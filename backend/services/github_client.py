@@ -11,7 +11,8 @@ from github.GithubException import GithubException, RateLimitExceededException
 
 from config.settings import settings
 from config.logging import get_logger, github_logger
-from models.github import PRFile, PRComment, GitHubStatusCheck, GitHubRateLimit
+from models.github import PRFile, PRComment, GitHubStatusCheck
+from models.api import GitHubRateLimit
 from utils.helpers import retry_async
 
 logger = get_logger(__name__)
