@@ -1,0 +1,21 @@
+# Simple FastAPI backend for development testing
+# Avoids complex dependencies that require compilation
+
+# Core FastAPI (use pre-built wheels)
+fastapi
+uvicorn
+python-multipart
+
+# Basic HTTP
+httpx
+requests
+
+# GitHub integration (minimal)
+PyGithub
+PyJWT
+
+# Environment and basic utilities
+python-dotenv
+
+# Development
+pytest
