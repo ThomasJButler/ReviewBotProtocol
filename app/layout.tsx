@@ -1,7 +1,9 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
-import { Toaster } from 'react-hot-toast'
+import ErrorBoundary from '@/components/error-boundary'
+import { ToastProvider } from '@/components/toast-provider'
+import Navigation from '@/components/layout/Navigation'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -25,19 +27,13 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={inter.className}>
-        <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
-          {children}
-        </div>
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            style: {
-              background: 'rgba(26, 26, 26, 0.9)',
-              color: '#ffffff',
-              border: '1px solid rgba(0, 255, 0, 0.3)',
-            },
-          }}
-        />
+        <ErrorBoundary>
+          <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
+            <Navigation />
+            <main>{children}</main>
+          </div>
+          <ToastProvider />
+        </ErrorBoundary>
       </body>
     </html>
   )
