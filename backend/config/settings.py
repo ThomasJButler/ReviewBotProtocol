@@ -1,6 +1,7 @@
 """Configuration settings for the Git Review Assistant backend."""
 
-from pydantic import BaseSettings, validator
+from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import List, Optional
 import os
 from pathlib import Path
@@ -13,7 +14,7 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     SECRET_KEY: str
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "https://localhost:3000"]
+    ALLOWED_ORIGINS: str = "http://localhost:3000,https://localhost:3000"
 
     # Server Configuration
     HOST: str = "0.0.0.0"
@@ -67,14 +68,15 @@ class Settings(BaseSettings):
     QUALITY_ANALYSIS_ENABLED: bool = True
     MAX_REVIEW_TIME: int = 300  # seconds
 
-    @validator("ALLOWED_ORIGINS", pre=True)
-    def parse_cors_origins(cls, v):
-        """Parse CORS origins from comma-separated string or list."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
+    @property
+    def allowed_origins_list(self) -> List[str]:
+        """Get ALLOWED_ORIGINS as a list."""
+        if isinstance(self.ALLOWED_ORIGINS, str):
+            return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+        return self.ALLOWED_ORIGINS
 
-    @validator("GITHUB_PRIVATE_KEY", pre=True)
+    @field_validator("GITHUB_PRIVATE_KEY", mode="before")
+    @classmethod
     def parse_private_key(cls, v):
         """Parse GitHub private key, handling both file path and direct content."""
         if not v:
@@ -99,7 +101,8 @@ class Settings(BaseSettings):
 
         return v
 
-    @validator("DEBUG", pre=True)
+    @field_validator("DEBUG", mode="before")
+    @classmethod
     def parse_debug(cls, v):
         """Parse debug flag from string or boolean."""
         if isinstance(v, str):
@@ -132,10 +135,11 @@ class Settings(BaseSettings):
             "retry_on_timeout": True,
         }
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": True
+    }
 
 
 # Global settings instance
