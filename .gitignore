@@ -94,3 +94,6 @@ backend/logs/
 # Database
 *.sqlite
 *.db
+/backend/tests/__pycache__
+/backend/config/__pycache__
+*.pyc
