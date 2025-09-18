@@ -98,7 +98,7 @@ async def require_admin(current_user: UserInfo = Depends(require_auth)) -> UserI
     """Require admin privileges."""
     # Check if user is admin (would need to add is_admin field to UserInfo)
     # For now, we'll check based on username or email
-    admin_users = ["admin", "root"] + settings.ALLOWED_ORIGINS  # Placeholder
+    admin_users = ["admin", "root"]  # Placeholder - removed ALLOWED_ORIGINS as it's not users
 
     if current_user.username not in admin_users:
         raise HTTPException(
@@ -405,16 +405,16 @@ async def log_security_event(
 
 # Error handlers specific to auth
 
-@auth_router.exception_handler(AuthenticationError)
-async def auth_exception_handler(request, exc):
-    """Handle authentication errors."""
-    return JSONResponse(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        content={
-            "error": {
-                "code": ErrorCode.AUTHENTICATION_ERROR,
-                "message": str(exc),
-                "timestamp": time.time()
-            }
-        }
-    )
+# Exception handlers moved to main.py since APIRouter doesn't support them
+# async def auth_exception_handler(request, exc):
+#     """Handle authentication errors."""
+#     return JSONResponse(
+#         status_code=status.HTTP_401_UNAUTHORIZED,
+#         content={
+#             "error": {
+#                 "code": ErrorCode.AUTHENTICATION_ERROR,
+#                 "message": str(exc),
+#                 "timestamp": time.time()
+#             }
+#         }
+#     )
