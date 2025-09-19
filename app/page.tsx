@@ -1,17 +1,22 @@
+'use client'
+
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+
 export default function Home() {
+  const router = useRouter()
+
+  useEffect(() => {
+    // Redirect to dashboard by default
+    router.push('/dashboard')
+  }, [router])
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <div className="glass-effect rounded-lg p-8 max-w-4xl w-full text-center">
-        <h1 className="text-4xl font-bold text-matrix-green mb-4">
-          AI Code Review Assistant
-        </h1>
-        <p className="text-lg text-gray-300 mb-8">
-          AI-powered code review system with GitHub integration
-        </p>
-        <div className="text-matrix-cyan">
-          🚀 Project setup complete! Ready for development.
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-matrix-green mx-auto mb-4"></div>
+        <p className="text-white">Redirecting to dashboard...</p>
       </div>
-    </main>
+    </div>
   )
 }
