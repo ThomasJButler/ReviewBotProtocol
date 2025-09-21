@@ -14,6 +14,7 @@ import {
   User,
   Settings,
   LogOut,
+  Clock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -30,6 +31,12 @@ const navigation = [
     href: '/review',
     icon: Code2,
     description: 'AI-powered code analysis',
+  },
+  {
+    name: 'History',
+    href: '/history',
+    icon: Clock,
+    description: 'Review history',
   },
   {
     name: 'Pull Requests',

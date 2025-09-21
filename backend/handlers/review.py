@@ -17,6 +17,7 @@ from models.github import PRAnalysisRequest
 from services.ai_reviewer import AIReviewer
 from services.github_client import GitHubClient
 from services.queue_processor import add_review_to_queue, queue_processor
+from services.metrics_service import MetricsService
 from database.connection import get_db_session
 from database.repositories.review_repository import ReviewRepository
 from utils.helpers import get_utc_timestamp
@@ -878,6 +879,74 @@ async def get_queue_status():
 
     except Exception as e:
         logger.error(f"Failed to get queue status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/user/{user_id}")
+async def get_user_metrics(
+    user_id: str,
+    days: int = Query(default=30, ge=1, le=365),
+    db_session = Depends(get_db_session)
+):
+    """Get comprehensive metrics for a user's review activity."""
+    try:
+        metrics_service = MetricsService(db_session)
+        metrics = await metrics_service.get_user_metrics(user_id, days)
+        return metrics
+
+    except Exception as e:
+        logger.error(f"Failed to get user metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/repository")
+async def get_repository_metrics(
+    repository: str = Query(..., description="Repository name"),
+    days: int = Query(default=30, ge=1, le=365),
+    db_session = Depends(get_db_session)
+):
+    """Get metrics for a specific repository."""
+    try:
+        metrics_service = MetricsService(db_session)
+        metrics = await metrics_service.get_repository_metrics(repository, days)
+        return metrics
+
+    except Exception as e:
+        logger.error(f"Failed to get repository metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/trending")
+async def get_trending_issues(
+    days: int = Query(default=7, ge=1, le=30),
+    limit: int = Query(default=10, ge=1, le=50),
+    db_session = Depends(get_db_session)
+):
+    """Get trending issues across all reviews."""
+    try:
+        metrics_service = MetricsService(db_session)
+        trending = await metrics_service.get_trending_issues(days, limit)
+        return {"trending_issues": trending, "period_days": days}
+
+    except Exception as e:
+        logger.error(f"Failed to get trending issues: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/comparison/{review_id1}/{review_id2}")
+async def get_comparison_metrics(
+    review_id1: str,
+    review_id2: str,
+    db_session = Depends(get_db_session)
+):
+    """Get detailed comparison metrics between two reviews."""
+    try:
+        metrics_service = MetricsService(db_session)
+        comparison = await metrics_service.get_comparison_metrics(review_id1, review_id2)
+        return comparison
+
+    except Exception as e:
+        logger.error(f"Failed to get comparison metrics: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
