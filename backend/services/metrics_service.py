@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, desc
 import logging
 
-from ..database.models import Review, User
-from ..database.repositories.review_repository import ReviewRepository
-from ..utils.datetime_utils import get_utc_timestamp
+from database.models import Review, User
+from database.repositories.review_repository import ReviewRepository
+from utils.datetime_utils import get_utc_timestamp
 
 logger = logging.getLogger(__name__)
 
