@@ -13,8 +13,10 @@ import {
   Github,
   User,
   Settings,
+  LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 
 const navigation = [
   {
@@ -45,6 +47,7 @@ const navigation = [
 
 export default function Navigation() {
   const pathname = usePathname()
+  const { user, isAuthenticated, login, logout } = useAuth()
 
   return (
     <header className="sticky top-0 z-50 bg-deep-black/80 backdrop-blur-lg border-b border-gray-800">
@@ -92,30 +95,47 @@ export default function Navigation() {
 
           {/* User Actions */}
           <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-gray-400 hover:text-white"
-            >
-              <Github className="h-4 w-4 mr-2" />
-              Connect GitHub
-            </Button>
+            {isAuthenticated ? (
+              <>
+                <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-matrix-green/10 border border-matrix-green/20">
+                  <img
+                    src={user?.avatar_url}
+                    alt={user?.name || user?.login}
+                    className="h-6 w-6 rounded-full"
+                  />
+                  <span className="text-sm text-white">
+                    {user?.name || user?.login}
+                  </span>
+                </div>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-gray-400 hover:text-white"
-            >
-              <Settings className="h-4 w-4" />
-            </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-gray-400 hover:text-white"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-gray-400 hover:text-white"
-            >
-              <User className="h-4 w-4" />
-            </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={logout}
+                  className="text-gray-400 hover:text-red-400"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={login}
+                className="text-gray-400 hover:text-white"
+              >
+                <Github className="h-4 w-4 mr-2" />
+                Connect GitHub
+              </Button>
+            )}
           </div>
         </div>
 

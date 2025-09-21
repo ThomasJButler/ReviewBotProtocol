@@ -36,19 +36,37 @@ import {
   FileText,
   PieChart,
   Activity,
+  Github,
+  ExternalLink,
 } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 
 export default function ReportsPage() {
   const [timeRange, setTimeRange] = useState('30d')
   const [reportType, setReportType] = useState('overview')
+  const { isAuthenticated, isLoading, login } = useAuth()
 
-  const stats = {
-    totalReviews: 1247,
-    averageScore: 8.4,
-    securityIssues: 23,
-    criticalIssues: 5,
-    resolvedIssues: 89,
-    activeReviewers: 12,
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
+        <div className="container mx-auto px-4 py-8">
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-white mb-2">
+              Analytics & Reports
+            </h1>
+            <p className="text-gray-400">
+              Insights into your code review performance and security metrics
+            </p>
+          </div>
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-matrix-green mx-auto mb-4"></div>
+              <p className="text-white">Loading...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const timeRangeOptions = [
@@ -58,96 +76,57 @@ export default function ReportsPage() {
     { value: '1y', label: 'Last year' },
   ]
 
-  const trends = [
-    {
-      metric: 'Code Quality Score',
-      current: 8.4,
-      previous: 7.9,
-      change: +6.3,
-      trend: 'up',
-    },
-    {
-      metric: 'Security Issues',
-      current: 23,
-      previous: 31,
-      change: -25.8,
-      trend: 'down',
-    },
-    {
-      metric: 'Review Speed',
-      current: '2.3h',
-      previous: '3.1h',
-      change: -25.8,
-      trend: 'down',
-    },
-    {
-      metric: 'PR Success Rate',
-      current: 94.2,
-      previous: 91.8,
-      change: +2.6,
-      trend: 'up',
-    },
-  ]
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
+        <div className="container mx-auto px-4 py-8">
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-white mb-2">
+              Analytics & Reports
+            </h1>
+            <p className="text-gray-400">
+              Insights into your code review performance and security metrics
+            </p>
+          </div>
 
-  const repositories = [
-    {
-      name: 'frontend-app',
-      reviews: 456,
-      score: 8.7,
-      issues: 8,
-      status: 'healthy',
-    },
-    {
-      name: 'backend-api',
-      reviews: 389,
-      score: 8.1,
-      issues: 12,
-      status: 'warning',
-    },
-    {
-      name: 'data-processor',
-      reviews: 234,
-      score: 7.9,
-      issues: 3,
-      status: 'healthy',
-    },
-    {
-      name: 'mobile-app',
-      reviews: 168,
-      score: 8.9,
-      issues: 0,
-      status: 'excellent',
-    },
-  ]
+          {/* Empty State - Not Authenticated */}
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <Card className="glass-effect max-w-md w-full">
+              <CardContent className="p-8 text-center">
+                <div className="mb-6">
+                  <BarChart3 className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-white mb-2">
+                    Connect Your GitHub Account
+                  </h3>
+                  <p className="text-gray-400 text-sm">
+                    Connect your GitHub account to see your code review
+                    analytics, repository statistics, and performance metrics.
+                  </p>
+                </div>
 
-  const topIssues = [
-    { type: 'SQL Injection', count: 12, severity: 'critical', trend: -2 },
-    { type: 'XSS Vulnerability', count: 8, severity: 'high', trend: +1 },
-    { type: 'Memory Leak', count: 15, severity: 'medium', trend: -5 },
-    { type: 'Unused Variables', count: 43, severity: 'low', trend: +8 },
-  ]
+                <Button
+                  onClick={login}
+                  className="w-full flex items-center justify-center gap-2"
+                >
+                  <Github className="h-4 w-4" />
+                  Connect GitHub Account
+                  <ExternalLink className="h-4 w-4" />
+                </Button>
 
-  const reviewers = [
-    { name: 'John Doe', reviews: 89, avgScore: 8.9, speciality: 'Security' },
-    {
-      name: 'Jane Smith',
-      reviews: 76,
-      avgScore: 8.7,
-      speciality: 'Performance',
-    },
-    {
-      name: 'Alex Chen',
-      reviews: 65,
-      avgScore: 9.1,
-      speciality: 'Architecture',
-    },
-    {
-      name: 'Sarah Wilson',
-      reviews: 54,
-      avgScore: 8.4,
-      speciality: 'Frontend',
-    },
-  ]
+                <div className="mt-6 pt-4 border-t border-gray-700">
+                  <p className="text-xs text-gray-500">
+                    We'll only access your public repositories and profile
+                    information
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
@@ -205,12 +184,10 @@ export default function ReportsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-400">Total Reviews</p>
-                      <p className="text-2xl font-bold text-white">
-                        {stats.totalReviews.toLocaleString()}
-                      </p>
-                      <p className="text-xs text-matrix-green flex items-center mt-1">
+                      <p className="text-2xl font-bold text-white">--</p>
+                      <p className="text-xs text-gray-500 flex items-center mt-1">
                         <TrendingUp className="h-3 w-3 mr-1" />
-                        +12% vs last period
+                        Loading...
                       </p>
                     </div>
                     <BarChart3 className="h-8 w-8 text-matrix-green" />
@@ -223,12 +200,10 @@ export default function ReportsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-400">Avg Quality Score</p>
-                      <p className="text-2xl font-bold text-white">
-                        {stats.averageScore}/10
-                      </p>
-                      <p className="text-xs text-matrix-green flex items-center mt-1">
+                      <p className="text-2xl font-bold text-white">--</p>
+                      <p className="text-xs text-gray-500 flex items-center mt-1">
                         <Award className="h-3 w-3 mr-1" />
-                        Excellent
+                        Loading...
                       </p>
                     </div>
                     <Target className="h-8 w-8 text-matrix-green" />
@@ -241,12 +216,10 @@ export default function ReportsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-400">Security Issues</p>
-                      <p className="text-2xl font-bold text-white">
-                        {stats.securityIssues}
-                      </p>
-                      <p className="text-xs text-red-400 flex items-center mt-1">
+                      <p className="text-2xl font-bold text-white">--</p>
+                      <p className="text-xs text-gray-500 flex items-center mt-1">
                         <AlertTriangle className="h-3 w-3 mr-1" />
-                        {stats.criticalIssues} critical
+                        Loading...
                       </p>
                     </div>
                     <Shield className="h-8 w-8 text-red-400" />
@@ -259,12 +232,10 @@ export default function ReportsPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-gray-400">Active Reviewers</p>
-                      <p className="text-2xl font-bold text-white">
-                        {stats.activeReviewers}
-                      </p>
-                      <p className="text-xs text-blue-400 flex items-center mt-1">
+                      <p className="text-2xl font-bold text-white">--</p>
+                      <p className="text-xs text-gray-500 flex items-center mt-1">
                         <Users className="h-3 w-3 mr-1" />
-                        +2 this month
+                        Loading...
                       </p>
                     </div>
                     <Users className="h-8 w-8 text-blue-400" />
@@ -285,34 +256,12 @@ export default function ReportsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {trends.map((trend, index) => (
-                    <div
-                      key={index}
-                      className="p-4 rounded-lg border border-border"
-                    >
-                      <p className="text-sm text-gray-400 mb-1">
-                        {trend.metric}
-                      </p>
-                      <p className="text-xl font-bold text-white mb-2">
-                        {trend.current}
-                      </p>
-                      <div
-                        className={`flex items-center text-sm ${
-                          trend.trend === 'up'
-                            ? 'text-matrix-green'
-                            : 'text-red-400'
-                        }`}
-                      >
-                        <TrendingUp
-                          className={`h-3 w-3 mr-1 ${
-                            trend.trend === 'down' ? 'rotate-180' : ''
-                          }`}
-                        />
-                        {Math.abs(trend.change)}%
-                      </div>
-                    </div>
-                  ))}
+                <div className="text-center py-8">
+                  <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-400">No trend data available</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Performance trends will appear after connecting GitHub
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -329,62 +278,12 @@ export default function ReportsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {repositories.map((repo, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between p-4 rounded-lg border border-border"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div
-                          className={`h-3 w-3 rounded-full ${
-                            repo.status === 'excellent'
-                              ? 'bg-matrix-green'
-                              : repo.status === 'healthy'
-                                ? 'bg-blue-500'
-                                : repo.status === 'warning'
-                                  ? 'bg-yellow-500'
-                                  : 'bg-red-500'
-                          }`}
-                        />
-                        <div>
-                          <p className="font-medium text-white">{repo.name}</p>
-                          <p className="text-sm text-gray-400">
-                            {repo.reviews} reviews
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6">
-                        <div className="text-right">
-                          <p className="text-sm text-gray-400">Quality Score</p>
-                          <p className="font-medium text-white">
-                            {repo.score}/10
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm text-gray-400">Issues</p>
-                          <p
-                            className={`font-medium ${repo.issues === 0 ? 'text-matrix-green' : 'text-yellow-400'}`}
-                          >
-                            {repo.issues}
-                          </p>
-                        </div>
-                        <Badge
-                          variant={
-                            repo.status === 'excellent'
-                              ? 'default'
-                              : repo.status === 'healthy'
-                                ? 'secondary'
-                                : repo.status === 'warning'
-                                  ? 'destructive'
-                                  : 'outline'
-                          }
-                        >
-                          {repo.status}
-                        </Badge>
-                      </div>
-                    </div>
-                  ))}
+                <div className="text-center py-8">
+                  <GitPullRequest className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-400">No repository data available</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Repository performance will appear after connecting GitHub
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -404,39 +303,12 @@ export default function ReportsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    {topIssues.map((issue, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between p-3 rounded-lg border border-border"
-                      >
-                        <div>
-                          <p className="font-medium text-white">{issue.type}</p>
-                          <p className="text-sm text-gray-400">
-                            {issue.count} occurrences
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <Badge
-                            variant={
-                              issue.severity === 'critical'
-                                ? 'destructive'
-                                : issue.severity === 'high'
-                                  ? 'secondary'
-                                  : 'outline'
-                            }
-                          >
-                            {issue.severity}
-                          </Badge>
-                          <span
-                            className={`text-sm ${issue.trend > 0 ? 'text-red-400' : 'text-matrix-green'}`}
-                          >
-                            {issue.trend > 0 ? '+' : ''}
-                            {issue.trend}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="text-center py-6">
+                    <Shield className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-400 text-sm">No security data</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Security metrics will appear after code reviews
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -452,43 +324,14 @@ export default function ReportsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-white">Critical</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div className="h-full w-1/5 bg-red-600 rounded-full"></div>
-                        </div>
-                        <span className="text-red-400">5</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-white">High</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div className="h-full w-2/5 bg-red-500 rounded-full"></div>
-                        </div>
-                        <span className="text-red-500">12</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-white">Medium</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div className="h-full w-1/4 bg-yellow-500 rounded-full"></div>
-                        </div>
-                        <span className="text-yellow-500">6</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-white">Low</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-32 h-2 bg-gray-700 rounded-full overflow-hidden">
-                          <div className="h-full w-full bg-blue-500 rounded-full"></div>
-                        </div>
-                        <span className="text-blue-500">43</span>
-                      </div>
-                    </div>
+                  <div className="text-center py-6">
+                    <PieChart className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-400 text-sm">
+                      No issue distribution data
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Issue distribution will appear after security scans
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -509,29 +352,12 @@ export default function ReportsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-lg border border-border">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-white">Average Review Time</span>
-                        <span className="text-matrix-green font-bold">
-                          2.3 hours
-                        </span>
-                      </div>
-                      <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
-                        <div className="h-full w-3/4 bg-matrix-green rounded-full"></div>
-                      </div>
-                    </div>
-                    <div className="p-4 rounded-lg border border-border">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-white">First Response Time</span>
-                        <span className="text-blue-400 font-bold">
-                          45 minutes
-                        </span>
-                      </div>
-                      <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
-                        <div className="h-full w-4/5 bg-blue-500 rounded-full"></div>
-                      </div>
-                    </div>
+                  <div className="text-center py-6">
+                    <Clock className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-400 text-sm">No performance data</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Performance metrics will appear after reviews
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -547,27 +373,12 @@ export default function ReportsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div className="text-center">
-                      <p className="text-3xl font-bold text-matrix-green">
-                        8.4
-                      </p>
-                      <p className="text-gray-400">Current Quality Score</p>
-                    </div>
-                    <div className="grid grid-cols-3 gap-4 text-center">
-                      <div>
-                        <p className="text-lg font-bold text-white">7.9</p>
-                        <p className="text-xs text-gray-400">Last Month</p>
-                      </div>
-                      <div>
-                        <p className="text-lg font-bold text-white">7.6</p>
-                        <p className="text-xs text-gray-400">3 Months Ago</p>
-                      </div>
-                      <div>
-                        <p className="text-lg font-bold text-white">7.2</p>
-                        <p className="text-xs text-gray-400">6 Months Ago</p>
-                      </div>
-                    </div>
+                  <div className="text-center py-6">
+                    <Activity className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                    <p className="text-gray-400 text-sm">No quality trends</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Quality trends will appear after reviews
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -587,44 +398,12 @@ export default function ReportsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {reviewers.map((reviewer, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between p-4 rounded-lg border border-border"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-full bg-matrix-green/20 flex items-center justify-center font-medium text-matrix-green">
-                          {reviewer.name
-                            .split(' ')
-                            .map(n => n[0])
-                            .join('')}
-                        </div>
-                        <div>
-                          <p className="font-medium text-white">
-                            {reviewer.name}
-                          </p>
-                          <p className="text-sm text-gray-400">
-                            {reviewer.speciality} Specialist
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6">
-                        <div className="text-right">
-                          <p className="text-sm text-gray-400">Reviews</p>
-                          <p className="font-medium text-white">
-                            {reviewer.reviews}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm text-gray-400">Avg Score</p>
-                          <p className="font-medium text-matrix-green">
-                            {reviewer.avgScore}/10
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                <div className="text-center py-8">
+                  <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-400">No team activity</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Team collaboration will appear here
+                  </p>
                 </div>
               </CardContent>
             </Card>

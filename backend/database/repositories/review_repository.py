@@ -354,3 +354,89 @@ class ReviewRepository:
             await self.session.rollback()
             logger.error(f"Failed to cleanup old reviews: {str(e)}")
             raise
+
+    async def get_filtered_reviews(
+        self,
+        filters: Dict[str, Any],
+        min_score: Optional[float] = None,
+        max_score: Optional[float] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        limit: int = 50,
+        offset: int = 0,
+        sort_by: str = "created_at",
+        order: str = "desc"
+    ) -> List[Review]:
+        """Get reviews with advanced filtering."""
+        try:
+            stmt = select(Review).options(selectinload(Review.issues))
+
+            # Apply filters
+            for key, value in filters.items():
+                if hasattr(Review, key) and value is not None:
+                    stmt = stmt.where(getattr(Review, key) == value)
+
+            # Score filters
+            if min_score is not None:
+                stmt = stmt.where(Review.overall_score >= min_score)
+            if max_score is not None:
+                stmt = stmt.where(Review.overall_score <= max_score)
+
+            # Date filters
+            if start_date:
+                stmt = stmt.where(Review.created_at >= start_date)
+            if end_date:
+                stmt = stmt.where(Review.created_at <= end_date)
+
+            # Sorting
+            sort_column = getattr(Review, sort_by, Review.created_at)
+            if order == "desc":
+                stmt = stmt.order_by(desc(sort_column))
+            else:
+                stmt = stmt.order_by(sort_column)
+
+            # Pagination
+            stmt = stmt.limit(limit).offset(offset)
+
+            result = await self.session.execute(stmt)
+            return result.scalars().all()
+
+        except Exception as e:
+            logger.error(f"Failed to get filtered reviews: {str(e)}")
+            raise
+
+    async def count_filtered_reviews(
+        self,
+        filters: Dict[str, Any],
+        min_score: Optional[float] = None,
+        max_score: Optional[float] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> int:
+        """Count reviews with filters."""
+        try:
+            stmt = select(func.count(Review.id))
+
+            # Apply filters
+            for key, value in filters.items():
+                if hasattr(Review, key) and value is not None:
+                    stmt = stmt.where(getattr(Review, key) == value)
+
+            # Score filters
+            if min_score is not None:
+                stmt = stmt.where(Review.overall_score >= min_score)
+            if max_score is not None:
+                stmt = stmt.where(Review.overall_score <= max_score)
+
+            # Date filters
+            if start_date:
+                stmt = stmt.where(Review.created_at >= start_date)
+            if end_date:
+                stmt = stmt.where(Review.created_at <= end_date)
+
+            result = await self.session.execute(stmt)
+            return result.scalar() or 0
+
+        except Exception as e:
+            logger.error(f"Failed to count filtered reviews: {str(e)}")
+            raise

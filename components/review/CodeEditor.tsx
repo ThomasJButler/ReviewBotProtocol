@@ -109,6 +109,14 @@ export default function CodeEditor({
 
   const handleEditorDidMount = (editor: any, monaco: any) => {
     editorRef.current = editor
+    console.log('Monaco Editor mounted successfully')
+
+    // Ensure editor is focusable and editable
+    if (!readOnly) {
+      editor.focus()
+      // Force the editor to be interactive
+      editor.updateOptions({ readOnly: false })
+    }
 
     // Configure editor theme
     monaco.editor.defineTheme('matrix-dark', {
@@ -260,15 +268,26 @@ export default function CodeEditor({
         </div>
 
         {/* Editor */}
-        <div className="relative">
+        <div
+          className="relative bg-card-surface rounded-lg border border-border overflow-hidden"
+          onClick={() => {
+            // Focus the editor when the container is clicked
+            if (editorRef.current && !readOnly) {
+              editorRef.current.focus()
+            }
+          }}
+        >
           <Editor
             height={isFullscreen ? 'calc(100vh - 200px)' : height}
             value={value}
             language={editorLanguage}
-            onChange={onChange}
+            onChange={value => {
+              console.log('Monaco Editor onChange:', value)
+              onChange?.(value)
+            }}
             onMount={handleEditorDidMount}
             options={{
-              readOnly,
+              readOnly: readOnly || false,
               lineNumbers: showLineNumbers ? 'on' : 'off',
               minimap: { enabled: showMinimap },
               fontSize: 14,
@@ -280,6 +299,12 @@ export default function CodeEditor({
               cursorBlinking: 'smooth',
               renderLineHighlight: 'all',
               bracketPairColorization: { enabled: true },
+              selectOnLineNumbers: true,
+              roundedSelection: false,
+              scrollbar: {
+                vertical: 'visible',
+                horizontal: 'visible',
+              },
               guides: {
                 bracketPairs: true,
                 indentation: true,
@@ -326,19 +351,6 @@ export default function CodeEditor({
               </div>
             }
           />
-
-          {/* Empty state overlay */}
-          {!value && (
-            <div className="absolute inset-0 flex items-center justify-center bg-deep-black/50 backdrop-blur-sm">
-              <div className="text-center">
-                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-400 text-lg mb-2">{placeholder}</p>
-                <p className="text-gray-500 text-sm">
-                  Start typing or paste your code here
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Metrics Footer */}
