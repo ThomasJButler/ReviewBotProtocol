@@ -111,14 +111,7 @@ export default function HistoryPage() {
   const [selectedReview, setSelectedReview] = useState<string | null>(null)
   const itemsPerPage = 10
 
-  // Fetch review history
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      fetchReviewHistory()
-    }
-  }, [isAuthenticated, user])
-
-  const fetchReviewHistory = async () => {
+  const fetchReviewHistory = useCallback(async () => {
     setIsLoadingReviews(true)
     try {
       const backendUrl =
@@ -141,7 +134,14 @@ export default function HistoryPage() {
     } finally {
       setIsLoadingReviews(false)
     }
-  }
+  }, [user])
+
+  // Fetch review history
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      fetchReviewHistory()
+    }
+  }, [isAuthenticated, user, fetchReviewHistory])
 
   const transformReviews = (backendReviews: any[]): ReviewHistoryItem[] => {
     return backendReviews.map(review => ({
@@ -560,7 +560,7 @@ export default function HistoryPage() {
                 <Button variant="outline" size="sm" onClick={resetFilters}>
                   Reset
                 </Button>
-                <Button variant="default" size="sm" onClick={exportReviews}>
+                <Button size="sm" onClick={exportReviews}>
                   <Download className="h-4 w-4" />
                 </Button>
               </div>

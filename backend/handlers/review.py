@@ -381,7 +381,7 @@ async def get_review_statistics(
 
     except Exception as e:
         logger.error(f"Failed to get review statistics: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)})
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @review_router.get("/history")
@@ -483,7 +483,7 @@ async def get_review_history(
 
     except Exception as e:
         logger.error(f"Failed to get review history: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)})
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @review_router.get("/stats/user")
@@ -577,7 +577,7 @@ async def get_user_statistics(
 
     except Exception as e:
         logger.error(f"Failed to get user statistics: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)})
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @review_router.get("/compare/{review_id1}/{review_id2}")

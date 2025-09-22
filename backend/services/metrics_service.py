@@ -10,7 +10,7 @@ import logging
 
 from database.models import Review, User
 from database.repositories.review_repository import ReviewRepository
-from utils.datetime_utils import get_utc_timestamp
+from utils.helpers import get_utc_timestamp
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   Card,
   CardContent,
@@ -84,14 +84,29 @@ export default function DashboardPage() {
     }
   }, [isAuthenticated, stats])
 
-  // Fetch activity data for charts
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchActivityData()
-    }
-  }, [isAuthenticated, timeRange])
+  const generateSampleActivityData = useCallback(() => {
+    const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
+    const sampleData = []
 
-  const fetchActivityData = async () => {
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date()
+      date.setDate(date.getDate() - i)
+
+      sampleData.push({
+        date: date.toISOString().split('T')[0],
+        reviews: Math.floor(Math.random() * 10) + 1,
+        score: Math.floor(Math.random() * 30) + 70,
+        issues: Math.floor(Math.random() * 20),
+        security: Math.floor(Math.random() * 5),
+        performance: Math.floor(Math.random() * 8),
+        quality: Math.floor(Math.random() * 10),
+      })
+    }
+
+    setActivityData(sampleData)
+  }, [timeRange])
+
+  const fetchActivityData = useCallback(async () => {
     try {
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
       const backendUrl =
@@ -150,29 +165,14 @@ export default function DashboardPage() {
       // Set sample data on error
       generateSampleActivityData()
     }
-  }
+  }, [timeRange, generateSampleActivityData])
 
-  const generateSampleActivityData = () => {
-    const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 90
-    const sampleData = []
-
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date()
-      date.setDate(date.getDate() - i)
-
-      sampleData.push({
-        date: date.toISOString().split('T')[0],
-        reviews: Math.floor(Math.random() * 10) + 1,
-        score: Math.floor(Math.random() * 30) + 70,
-        issues: Math.floor(Math.random() * 20),
-        security: Math.floor(Math.random() * 5),
-        performance: Math.floor(Math.random() * 8),
-        quality: Math.floor(Math.random() * 10),
-      })
+  // Fetch activity data for charts
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchActivityData()
     }
-
-    setActivityData(sampleData)
-  }
+  }, [isAuthenticated, fetchActivityData])
 
   if (isLoading) {
     return (

@@ -233,13 +233,13 @@ export async function GET(request: NextRequest) {
               ) / repos.length
             )
           : 0,
-      totalLanguages: [
-        ...new Set(
+      totalLanguages: Array.from(
+        new Set(
           repos
             .filter((repo: any) => repo.language)
             .map((repo: any) => repo.language)
-        ),
-      ].length,
+        )
+      ).length,
       hasActiveRepos: repos.some((repo: any) => {
         const lastUpdate = new Date(repo.updated_at)
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
