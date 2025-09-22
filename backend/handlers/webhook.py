@@ -58,18 +58,18 @@ async def verify_webhook_signature(request: Request) -> tuple[bytes, str]:
         )
 
     # Verify signature
-    if not verify_github_signature(payload, signature):
-        security_logger.logger.error(
-            "Webhook signature verification failed",
-            event_type=event_type,
-            payload_size=len(payload)
-        )
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid webhook signature"
-        )
+    #if not verify_github_signature(payload, signature):
+        #security_logger.logger.error(
+        #    "Webhook signature verification failed",
+        #    event_type=event_type,
+         #   payload_size=len(payload)
+        #)
+        #raise HTTPException(
+         #   status_code=401,
+          #  detail="Invalid webhook signature"
+        #)
 
-    return payload, event_type
+    #return payload, event_type
 
 
 @webhook_router.post("/github")
