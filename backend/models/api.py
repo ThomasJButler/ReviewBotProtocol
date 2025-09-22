@@ -1,9 +1,11 @@
 """Pydantic models for API responses and common structures."""
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Generic, TypeVar
 from datetime import datetime
 from enum import Enum
+
+T = TypeVar('T')
 
 
 class APIStatus(str, Enum):
@@ -35,11 +37,11 @@ class APIError(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
-class APIResponse(BaseModel):
+class APIResponse(BaseModel, Generic[T]):
     """Generic API response model."""
     status: APIStatus
     message: str
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[T] = None
     errors: Optional[List[APIError]] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     request_id: Optional[str] = None

@@ -17,6 +17,7 @@ from models.github import PRAnalysisRequest
 from services.ai_reviewer import AIReviewer
 from services.github_client import GitHubClient
 from services.queue_processor import add_review_to_queue, queue_processor
+from services.metrics_service import MetricsService
 from database.connection import get_db_session
 from database.repositories.review_repository import ReviewRepository
 from utils.helpers import get_utc_timestamp
@@ -383,6 +384,306 @@ async def get_review_statistics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@review_router.get("/history")
+async def get_review_history(
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    repository: Optional[str] = Query(None, description="Filter by repository"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    min_score: Optional[float] = Query(None, ge=0, le=10, description="Minimum score filter"),
+    max_score: Optional[float] = Query(None, ge=0, le=10, description="Maximum score filter"),
+    days: int = Query(30, ge=1, le=365, description="Days to look back"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    sort_by: str = Query("created_at", description="Sort field"),
+    order: str = Query("desc", description="Sort order (asc/desc)"),
+    db_session = Depends(get_db_session)
+):
+    """Get review history with advanced filtering and pagination."""
+    try:
+        from datetime import timedelta
+
+        repo = ReviewRepository(db_session)
+
+        # Build filters
+        filters = {}
+        if user_id:
+            filters["created_by"] = user_id
+        if repository:
+            filters["repository"] = repository
+        if status:
+            filters["status"] = status
+
+        # Date range filter
+        end_date = get_utc_timestamp()
+        start_date = end_date - timedelta(days=days)
+
+        # Get reviews with filters
+        reviews = await repo.get_filtered_reviews(
+            filters=filters,
+            min_score=min_score,
+            max_score=max_score,
+            start_date=start_date,
+            end_date=end_date,
+            limit=per_page,
+            offset=(page - 1) * per_page,
+            sort_by=sort_by,
+            order=order
+        )
+
+        # Get total count for pagination
+        total_count = await repo.count_filtered_reviews(
+            filters=filters,
+            min_score=min_score,
+            max_score=max_score,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        # Format reviews for response
+        review_history = []
+        for review in reviews:
+            review_history.append({
+                "id": str(review.id),
+                "type": review.type,
+                "status": review.status,
+                "repository": review.repository,
+                "pr_number": review.pr_number,
+                "overall_score": review.overall_score,
+                "letter_grade": review.metrics.get("letter_grade") if review.metrics else None,
+                "total_issues": review.total_issues,
+                "security_issues": review.security_issues_count,
+                "performance_issues": review.performance_issues_count,
+                "quality_issues": review.quality_issues_count,
+                "created_at": review.created_at,
+                "processing_time": review.processing_time,
+                "ai_model_used": review.ai_model_used,
+                "code_suggestions": review.metrics.get("code_suggestions", []) if review.metrics else [],
+                "priority_fixes": review.metrics.get("priority_fixes", []) if review.metrics else [],
+            })
+
+        return {
+            "reviews": review_history,
+            "pagination": {
+                "total": total_count,
+                "page": page,
+                "per_page": per_page,
+                "pages": (total_count + per_page - 1) // per_page,
+                "has_next": (page * per_page) < total_count,
+                "has_prev": page > 1
+            },
+            "filters_applied": {
+                "user_id": user_id,
+                "repository": repository,
+                "status": status,
+                "min_score": min_score,
+                "max_score": max_score,
+                "days": days
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get review history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/stats/user")
+async def get_user_statistics(
+    user_id: str = Query(..., description="User ID"),
+    days: int = Query(30, ge=1, le=365, description="Days to look back"),
+    db_session = Depends(get_db_session)
+):
+    """Get user-specific review statistics and trends."""
+    try:
+        from datetime import timedelta
+
+        repo = ReviewRepository(db_session)
+
+        end_date = get_utc_timestamp()
+        start_date = end_date - timedelta(days=days)
+
+        # Get user's reviews
+        user_reviews = await repo.get_filtered_reviews(
+            filters={"created_by": user_id},
+            start_date=start_date,
+            end_date=end_date,
+            limit=1000  # Get all reviews for statistics
+        )
+
+        if not user_reviews:
+            return {
+                "user_id": user_id,
+                "total_reviews": 0,
+                "average_score": 0,
+                "total_issues_found": 0,
+                "improvement_trend": 0,
+                "top_issues": [],
+                "repositories_reviewed": [],
+                "review_frequency": "No reviews yet"
+            }
+
+        # Calculate statistics
+        total_reviews = len(user_reviews)
+        total_score = sum(r.overall_score for r in user_reviews)
+        total_issues = sum(r.total_issues for r in user_reviews)
+
+        # Calculate average score
+        average_score = total_score / total_reviews if total_reviews > 0 else 0
+
+        # Calculate improvement trend (compare first half to second half)
+        if total_reviews > 1:
+            mid_point = total_reviews // 2
+            first_half_avg = sum(r.overall_score for r in user_reviews[:mid_point]) / mid_point
+            second_half_avg = sum(r.overall_score for r in user_reviews[mid_point:]) / (total_reviews - mid_point)
+            improvement_trend = second_half_avg - first_half_avg
+        else:
+            improvement_trend = 0
+
+        # Get unique repositories
+        repositories = list(set(r.repository for r in user_reviews if r.repository))
+
+        # Count issue categories
+        issue_counts = {
+            "security": sum(r.security_issues_count for r in user_reviews),
+            "performance": sum(r.performance_issues_count for r in user_reviews),
+            "quality": sum(r.quality_issues_count for r in user_reviews)
+        }
+
+        # Calculate review frequency
+        if total_reviews > 0:
+            days_active = (user_reviews[-1].created_at - user_reviews[0].created_at).days + 1
+            review_frequency = f"{total_reviews / max(days_active, 1):.1f} reviews/day"
+        else:
+            review_frequency = "No reviews"
+
+        return {
+            "user_id": user_id,
+            "total_reviews": total_reviews,
+            "average_score": round(average_score, 2),
+            "total_issues_found": total_issues,
+            "improvement_trend": round(improvement_trend, 2),
+            "top_issues": [
+                {"category": k, "count": v}
+                for k, v in sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)
+            ],
+            "repositories_reviewed": repositories,
+            "review_frequency": review_frequency,
+            "best_review": max(user_reviews, key=lambda r: r.overall_score).overall_score if user_reviews else 0,
+            "worst_review": min(user_reviews, key=lambda r: r.overall_score).overall_score if user_reviews else 0,
+            "recent_activity": {
+                "last_7_days": sum(1 for r in user_reviews if (end_date - r.created_at).days <= 7),
+                "last_30_days": sum(1 for r in user_reviews if (end_date - r.created_at).days <= 30)
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get user statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/compare/{review_id1}/{review_id2}")
+async def compare_reviews(
+    review_id1: str,
+    review_id2: str,
+    db_session = Depends(get_db_session)
+):
+    """Compare two reviews to show improvements or differences."""
+    try:
+        repo = ReviewRepository(db_session)
+
+        # Get both reviews
+        review1 = await repo.get_review_by_id(review_id1)
+        review2 = await repo.get_review_by_id(review_id2)
+
+        if not review1 or not review2:
+            raise HTTPException(status_code=404, detail="One or both reviews not found")
+
+        # Determine which is newer
+        if review1.created_at > review2.created_at:
+            newer, older = review1, review2
+        else:
+            newer, older = review2, review1
+
+        # Calculate improvements
+        score_diff = newer.overall_score - older.overall_score
+        issues_diff = newer.total_issues - older.total_issues
+        security_diff = newer.security_issues_count - older.security_issues_count
+
+        # Compare issue categories
+        newer_issues_by_category = {}
+        older_issues_by_category = {}
+
+        for issue in newer.issues:
+            newer_issues_by_category[issue.category] = newer_issues_by_category.get(issue.category, 0) + 1
+
+        for issue in older.issues:
+            older_issues_by_category[issue.category] = older_issues_by_category.get(issue.category, 0) + 1
+
+        # Find resolved and new issues
+        resolved_issues = []
+        new_issues = []
+
+        # Simple comparison based on title and category
+        older_issue_signatures = {(i.category, i.title) for i in older.issues}
+        newer_issue_signatures = {(i.category, i.title) for i in newer.issues}
+
+        for issue in older.issues:
+            if (issue.category, issue.title) not in newer_issue_signatures:
+                resolved_issues.append({
+                    "category": issue.category,
+                    "title": issue.title,
+                    "severity": issue.severity
+                })
+
+        for issue in newer.issues:
+            if (issue.category, issue.title) not in older_issue_signatures:
+                new_issues.append({
+                    "category": issue.category,
+                    "title": issue.title,
+                    "severity": issue.severity
+                })
+
+        return {
+            "comparison": {
+                "review1_id": str(review1.id),
+                "review2_id": str(review2.id),
+                "newer_review_id": str(newer.id),
+                "older_review_id": str(older.id),
+                "time_difference": str(newer.created_at - older.created_at)
+            },
+            "score_comparison": {
+                "older_score": older.overall_score,
+                "newer_score": newer.overall_score,
+                "improvement": score_diff,
+                "percentage_change": (score_diff / older.overall_score * 100) if older.overall_score > 0 else 0
+            },
+            "issues_comparison": {
+                "older_total": older.total_issues,
+                "newer_total": newer.total_issues,
+                "issues_resolved": len(resolved_issues),
+                "new_issues_found": len(new_issues),
+                "net_change": issues_diff
+            },
+            "category_breakdown": {
+                "older": older_issues_by_category,
+                "newer": newer_issues_by_category
+            },
+            "resolved_issues": resolved_issues[:10],  # Top 10
+            "new_issues": new_issues[:10],  # Top 10
+            "improvement_summary": {
+                "improved": score_diff > 0,
+                "score_improved": score_diff > 0,
+                "issues_reduced": issues_diff < 0,
+                "security_improved": security_diff < 0
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to compare reviews: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @review_router.delete("/{review_id}")
 async def delete_review(
     review_id: str,
@@ -405,6 +706,166 @@ async def delete_review(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@review_router.post("/code")
+async def review_code_direct(
+    request: Dict[str, Any],
+    db_session = Depends(get_db_session)
+):
+    """
+    Direct code review endpoint for real-time analysis with database persistence.
+
+    This endpoint provides immediate code review results and saves them to database.
+    Used by the frontend for instant feedback on code snippets.
+    """
+    try:
+        logger.info("Starting direct code review")
+
+        # Extract files from request
+        files_data = request.get("files", [])
+        if not files_data:
+            raise HTTPException(status_code=400, detail="No files provided")
+
+        # Extract optional metadata
+        user_id = request.get("user_id")
+        repository = request.get("repository")
+
+        # Create review record
+        review_id = str(uuid.uuid4())
+        repo = ReviewRepository(db_session)
+
+        review_data = {
+            "id": review_id,
+            "type": "direct",
+            "status": "in_progress",
+            "repository": repository,
+            "configuration": {
+                "files_count": len(files_data),
+                "source": "web_ui"
+            },
+            "created_by": user_id,
+            "started_at": get_utc_timestamp()
+        }
+
+        review_record = await repo.create_review(review_data)
+
+        # Initialize AI reviewer
+        ai_reviewer = AIReviewer()
+
+        # Convert to PRFile objects for processing
+        from models.github import PRFile
+        pr_files = []
+
+        for file_data in files_data:
+            # Create mock diff format if not provided
+            content = file_data.get("content", file_data.get("patch", ""))
+
+            # If it's raw content, convert to diff format
+            if not content.startswith('+') and not content.startswith('-'):
+                content = '+' + content.replace('\n', '\n+')
+
+            pr_file = PRFile(
+                filename=file_data.get("filename", "code.txt"),
+                status=file_data.get("status", "modified"),
+                additions=file_data.get("additions", len(content.split('\n'))),
+                deletions=file_data.get("deletions", 0),
+                changes=file_data.get("changes", len(content.split('\n'))),
+                blob_url=file_data.get("blob_url", ""),
+                raw_url=file_data.get("raw_url", ""),
+                contents_url=file_data.get("contents_url", ""),
+                patch=content
+            )
+            pr_files.append(pr_file)
+
+        # Process the files with enhanced AI analysis
+        start_time = time.time()
+        results = await ai_reviewer.review_pr_files(pr_files)
+        processing_time = time.time() - start_time
+
+        # Update review record with results
+        update_data = {
+            "status": "completed",
+            "overall_score": results.get("overall_score", 0),
+            "total_issues": results.get("total_issues", 0),
+            "security_issues_count": len(results.get("security_issues", [])),
+            "performance_issues_count": len(results.get("performance_issues", [])),
+            "quality_issues_count": len(results.get("quality_issues", [])),
+            "processing_time": processing_time,
+            "completed_at": get_utc_timestamp(),
+            "ai_model_used": settings.OPENAI_MODEL,
+            "ai_tokens_used": results.get("ai_metrics", {}).get("total_tokens", 0),
+            "ai_cost": results.get("ai_metrics", {}).get("total_cost", 0),
+            "metrics": {
+                "letter_grade": results.get("letter_grade", "B"),
+                "scoring_breakdown": results.get("scoring_breakdown", {}),
+                "code_suggestions": results.get("code_suggestions", []),
+                "priority_fixes": results.get("priority_fixes", []),
+                "quick_wins": results.get("quick_wins", [])
+            }
+        }
+
+        await repo.update_review(review_id, update_data)
+
+        # Add issues to review
+        issues_data = []
+        for file_result in results.get("files_reviewed", []):
+            filename = file_result.get("filename", "unknown")
+
+            # Process all issue types
+            issue_categories = [
+                ("security_issues", "security"),
+                ("performance_issues", "performance"),
+                ("quality_issues", "quality"),
+                ("documentation_issues", "documentation"),
+                ("testing_issues", "testing"),
+                ("architecture_issues", "architecture")
+            ]
+
+            for issue_list_key, category in issue_categories:
+                for issue in file_result.get(issue_list_key, []):
+                    issues_data.append({
+                        "category": category,
+                        "severity": issue.get("severity", "medium"),
+                        "title": issue.get("type", "Issue detected"),
+                        "message": issue.get("description", ""),
+                        "file_path": filename,
+                        "line_number": issue.get("line_number"),
+                        "code_snippet": issue.get("code_snippet"),
+                        "suggestion": issue.get("recommendation"),
+                        "rule_id": issue.get("rule_id"),
+                        "confidence_score": issue.get("confidence", 0.8)
+                    })
+
+        if issues_data:
+            await repo.add_issues_to_review(review_id, issues_data)
+
+        # Add review ID and processing time to results
+        results["review_id"] = review_id
+        results["analysis_time"] = f"{processing_time:.1f}s"
+        results["saved_to_database"] = True
+
+        logger.info(f"Direct code review {review_id} completed and saved in {processing_time:.2f}s")
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Direct code review failed: {str(e)}")
+
+        # Try to update review as failed
+        if 'review_id' in locals():
+            try:
+                await repo.update_review(review_id, {
+                    "status": "failed",
+                    "error_message": str(e),
+                    "completed_at": get_utc_timestamp()
+                })
+            except:
+                pass
+
+        raise HTTPException(status_code=500, detail=f"Review failed: {str(e)}")
+
+
 @review_router.get("/queue/status")
 async def get_queue_status():
     """Get current queue status and statistics."""
@@ -418,6 +879,74 @@ async def get_queue_status():
 
     except Exception as e:
         logger.error(f"Failed to get queue status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/user/{user_id}")
+async def get_user_metrics(
+    user_id: str,
+    days: int = Query(default=30, ge=1, le=365),
+    db_session = Depends(get_db_session)
+):
+    """Get comprehensive metrics for a user's review activity."""
+    try:
+        metrics_service = MetricsService(db_session)
+        metrics = await metrics_service.get_user_metrics(user_id, days)
+        return metrics
+
+    except Exception as e:
+        logger.error(f"Failed to get user metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/repository")
+async def get_repository_metrics(
+    repository: str = Query(..., description="Repository name"),
+    days: int = Query(default=30, ge=1, le=365),
+    db_session = Depends(get_db_session)
+):
+    """Get metrics for a specific repository."""
+    try:
+        metrics_service = MetricsService(db_session)
+        metrics = await metrics_service.get_repository_metrics(repository, days)
+        return metrics
+
+    except Exception as e:
+        logger.error(f"Failed to get repository metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/trending")
+async def get_trending_issues(
+    days: int = Query(default=7, ge=1, le=30),
+    limit: int = Query(default=10, ge=1, le=50),
+    db_session = Depends(get_db_session)
+):
+    """Get trending issues across all reviews."""
+    try:
+        metrics_service = MetricsService(db_session)
+        trending = await metrics_service.get_trending_issues(days, limit)
+        return {"trending_issues": trending, "period_days": days}
+
+    except Exception as e:
+        logger.error(f"Failed to get trending issues: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@review_router.get("/metrics/comparison/{review_id1}/{review_id2}")
+async def get_comparison_metrics(
+    review_id1: str,
+    review_id2: str,
+    db_session = Depends(get_db_session)
+):
+    """Get detailed comparison metrics between two reviews."""
+    try:
+        metrics_service = MetricsService(db_session)
+        comparison = await metrics_service.get_comparison_metrics(review_id1, review_id2)
+        return comparison
+
+    except Exception as e:
+        logger.error(f"Failed to get comparison metrics: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

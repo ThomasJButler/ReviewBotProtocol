@@ -16,6 +16,7 @@ from config.logging import get_logger, configure_logging
 from handlers.webhook import webhook_router
 from handlers.review import review_router
 from handlers.auth import auth_router
+from handlers.github import github_router
 from database.connection import init_db, close_db
 
 # Configure logging
@@ -262,6 +263,12 @@ app.include_router(
     auth_router,
     prefix="/auth",
     tags=["authentication"]
+)
+
+app.include_router(
+    github_router,
+    prefix="/github",
+    tags=["github"]
 )
 
 

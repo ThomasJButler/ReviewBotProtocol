@@ -5,7 +5,7 @@ import time
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 import httpx
-import jwt
+import jwt as PyJWT
 from github import Github, GithubIntegration
 from github.GithubException import GithubException, RateLimitExceededException
 
@@ -428,6 +428,158 @@ class GitHubClient:
             logger.error(f"Failed to get rate limit status: {str(e)}")
             raise
 
+    async def get_user_repositories(self, per_page: int = 30, page: int = 1) -> List[Dict[str, Any]]:
+        """Get repositories for the authenticated user."""
+        try:
+            github = await self._get_github_instance()
+            user = github.get_user()
+
+            repos = []
+            for repo in user.get_repos(per_page=per_page):
+                repos.append({
+                    "id": repo.id,
+                    "name": repo.name,
+                    "full_name": repo.full_name,
+                    "description": repo.description,
+                    "private": repo.private,
+                    "fork": repo.fork,
+                    "language": repo.language,
+                    "default_branch": repo.default_branch,
+                    "updated_at": repo.updated_at.isoformat() if repo.updated_at else None,
+                    "url": repo.html_url
+                })
+
+                if len(repos) >= per_page:
+                    break
+
+            logger.info(f"Retrieved {len(repos)} repositories for user")
+            return repos
+
+        except Exception as e:
+            logger.error(f"Failed to get user repositories: {str(e)}")
+            raise
+
+    async def get_repository_pulls(
+        self,
+        repo_full_name: str,
+        state: str = "open",
+        per_page: int = 30,
+        page: int = 1
+    ) -> List[Dict[str, Any]]:
+        """Get pull requests for a repository."""
+        try:
+            url = f"/repos/{repo_full_name}/pulls"
+            params = {
+                "state": state,
+                "per_page": per_page,
+                "page": page,
+                "sort": "updated",
+                "direction": "desc"
+            }
+
+            response = await self._make_request("GET", url, params=params)
+
+            pulls = []
+            for pr_data in response:
+                pulls.append({
+                    "id": pr_data["id"],
+                    "number": pr_data["number"],
+                    "title": pr_data["title"],
+                    "description": pr_data["body"] or "",
+                    "author": pr_data["user"]["login"],
+                    "state": pr_data["state"],
+                    "draft": pr_data["draft"],
+                    "repository": repo_full_name,
+                    "branch": pr_data["head"]["ref"],
+                    "baseBranch": pr_data["base"]["ref"],
+                    "createdAt": pr_data["created_at"],
+                    "updatedAt": pr_data["updated_at"],
+                    "labels": [label["name"] for label in pr_data["labels"]],
+                    "changedFiles": pr_data["changed_files"],
+                    "additions": pr_data["additions"],
+                    "deletions": pr_data["deletions"],
+                    "commits": pr_data["commits"],
+                    "url": pr_data["html_url"],
+                    "head_sha": pr_data["head"]["sha"]
+                })
+
+            logger.info(
+                f"Retrieved {len(pulls)} pull requests",
+                repository=repo_full_name,
+                state=state
+            )
+
+            return pulls
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get repository pulls: {str(e)}",
+                repository=repo_full_name,
+                state=state
+            )
+            raise
+
+    async def search_user_pulls(
+        self,
+        query: str = "",
+        state: str = "open",
+        per_page: int = 30
+    ) -> List[Dict[str, Any]]:
+        """Search pull requests for the authenticated user across all repositories."""
+        try:
+            github = await self._get_github_instance()
+            user = github.get_user()
+            username = user.login
+
+            # Build search query
+            search_query = f"author:{username} type:pr"
+            if state != "all":
+                search_query += f" state:{state}"
+            if query:
+                search_query += f" {query}"
+
+            url = "/search/issues"
+            params = {
+                "q": search_query,
+                "per_page": per_page,
+                "sort": "updated",
+                "order": "desc"
+            }
+
+            response = await self._make_request("GET", url, params=params)
+
+            pulls = []
+            for item in response.get("items", []):
+                # Extract repository name from URL
+                repo_full_name = "/".join(item["repository_url"].split("/")[-2:])
+
+                pulls.append({
+                    "id": item["id"],
+                    "number": item["number"],
+                    "title": item["title"],
+                    "description": item["body"] or "",
+                    "author": item["user"]["login"],
+                    "state": item["state"],
+                    "draft": item.get("draft", False),
+                    "repository": repo_full_name,
+                    "createdAt": item["created_at"],
+                    "updatedAt": item["updated_at"],
+                    "labels": [label["name"] for label in item["labels"]],
+                    "url": item["html_url"]
+                })
+
+            logger.info(
+                f"Found {len(pulls)} pull requests in search",
+                query=search_query,
+                total=response.get("total_count", 0)
+            )
+
+            return pulls
+
+        except Exception as e:
+            logger.error(f"Failed to search user pulls: {str(e)}")
+            raise
+
 
 # Health check functions for main app
 
@@ -484,7 +636,7 @@ async def validate_github_config() -> Dict[str, Any]:
                 "exp": int(time.time()) + (10 * 60),  # 10 minutes
                 "iss": settings.GITHUB_APP_ID
             }
-            jwt.encode(payload, settings.GITHUB_PRIVATE_KEY, algorithm="RS256")
+            PyJWT.encode(payload, settings.GITHUB_PRIVATE_KEY, algorithm="RS256")
         except Exception as e:
             issues.append(f"Failed to generate JWT: {str(e)}")
 

@@ -102,27 +102,30 @@ export default function FileUpload({
   const [dragActive, setDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const validateFile = (file: File): { valid: boolean; error?: string } => {
-    // Check file size
-    if (file.size > maxSize * 1024 * 1024) {
-      return { valid: false, error: `File size exceeds ${maxSize}MB limit` }
-    }
-
-    // Check file type if specified
-    if (acceptedTypes && acceptedTypes.length > 0) {
-      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
-      if (!acceptedTypes.includes(fileExtension)) {
-        return { valid: false, error: 'File type not supported' }
+  const validateFile = useCallback(
+    (file: File): { valid: boolean; error?: string } => {
+      // Check file size
+      if (file.size > maxSize * 1024 * 1024) {
+        return { valid: false, error: `File size exceeds ${maxSize}MB limit` }
       }
-    }
 
-    // Check if we're at max files
-    if (selectedFiles.length >= maxFiles) {
-      return { valid: false, error: `Maximum ${maxFiles} files allowed` }
-    }
+      // Check file type if specified
+      if (acceptedTypes && acceptedTypes.length > 0) {
+        const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
+        if (!acceptedTypes.includes(fileExtension)) {
+          return { valid: false, error: 'File type not supported' }
+        }
+      }
 
-    return { valid: true }
-  }
+      // Check if we're at max files
+      if (selectedFiles.length >= maxFiles) {
+        return { valid: false, error: `Maximum ${maxFiles} files allowed` }
+      }
+
+      return { valid: true }
+    },
+    [maxSize, acceptedTypes, selectedFiles.length, maxFiles]
+  )
 
   const processFiles = useCallback(
     (files: File[]) => {
@@ -162,14 +165,7 @@ export default function FileUpload({
         console.warn('Invalid files:', invalidFiles)
       }
     },
-    [
-      onFilesSelected,
-      selectedFiles.length,
-      maxFiles,
-      maxSize,
-      acceptedTypes,
-      showPreview,
-    ]
+    [onFilesSelected, showPreview, validateFile]
   )
 
   const onDrop = useCallback(

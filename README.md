@@ -134,7 +134,6 @@ GITHUB_CLIENT_SECRET=your-client-secret
 
 # Optional
 LANGCHAIN_API_KEY=your-langchain-key  # For tracing
-DEMO_MODE=true  # For portfolio demo without real GitHub
 ```
 
 ## Architecture Overview
@@ -203,23 +202,14 @@ npm run deploy          # Deploy to Vercel/Render
 
 ## Deployment
 
-### Portfolio Demo Mode
+### Local Development
 
-For showcasing without exposing real credentials:
-
-```env
-DEMO_MODE=true
-GITHUB_INTEGRATION=false
-```
-
-### Full Functionality
-
-Users can fork and deploy with their own credentials:
+This is a fully functional application designed for local development and portfolio demonstration:
 
 1. Fork this repository
 2. Set up GitHub App following the guide in `/backend/RENDER_SETUP_GUIDE.md`
-3. Deploy to Vercel (frontend) + Render (backend)
-4. Configure environment variables
+3. Configure environment variables with your API keys
+4. Run locally with `npm run dev`
 
 See detailed deployment guides:
 

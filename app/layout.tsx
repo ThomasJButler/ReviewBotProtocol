@@ -4,6 +4,7 @@ import './globals.css'
 import ErrorBoundary from '@/components/error-boundary'
 import { ToastProvider } from '@/components/toast-provider'
 import Navigation from '@/components/layout/Navigation'
+import { AuthProvider } from '@/contexts/AuthContext'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -28,11 +29,13 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className={inter.className}>
         <ErrorBoundary>
-          <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
-            <Navigation />
-            <main>{children}</main>
-          </div>
-          <ToastProvider />
+          <AuthProvider>
+            <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
+              <Navigation />
+              <main>{children}</main>
+            </div>
+            <ToastProvider />
+          </AuthProvider>
         </ErrorBoundary>
       </body>
     </html>
