@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 import json
 import time
+# Ensure config is imported to load settings
 from typing import Dict, Any
 
 from config.logging import get_logger, security_logger, review_logger

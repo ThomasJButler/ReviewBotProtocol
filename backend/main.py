@@ -6,6 +6,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import time
+import os
 import uvicorn
 import sentry_sdk
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
@@ -244,6 +245,39 @@ async def get_metrics():
         "reviews_completed": 0,
         "avg_response_time": 0.0
     }
+
+
+@app.get("/status", tags=["health"])
+async def get_status():
+    """Simple configuration status endpoint (instructor-compatible)."""
+    try:
+        # Check if OpenAI is configured
+        openai_configured = bool(settings.OPENAI_API_KEY)
+
+        # Check if GitHub is configured
+        github_configured = bool(settings.GITHUB_APP_ID and settings.GITHUB_PRIVATE_KEY)
+
+        # Check if LangChain is configured
+        langchain_configured = bool(settings.LANGCHAIN_API_KEY) if hasattr(settings, 'LANGCHAIN_API_KEY') else False
+
+        return {
+            "status": "operational",
+            "openai_configured": openai_configured,
+            "github_configured": github_configured,
+            "langchain_configured": langchain_configured,
+            "openai_model": settings.OPENAI_MODEL,
+            "server": f"{settings.HOST}:{settings.PORT}",
+            "version": settings.APP_VERSION,
+            "mode": "production" if not settings.DEBUG else "development",
+            "demo_mode": "DEMO_MODE" in os.environ and os.environ.get("DEMO_MODE", "false").lower() == "true"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "openai_configured": False,
+            "github_configured": False
+        }
 
 
 # Include API routers

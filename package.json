@@ -18,7 +18,18 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "check": "npm run lint && npm run typecheck && npm run format:check",
-    "prepare": "husky"
+    "prepare": "husky",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:logs:frontend": "docker-compose logs -f frontend",
+    "docker:logs:backend": "docker-compose logs -f backend",
+    "docker:restart": "docker-compose restart",
+    "docker:clean": "docker-compose down -v --remove-orphans",
+    "docker:rebuild": "npm run docker:clean && npm run docker:build && npm run docker:up",
+    "docker:dev": "docker-compose up",
+    "docker:prod": "docker-compose -f docker-compose.yml up -d"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",
