@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 # LangChain imports
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate, PromptTemplate
 from langchain.schema import HumanMessage, SystemMessage, BaseMessage
 from langchain.chains import LLMChain, SequentialChain
@@ -27,6 +27,8 @@ from config.logging import get_logger, review_logger
 from models.review import ReviewIssue, IssueCategory, SeverityLevel, AIAnalysisResult
 from models.github import PRFile
 from utils.helpers import get_file_language, calculate_complexity_score, format_review_comment
+
+# LangGraph workflow imported lazily in __init__ to avoid circular import
 
 logger = get_logger(__name__)
 
@@ -194,7 +196,13 @@ class AIReviewResult(BaseModel):
 class AIReviewer:
     """LangChain-based AI code reviewer with course-inspired enhancements."""
 
-    def __init__(self):
+    def __init__(self, use_langgraph: bool = True):
+        """Initialize AIReviewer with optional LangGraph workflow.
+
+        Args:
+            use_langgraph: Whether to use LangGraph workflow (course requirement).
+                         Defaults to True for course compliance.
+        """
         # Initialize OpenAI model
         self.llm = ChatOpenAI(
             model_name=settings.OPENAI_MODEL,
@@ -218,6 +226,17 @@ class AIReviewer:
 
         # Setup chains
         self._setup_chains()
+
+        # Initialize LangGraph workflow for course compliance
+        self.use_langgraph = use_langgraph
+        if self.use_langgraph:
+            # Lazy import to avoid circular dependency
+            from services.review_workflow import create_review_workflow
+            self.review_workflow = create_review_workflow(self)
+            logger.info("LangGraph workflow enabled (course requirement)")
+        else:
+            self.review_workflow = None
+            logger.info("LangGraph workflow disabled, using basic chains")
 
     def _setup_security_patterns(self):
         """Setup regex patterns for vulnerability detection based on bad_code_python.py."""
@@ -892,9 +911,53 @@ Return comprehensive scoring and suggestions as JSON:
         )
 
 
-    async def review_pr_files(self, files: List[PRFile]) -> Dict[str, Any]:
-        """Review all files in a pull request."""
+    async def review_pr_files(self, files: List[PRFile], pr_number: int = 0, pr_title: str = "", pr_description: str = "") -> Dict[str, Any]:
+        """Review all files in a pull request.
+
+        Args:
+            files: List of PR files to review
+            pr_number: Pull request number (for LangGraph workflow)
+            pr_title: Pull request title (for LangGraph workflow)
+            pr_description: Pull request description (for LangGraph workflow)
+
+        Returns:
+            Dictionary containing review results
+        """
         start_time = time.time()
+
+        # Use LangGraph workflow if enabled (course requirement)
+        if self.use_langgraph and self.review_workflow:
+            logger.info(f"Using LangGraph workflow to review PR #{pr_number} with {len(files)} files")
+
+            # Prepare PR data for LangGraph workflow
+            pr_data = {
+                "pr_number": pr_number,
+                "pr_title": pr_title,
+                "pr_description": pr_description,
+                "files": files
+            }
+
+            try:
+                # Execute LangGraph workflow
+                workflow_results = await self.review_workflow.run_review(pr_data)
+
+                # Log LangGraph usage for course demonstration
+                logger.info(
+                    "LangGraph workflow completed successfully",
+                    pr_number=pr_number,
+                    files_reviewed=len(workflow_results.get("files_reviewed", [])),
+                    total_issues=workflow_results.get("total_issues", 0),
+                    workflow_metadata=workflow_results.get("workflow_metadata", {})
+                )
+
+                return workflow_results
+
+            except Exception as e:
+                logger.error(f"LangGraph workflow failed: {str(e)}, falling back to basic chains")
+                # Fall through to basic chain implementation
+
+        # Original implementation using basic chains
+        logger.info(f"Starting AI review of {len(files)} files using basic chains")
 
         review_results = {
             "files_reviewed": [],
@@ -911,8 +974,6 @@ Return comprehensive scoring and suggestions as JSON:
                 "chains_executed": 0
             }
         }
-
-        logger.info(f"Starting AI review of {len(files)} files")
 
         # Process files concurrently (with semaphore to limit concurrent API calls)
         semaphore = asyncio.Semaphore(3)  # Limit to 3 concurrent API calls
