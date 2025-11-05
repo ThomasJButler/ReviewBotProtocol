@@ -86,14 +86,26 @@ temp/
 
 # Backend
 backend/.venv/
-backend/__pycache__/
-backend/*.pyc
 backend/.env
 backend/logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+*.egg-info/
+dist/
+*.egg
 
 # Database
 *.sqlite
 *.db
-/backend/tests/__pycache__
-/backend/config/__pycache__
-*.pyc
+*.db-journal
