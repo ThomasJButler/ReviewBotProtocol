@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 🎯 Project Overview
 
-**Git Review Assistant** - An AI-powered code review system with automated PR analysis, security scanning, and intelligent feedback generation using GitHub API integration.
+**ReviewBot Protocol** - An AI-powered code review system with automated PR analysis, security scanning, and intelligent feedback generation using GitHub API integration.
 
 **Course Project**: Part of "Codecademy Mastering Generative AI & Agents for Developers" bootcamp demonstrating advanced AI code review methodologies and practical application of AI in software development workflows.
 
@@ -182,7 +182,7 @@ npm run deploy:backend
 ```env
 # Required - Frontend (.env.local)
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-NEXT_PUBLIC_GITHUB_APP_NAME=git-review-assistant
+NEXT_PUBLIC_GITHUB_APP_NAME=reviewbot-protocol
 
 # Required - API Keys
 OPENAI_API_KEY=sk-...
@@ -194,7 +194,7 @@ GITHUB_CLIENT_SECRET=abc123def456
 
 # LangChain Configuration (Course Required)
 LANGCHAIN_API_KEY=ls__...      # LangSmith tracing & monitoring
-LANGCHAIN_PROJECT=git-review-assistant
+LANGCHAIN_PROJECT=reviewbot-protocol
 LANGCHAIN_TRACING_V2=true
 
 # Optional - Enhanced Features

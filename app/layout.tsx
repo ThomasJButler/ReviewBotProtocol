@@ -9,13 +9,23 @@ import { AuthProvider } from '@/contexts/AuthContext'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'AI Code Review Assistant',
-  description: 'AI-powered code review system with GitHub integration',
-  keywords: ['AI', 'code review', 'GitHub', 'security', 'development'],
+  title: 'ReviewBot Protocol',
+  description:
+    'AI-powered code review protocol with automated PR analysis and security scanning',
+  keywords: [
+    'AI',
+    'code review',
+    'GitHub',
+    'security',
+    'development',
+    'ReviewBot',
+    'protocol',
+  ],
   authors: [{ name: 'Tom Butler' }],
   openGraph: {
-    title: 'AI Code Review Assistant',
-    description: 'AI-powered code review system with GitHub integration',
+    title: 'ReviewBot Protocol',
+    description:
+      'AI-powered code review protocol with automated PR analysis and security scanning',
     type: 'website',
   },
 }

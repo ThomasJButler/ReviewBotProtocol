@@ -1,4 +1,4 @@
-"""Main FastAPI application for Git Review Assistant backend."""
+"""Main FastAPI application for ReviewBot Protocol backend."""
 
 from fastapi import FastAPI, Request, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +41,7 @@ if settings.SENTRY_DSN:
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
-    logger.info("Starting Git Review Assistant API", version=settings.APP_VERSION)
+    logger.info("Starting ReviewBot Protocol API", version=settings.APP_VERSION)
 
     # Initialize database
     await init_db()

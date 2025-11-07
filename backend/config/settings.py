@@ -1,4 +1,4 @@
-"""Configuration settings for the Git Review Assistant backend."""
+"""Configuration settings for the ReviewBot Protocol backend."""
 
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
 
     # App Configuration
-    APP_NAME: str = "Git Review Assistant API"
+    APP_NAME: str = "ReviewBot Protocol API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     SECRET_KEY: str
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # LangChain Configuration (Course Requirements)
     LANGCHAIN_API_KEY: Optional[str] = None
-    LANGCHAIN_PROJECT: str = "git-review-assistant"
+    LANGCHAIN_PROJECT: str = "reviewbot-protocol"
     LANGCHAIN_TRACING_V2: bool = True
 
     # Database Configuration

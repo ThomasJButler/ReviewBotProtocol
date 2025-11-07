@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1200, height=630">
+    <title>ReviewBot Protocol - OG Image Template</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 1200px;
+            height: 630px;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Matrix rain effect background */
+        .matrix-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            opacity: 0.1;
+            background-image: repeating-linear-gradient(
+                0deg,
+                #00ff00 0px,
+                transparent 2px,
+                transparent 20px,
+                #00ff00 22px
+            );
+            animation: matrix-fall 20s linear infinite;
+        }
+
+        @keyframes matrix-fall {
+            from { transform: translateY(-100%); }
+            to { transform: translateY(100%); }
+        }
+
+        /* Glass container */
+        .container {
+            background: rgba(26, 26, 26, 0.6);
+            backdrop-filter: blur(12px);
+            border: 2px solid rgba(0, 255, 0, 0.3);
+            border-radius: 16px;
+            padding: 80px;
+            text-align: center;
+            position: relative;
+            box-shadow:
+                0 0 40px rgba(0, 255, 0, 0.2),
+                inset 0 0 40px rgba(0, 255, 255, 0.1);
+        }
+
+        /* Logo */
+        .logo {
+            font-size: 72px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #00ff00, #00ffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 20px;
+            letter-spacing: 2px;
+            text-shadow: 0 0 30px rgba(0, 255, 0, 0.5);
+        }
+
+        /* Tagline */
+        .tagline {
+            font-size: 28px;
+            color: #c7c7c7;
+            margin-bottom: 40px;
+            letter-spacing: 1px;
+        }
+
+        /* Features */
+        .features {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 40px;
+        }
+
+        .feature {
+            color: #00ff00;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .feature-icon {
+            font-size: 24px;
+        }
+
+        /* Corner decorations */
+        .corner {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border: 2px solid #00ff00;
+        }
+
+        .corner.top-left {
+            top: 20px;
+            left: 20px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        .corner.top-right {
+            top: 20px;
+            right: 20px;
+            border-left: none;
+            border-bottom: none;
+        }
+
+        .corner.bottom-left {
+            bottom: 20px;
+            left: 20px;
+            border-right: none;
+            border-top: none;
+        }
+
+        .corner.bottom-right {
+            bottom: 20px;
+            right: 20px;
+            border-left: none;
+            border-top: none;
+        }
+
+        /* Protocol indicator */
+        .protocol {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #00ffff;
+            font-size: 14px;
+            opacity: 0.8;
+            letter-spacing: 2px;
+        }
+
+        /* GitHub indicator */
+        .github {
+            position: absolute;
+            bottom: 40px;
+            right: 40px;
+            color: #c7c7c7;
+            font-size: 14px;
+            opacity: 0.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="matrix-bg"></div>
+
+    <div class="corner top-left"></div>
+    <div class="corner top-right"></div>
+    <div class="corner bottom-left"></div>
+    <div class="corner bottom-right"></div>
+
+    <div class="protocol">[ PROTOCOL://ACTIVE ]</div>
+
+    <div class="container">
+        <div class="logo">RBP://</div>
+        <div class="tagline">AI-Powered Code Review Protocol</div>
+
+        <div class="features">
+            <div class="feature">
+                <span class="feature-icon">🔒</span>
+                <span>Security Scanning</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">⚡</span>
+                <span>Performance Analysis</span>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🤖</span>
+                <span>AI-Powered Reviews</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="github">GitHub App Integration</div>
+</body>
+</html>
+
+<!--
+To create the actual OG image:
+1. Open this file in a browser
+2. Set browser window to exactly 1200x630px
+3. Take a screenshot
+4. Save as og-image.png in /public/
+
+Or use a headless browser tool:
+- Puppeteer
+- Playwright
+- Chrome DevTools
+-->

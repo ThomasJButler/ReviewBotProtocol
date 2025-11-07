@@ -1,4 +1,4 @@
-# Git Review Assistant
+# ReviewBot Protocol
 
 > **Portfolio Project**: A full-stack AI-powered code review system built to demonstrate modern development capabilities and understanding of AI systems from the ground up.
 
@@ -102,8 +102,8 @@ Look, CodeRabbit is ace and you should probably use that for most scenarios. But
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/git-review-assistant
-cd git-review-assistant
+git clone https://github.com/yourusername/reviewbot-protocol
+cd reviewbot-protocol
 
 # Install frontend dependencies
 npm install
