@@ -236,6 +236,55 @@ class ReviewStatsResponse(BaseModel):
     reviews_by_date: Dict[str, int]
 
 
+class ReviewHistoryItem(BaseModel):
+    """Model for review history item."""
+    id: str
+    type: str
+    status: str
+    repository: Optional[str] = None
+    pr_number: Optional[int] = None
+    overall_score: Optional[float] = None
+    letter_grade: Optional[str] = None
+    total_issues: int = 0
+    security_issues: int = 0
+    performance_issues: int = 0
+    quality_issues: int = 0
+    created_at: datetime
+    processing_time: Optional[float] = None
+    ai_model_used: Optional[str] = None
+    code_suggestions: List[Any] = []
+    priority_fixes: List[Any] = []
+
+
+class ReviewHistoryResponse(BaseModel):
+    """Response model for review history."""
+    reviews: List[ReviewHistoryItem]
+    pagination: Dict[str, Any]
+    filters_applied: Dict[str, Any]
+
+
+class UserStatsResponse(BaseModel):
+    """Response model for user statistics."""
+    user_id: str
+    total_reviews: int
+    average_score: float
+    total_issues_found: int
+    improvement_trend: float
+    top_issues: List[Dict[str, Any]]
+    repositories_reviewed: List[str]
+    review_frequency: str
+    best_review: Optional[float] = None
+    worst_review: Optional[float] = None
+    recent_activity: Dict[str, int]
+
+
+class QueueStatusResponse(BaseModel):
+    """Response model for queue status."""
+    queue_stats: Dict[str, Any]
+    worker_status: str
+    timestamp: datetime
+
+
 # LangChain Integration Models
 
 class LangChainPrompt(BaseModel):

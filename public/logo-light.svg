@@ -18,7 +18,7 @@
   </text>
 
   <!-- Protocol text -->
-  <text x="90" y="35" font-family="'JetBrains Mono', monospace" font-size="14" fill="#333333">
+  <text x="125" y="35" font-family="'JetBrains Mono', monospace" font-size="14" fill="#333333">
     protocol
   </text>
 
