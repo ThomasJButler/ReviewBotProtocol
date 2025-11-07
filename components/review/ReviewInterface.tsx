@@ -9,11 +9,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
-import CodeEditor from './CodeEditor'
-import FileUpload from './FileUpload'
 import PRSelector from './PRSelector'
 import ReviewResults, {
   type ReviewResultsDisplay,
@@ -26,13 +22,10 @@ import {
 import { type PullRequest } from '@/hooks/useGitHubService'
 import { useGitHubService } from '@/hooks/useGitHubService'
 import {
-  FileText,
-  Upload,
   GitPullRequest,
   Sparkles,
   Zap,
   Clock,
-  CheckCircle2,
   AlertTriangle,
   Shield,
   TrendingUp,
@@ -40,43 +33,30 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface UploadedFile extends File {
-  id: string
-  status: 'pending' | 'uploading' | 'success' | 'error'
-  error?: string
-  progress?: number
-}
-
 interface ReviewInterfaceProps {
   className?: string
   onReviewComplete?: (results: ReviewResultsDisplay) => void
-  maxFiles?: number
-  maxFileSize?: number
-}
-
-type ReviewMode = 'paste' | 'upload' | 'pr'
-
-interface ReviewRequest {
-  mode: ReviewMode
-  content?: string
-  files?: File[]
-  pullRequest?: PullRequest
 }
 
 // Convert ServiceReviewResults to ReviewResultsDisplay
 function convertToDisplayResults(
   serviceResults: ServiceReviewResults
 ): ReviewResultsDisplay {
+  // Safely handle potentially missing arrays with fallbacks
+  const security = serviceResults.security || []
+  const performance = serviceResults.performance || []
+  const quality = serviceResults.quality || []
+
   const allFindings: ReviewFinding[] = [
-    ...serviceResults.security.map(f => ({
+    ...security.map(f => ({
       ...f,
       category: 'security' as const,
     })),
-    ...serviceResults.performance.map(f => ({
+    ...performance.map(f => ({
       ...f,
       category: 'performance' as const,
     })),
-    ...serviceResults.quality.map(f => ({
+    ...quality.map(f => ({
       ...f,
       category: 'quality' as const,
     })),
@@ -92,22 +72,22 @@ function convertToDisplayResults(
   return {
     id: `review-${Date.now()}`,
     timestamp: new Date().toISOString(),
-    summary: serviceResults.summary,
-    overallScore: serviceResults.score,
+    summary: serviceResults.summary || 'Analysis completed',
+    overallScore: serviceResults.score || 0,
     findings: allFindings,
     metrics: {
-      totalIssues: serviceResults.totalIssues,
+      totalIssues: serviceResults.totalIssues || 0,
       criticalIssues,
       highIssues,
       mediumIssues,
       lowIssues,
-      securityIssues: serviceResults.security.length,
-      performanceIssues: serviceResults.performance.length,
-      qualityIssues: serviceResults.quality.length,
+      securityIssues: security.length,
+      performanceIssues: performance.length,
+      qualityIssues: quality.length,
       linesAnalyzed: serviceResults.linesAnalyzed || 0,
       filesAnalyzed: 1,
     },
-    duration: 0, // Not available from service
+    duration: 0,
     aiModel: 'GPT-4',
   }
 }
@@ -115,140 +95,57 @@ function convertToDisplayResults(
 export default function ReviewInterface({
   className,
   onReviewComplete,
-  maxFiles = 10,
-  maxFileSize = 50,
 }: ReviewInterfaceProps) {
-  const [activeMode, setActiveMode] = useState<ReviewMode>('paste')
   const [reviewResults, setReviewResults] =
     useState<ReviewResultsDisplay | null>(null)
-
-  // Paste mode state
-  const [codeInput, setCodeInput] = useState('')
-  const [codeLanguage, setCodeLanguage] = useState('javascript')
-
-  // Upload mode state
-  const [selectedFiles, setSelectedFiles] = useState<UploadedFile[]>([])
-
-  // PR mode state
   const [selectedPR, setSelectedPR] = useState<PullRequest | null>(null)
 
   // Service hooks
-  const {
-    analyzeCode,
-    analyzeFiles,
-    analyzePR,
-    isLoading: isReviewing,
-    error,
-  } = useReviewService()
+  const { analyzePR, isLoading: isReviewing, error } = useReviewService()
   const { isAuthenticated, signIn } = useGitHubService()
 
   const handleReview = useCallback(async () => {
-    let results: ReviewResultsDisplay | null = null
+    if (!selectedPR) {
+      return
+    }
+
+    if (!isAuthenticated) {
+      console.error('Not authenticated')
+      return
+    }
 
     try {
-      // Call appropriate service method based on mode
-      switch (activeMode) {
-        case 'paste':
-          if (!codeInput.trim()) {
-            throw new Error('Please enter some code to review')
-          }
-          const codeResults = await analyzeCode({
-            code: codeInput,
-            language: codeLanguage,
-            mode: 'paste',
-          })
-          results = codeResults ? convertToDisplayResults(codeResults) : null
-          break
+      const prResults = await analyzePR(
+        selectedPR.number,
+        selectedPR.repository
+      )
 
-        case 'upload':
-          if (selectedFiles.length === 0) {
-            throw new Error('Please select at least one file to review')
-          }
-          const files = selectedFiles.filter(
-            f => f.status === 'success'
-          ) as File[]
-          const fileResults = await analyzeFiles(files)
-          results = fileResults ? convertToDisplayResults(fileResults) : null
-          break
+      if (prResults) {
+        console.log('PR Results received:', prResults)
+        console.log('Has security array?', Array.isArray(prResults.security))
+        console.log(
+          'Has performance array?',
+          Array.isArray(prResults.performance)
+        )
+        console.log('Has quality array?', Array.isArray(prResults.quality))
 
-        case 'pr':
-          if (!selectedPR) {
-            throw new Error('Please select a pull request to review')
-          }
-          if (!isAuthenticated) {
-            throw new Error('Please connect to GitHub first')
-          }
-          const prResults = await analyzePR(
-            selectedPR.number,
-            selectedPR.repository
-          )
-          results = prResults ? convertToDisplayResults(prResults) : null
-          break
-
-        default:
-          throw new Error('Invalid review mode')
-      }
-
-      if (results) {
+        const results = convertToDisplayResults(prResults)
+        console.log('Converted results:', results)
         setReviewResults(results)
         onReviewComplete?.(results)
       }
     } catch (err) {
-      // Error handling is managed by the service hooks
       console.error('Review error:', err)
     }
-  }, [
-    activeMode,
-    codeInput,
-    codeLanguage,
-    selectedFiles,
-    selectedPR,
-    isAuthenticated,
-    analyzeCode,
-    analyzeFiles,
-    analyzePR,
-    onReviewComplete,
-  ])
+  }, [selectedPR, isAuthenticated, analyzePR, onReviewComplete])
 
   const canReview = () => {
-    switch (activeMode) {
-      case 'paste':
-        return codeInput.trim().length > 0
-      case 'upload':
-        return selectedFiles.length > 0
-      case 'pr':
-        return selectedPR !== null && isAuthenticated
-      default:
-        return false
-    }
+    return selectedPR !== null && isAuthenticated
   }
 
   const getEstimatedTime = () => {
-    switch (activeMode) {
-      case 'paste':
-        const lines = codeInput.split('\n').length
-        return Math.max(5, Math.ceil(lines / 20)) // Roughly 1 second per 20 lines, min 5 seconds
-      case 'upload':
-        return Math.max(10, selectedFiles.length * 5) // 5 seconds per file, min 10 seconds
-      case 'pr':
-        return selectedPR ? Math.max(15, selectedPR.changedFiles * 3) : 15 // 3 seconds per changed file
-      default:
-        return 10
-    }
+    return selectedPR ? Math.max(15, selectedPR.changedFiles * 3) : 15
   }
-
-  const handleFilesSelected = useCallback((files: File[]) => {
-    const uploadedFiles: UploadedFile[] = files.map(file => ({
-      ...file,
-      id: `${file.name}-${Date.now()}-${Math.random()}`,
-      status: 'pending',
-    }))
-    setSelectedFiles(prev => [...prev, ...uploadedFiles])
-  }, [])
-
-  const handleFileRemoved = useCallback((fileId: string) => {
-    setSelectedFiles(prev => prev.filter(f => f.id !== fileId))
-  }, [])
 
   return (
     <div className={cn('space-y-8', className)}>
@@ -274,7 +171,7 @@ export default function ReviewInterface({
       <Card className="max-w-6xl mx-auto">
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            <span>Select Review Method</span>
+            <span>Review GitHub Pull Request</span>
             {canReview() && (
               <Badge variant="outline" className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />~{getEstimatedTime()}s
@@ -282,111 +179,48 @@ export default function ReviewInterface({
             )}
           </CardTitle>
           <CardDescription>
-            Choose how you'd like to submit your code for AI-powered analysis
+            Connect your GitHub account and select a pull request for automated
+            AI-powered review
           </CardDescription>
         </CardHeader>
 
         <CardContent>
-          <Tabs
-            value={activeMode}
-            onValueChange={value => setActiveMode(value as ReviewMode)}
-          >
-            <TabsList className="grid w-full grid-cols-3 mb-8">
-              <TabsTrigger value="paste" className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                📝 Paste Code
-              </TabsTrigger>
-              <TabsTrigger value="upload" className="flex items-center gap-2">
-                <Upload className="h-4 w-4" />
-                📁 Upload Files
-              </TabsTrigger>
-              <TabsTrigger value="pr" className="flex items-center gap-2">
-                <GitPullRequest className="h-4 w-4" />
-                🔗 Review PR
-              </TabsTrigger>
-            </TabsList>
+          <div className="space-y-6">
+            <div className="text-center mb-6">
+              <h3 className="text-2xl font-semibold text-white mb-2">
+                Review GitHub PR
+              </h3>
+              <p className="text-gray-400">
+                Select a GitHub pull request for automated review
+              </p>
+            </div>
 
-            {/* Paste Code Tab */}
-            <TabsContent value="paste" className="space-y-6">
-              <div className="text-center mb-6">
-                <h3 className="text-2xl font-semibold text-white mb-2">
-                  📝 Paste Your Code
-                </h3>
-                <p className="text-gray-400">
-                  Paste your code here for instant AI analysis
-                </p>
-              </div>
-
-              <CodeEditor
-                value={codeInput}
-                onChange={value => setCodeInput(value || '')}
-                language={codeLanguage}
-                onLanguageChange={setCodeLanguage}
-                height={400}
-                placeholder="Paste your code here for review..."
-                showMetrics={true}
+            {!isAuthenticated ? (
+              <Card>
+                <CardContent className="p-8 text-center">
+                  <GitPullRequest className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-semibold text-white mb-2">
+                    Connect to GitHub
+                  </h3>
+                  <p className="text-gray-400 mb-6">
+                    Connect your GitHub account to access and review pull
+                    requests
+                  </p>
+                  <Button onClick={signIn} disabled={isReviewing}>
+                    <GitPullRequest className="h-4 w-4 mr-2" />
+                    Connect GitHub Account
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <PRSelector
+                onPRSelected={setSelectedPR}
+                selectedPR={selectedPR}
+                maxResults={20}
+                showFilters={true}
               />
-            </TabsContent>
-
-            {/* Upload Files Tab */}
-            <TabsContent value="upload" className="space-y-6">
-              <div className="text-center mb-6">
-                <h3 className="text-2xl font-semibold text-white mb-2">
-                  📁 Upload Code Files
-                </h3>
-                <p className="text-gray-400">
-                  Upload multiple files for comprehensive analysis
-                </p>
-              </div>
-
-              <FileUpload
-                onFilesSelected={handleFilesSelected}
-                selectedFiles={selectedFiles}
-                onRemoveFile={handleFileRemoved}
-                maxFiles={maxFiles}
-                maxSize={maxFileSize}
-                multiple={true}
-              />
-            </TabsContent>
-
-            {/* Review PR Tab */}
-            <TabsContent value="pr" className="space-y-6">
-              <div className="text-center mb-6">
-                <h3 className="text-2xl font-semibold text-white mb-2">
-                  🔗 Review GitHub PR
-                </h3>
-                <p className="text-gray-400">
-                  Select a GitHub pull request for automated review
-                </p>
-              </div>
-
-              {!isAuthenticated ? (
-                <Card>
-                  <CardContent className="p-8 text-center">
-                    <GitPullRequest className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-white mb-2">
-                      Connect to GitHub
-                    </h3>
-                    <p className="text-gray-400 mb-6">
-                      Connect your GitHub account to access and review pull
-                      requests
-                    </p>
-                    <Button onClick={signIn} disabled={isReviewing}>
-                      <GitPullRequest className="h-4 w-4 mr-2" />
-                      Connect GitHub Account
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <PRSelector
-                  onPRSelected={setSelectedPR}
-                  selectedPR={selectedPR}
-                  maxResults={20}
-                  showFilters={true}
-                />
-              )}
-            </TabsContent>
-          </Tabs>
+            )}
+          </div>
 
           {/* Action Button */}
           <div className="mt-8 text-center">
@@ -404,7 +238,7 @@ export default function ReviewInterface({
               ) : (
                 <>
                   <Zap className="h-5 w-5 mr-3" />
-                  🔍 Start AI Review
+                  Start AI Review
                 </>
               )}
             </Button>

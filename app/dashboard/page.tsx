@@ -389,21 +389,21 @@ export default function DashboardPage() {
                 <CardDescription>Get started with code review</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button className="w-full justify-start" variant="secondary">
-                  <Code2 className="h-4 w-4 mr-2" />
-                  Review Code
-                </Button>
-                <Button className="w-full justify-start" variant="secondary">
+                <Button
+                  className="w-full justify-start"
+                  variant="secondary"
+                  onClick={() => (window.location.href = '/review')}
+                >
                   <GitPullRequest className="h-4 w-4 mr-2" />
                   Analyze PR
                 </Button>
-                <Button className="w-full justify-start" variant="secondary">
-                  <FileText className="h-4 w-4 mr-2" />
-                  Upload Files
-                </Button>
-                <Button className="w-full justify-start" variant="secondary">
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                  View Reports
+                <Button
+                  className="w-full justify-start"
+                  variant="secondary"
+                  onClick={() => (window.location.href = '/pull-requests')}
+                >
+                  <GitPullRequest className="h-4 w-4 mr-2" />
+                  View Pull Requests
                 </Button>
               </CardContent>
             </Card>

@@ -1,0 +1,251 @@
+# Azure Container Instances Deployment Template
+# Git Review Assistant - Full Stack Deployment
+#
+# This template deploys both frontend and backend as Azure Container Instances
+# using the Docker images built from this repository.
+#
+# Prerequisites:
+# 1. Azure CLI installed (az cli)
+# 2. Docker images pushed to Azure Container Registry or Docker Hub
+# 3. Environment variables prepared
+#
+# Usage:
+#   az deployment group create \
+#     --resource-group git-review-assistant-rg \
+#     --template-file azure-container-instances.yaml \
+#     --parameters @azure-parameters.json
+
+apiVersion: '2021-09-01'
+location: eastus
+name: git-review-assistant
+properties:
+  containers:
+
+  # Backend Container
+  - name: backend
+    properties:
+      image: gitreviewassistant.azurecr.io/backend:latest
+      resources:
+        requests:
+          cpu: 1.0
+          memoryInGb: 1.5
+      ports:
+      - port: 8000
+        protocol: TCP
+      environmentVariables:
+      # AI Services
+      - name: OPENAI_API_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: LANGCHAIN_API_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: LANGCHAIN_PROJECT
+        value: git-review-assistant
+      - name: LANGCHAIN_TRACING_V2
+        value: 'true'
+
+      # GitHub App Configuration
+      - name: GITHUB_APP_ID
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_CLIENT_ID
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_CLIENT_SECRET
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_PRIVATE_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_WEBHOOK_SECRET
+        secureValue: <SET_VIA_PARAMETERS>
+
+      # Application Configuration
+      - name: ENVIRONMENT
+        value: production
+      - name: ALLOWED_ORIGINS
+        value: https://git-review-frontend.eastus.azurecontainer.io:3000
+      - name: USE_MOCK_REVIEWER
+        value: 'false'
+      - name: DATABASE_URL
+        value: sqlite:///./review_assistant.db
+
+      # Optional: Redis
+      # - name: REDIS_URL
+      #   value: redis://your-redis-host:6379
+
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 3
+        failureThreshold: 3
+
+  # Frontend Container
+  - name: frontend
+    properties:
+      image: gitreviewassistant.azurecr.io/frontend:latest
+      resources:
+        requests:
+          cpu: 0.5
+          memoryInGb: 1.0
+      ports:
+      - port: 3000
+        protocol: TCP
+      environmentVariables:
+      # Next.js Configuration
+      - name: NEXT_PUBLIC_APP_URL
+        value: https://git-review-frontend.eastus.azurecontainer.io:3000
+      - name: NEXT_PUBLIC_GITHUB_APP_NAME
+        value: git-review-assistant
+      - name: NEXT_PUBLIC_API_URL
+        value: http://git-review-backend.eastus.azurecontainer.io:8000
+
+      # GitHub OAuth
+      - name: GITHUB_CLIENT_ID
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_CLIENT_SECRET
+        secureValue: <SET_VIA_PARAMETERS>
+
+      # OpenAI (for frontend API routes if needed)
+      - name: OPENAI_API_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+
+      livenessProbe:
+        httpGet:
+          path: /api/health
+          port: 3000
+        initialDelaySeconds: 30
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 3
+
+  # Container Registry Credentials
+  imageRegistryCredentials:
+  - server: gitreviewassistant.azurecr.io
+    username: <SET_VIA_PARAMETERS>
+    password: <SET_VIA_PARAMETERS>
+
+  # Networking Configuration
+  ipAddress:
+    type: Public
+    ports:
+    - protocol: TCP
+      port: 8000
+    - protocol: TCP
+      port: 3000
+    dnsNameLabel: git-review-assistant
+
+  # OS Type
+  osType: Linux
+
+  # Restart Policy
+  restartPolicy: Always
+
+---
+
+# Alternative: Separate Container Groups
+# Deploy backend and frontend in separate container groups for better isolation
+
+# Backend Container Group
+apiVersion: '2021-09-01'
+location: eastus
+name: git-review-backend
+properties:
+  containers:
+  - name: backend
+    properties:
+      image: gitreviewassistant.azurecr.io/backend:latest
+      resources:
+        requests:
+          cpu: 1.0
+          memoryInGb: 2.0
+      ports:
+      - port: 8000
+        protocol: TCP
+      environmentVariables:
+      # (Same as above)
+      - name: OPENAI_API_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: LANGCHAIN_API_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_APP_ID
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_CLIENT_ID
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_CLIENT_SECRET
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_PRIVATE_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_WEBHOOK_SECRET
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: ENVIRONMENT
+        value: production
+      - name: ALLOWED_ORIGINS
+        value: https://git-review-frontend.eastus.azurecontainer.io
+
+  imageRegistryCredentials:
+  - server: gitreviewassistant.azurecr.io
+    username: <SET_VIA_PARAMETERS>
+    password: <SET_VIA_PARAMETERS>
+
+  ipAddress:
+    type: Public
+    ports:
+    - protocol: TCP
+      port: 8000
+    dnsNameLabel: git-review-backend
+
+  osType: Linux
+  restartPolicy: Always
+
+---
+
+# Frontend Container Group
+apiVersion: '2021-09-01'
+location: eastus
+name: git-review-frontend
+properties:
+  containers:
+  - name: frontend
+    properties:
+      image: gitreviewassistant.azurecr.io/frontend:latest
+      resources:
+        requests:
+          cpu: 0.5
+          memoryInGb: 1.0
+      ports:
+      - port: 3000
+        protocol: TCP
+      environmentVariables:
+      - name: NEXT_PUBLIC_APP_URL
+        value: https://git-review-frontend.eastus.azurecontainer.io
+      - name: NEXT_PUBLIC_API_URL
+        value: https://git-review-backend.eastus.azurecontainer.io:8000
+      - name: GITHUB_CLIENT_ID
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: GITHUB_CLIENT_SECRET
+        secureValue: <SET_VIA_PARAMETERS>
+      - name: OPENAI_API_KEY
+        secureValue: <SET_VIA_PARAMETERS>
+
+  imageRegistryCredentials:
+  - server: gitreviewassistant.azurecr.io
+    username: <SET_VIA_PARAMETERS>
+    password: <SET_VIA_PARAMETERS>
+
+  ipAddress:
+    type: Public
+    ports:
+    - protocol: TCP
+      port: 3000
+    dnsNameLabel: git-review-frontend
+
+  osType: Linux
+  restartPolicy: Always

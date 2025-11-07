@@ -23,20 +23,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **AI-Powered Analysis**: Using LangChain + GPT-4o for intelligent code reviews
 - **Security Scanning**: OWASP Top 10 vulnerability detection and secret detection
 - **GitHub Integration**: Automated webhook processing for PR reviews with inline comments
-- **Real-time Feedback**: WebSocket connections for live review updates
+- **Real-time Feedback**: Asynchronous review processing with status updates
 
 ## 🏗️ Architecture
 
 ### Tech Stack (Course Compliant)
 
-- **Frontend**: Next.js 15 (App Router), TypeScript 5.6 (strict mode)
+- **Frontend**: Next.js 14.2 (App Router), TypeScript 5.6 (strict mode)
 - **Styling**: Tailwind CSS with custom cyber/matrix theme (glass morphism, green accents)
 - **UI Components**: Shadcn/ui + Radix UI primitives
 - **AI Engine**: LangChain + LangGraph + OpenAI GPT-4o (Course Requirements)
 - **Backend**: FastAPI for webhook processing
 - **API Integration**: GitHub API v3/GraphQL, GitHub Webhooks for automated PR reviews
 - **State Management**: React Context + Zustand for complex state
-- **Real-time**: WebSockets for live updates
+- **Real-time**: WebSockets for live updates (planned feature)
 - **Testing**: Jest + React Testing Library, Cypress for E2E
 
 ### LangChain Architecture (Core Course Component)
@@ -50,7 +50,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Project Structure
 
 ```
-├── app/                    # Next.js 15 App Router
+├── app/                    # Next.js 14.2 App Router
 │   ├── api/               # API routes
 │   │   ├── review/        # Review endpoints
 │   │   ├── webhook/       # GitHub webhook handler
@@ -313,10 +313,10 @@ const reviewWorkflow = new StateGraph()
 
 ### 1. Paste Code Review
 
-- Monaco Editor for code input
+- Code input interface (Monaco Editor dependency available for future enhancement)
 - Language auto-detection
-- Real-time syntax highlighting
-- Instant AI analysis
+- Syntax highlighting
+- AI-powered analysis
 
 ### 2. File Upload Review
 
@@ -372,9 +372,10 @@ const reviewWorkflow = new StateGraph()
 
 ### Unit Tests
 
-- Components: 90% coverage minimum
-- Services: 95% coverage minimum
-- Utilities: 100% coverage
+- Components: 90% coverage target
+- Services: 95% coverage target
+- Utilities: 100% coverage target
+- Current status: ~53% test pass rate (39/74 tests)
 
 ### Integration Tests
 
@@ -412,7 +413,7 @@ const reviewWorkflow = new StateGraph()
 
 - [GitHub Apps Documentation](https://docs.github.com/en/developers/apps)
 - [LangChain Documentation](https://docs.langchain.com/)
-- [Next.js 15 Documentation](https://nextjs.org/docs)
+- [Next.js 14 Documentation](https://nextjs.org/docs)
 - [Shadcn/ui Components](https://ui.shadcn.com/)
 - Portfolio Style Guide: `STYLE_GUIDE.md`
 - DevelopersOracle Integration: `DevelopersOracle/README.md`
@@ -433,4 +434,4 @@ const reviewWorkflow = new StateGraph()
 - Add loading skeletons for better UX
 - Cache GitHub API responses to reduce rate limit usage
 - Use streaming for large PR reviews
-- Implement WebSocket fallback to polling for older browsers
+- Consider implementing WebSocket support for real-time updates (currently uses async processing)

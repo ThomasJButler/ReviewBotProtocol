@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { toast } from 'react-hot-toast'
+import { useAuth } from '@/contexts/AuthContext'
 
 export interface PullRequest {
   id: number
@@ -38,6 +39,9 @@ export function useGitHubService() {
   const [repositories, setRepositories] = useState<string[]>([])
   const [authors, setAuthors] = useState<string[]>([])
 
+  // Use real authentication from AuthContext
+  const { isAuthenticated, user, login, logout } = useAuth()
+
   const fetchPullRequests = useCallback(async (filters: PRFilters = {}) => {
     setIsLoading(true)
     setError(null)
@@ -51,13 +55,22 @@ export function useGitHubService() {
       const response = await fetch(`/api/github/prs?${params.toString()}`)
 
       if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error(
+            'Authentication required. Please connect your GitHub account.'
+          )
+        }
         throw new Error('Failed to fetch pull requests')
       }
 
       const result = await response.json()
 
       if (!result.success) {
-        throw new Error(result.error || 'Failed to load pull requests')
+        throw new Error(
+          result.metadata?.error ||
+            result.error ||
+            'Failed to load pull requests'
+        )
       }
 
       setPullRequests(result.data)
@@ -88,6 +101,9 @@ export function useGitHubService() {
         })
 
         if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('Authentication required')
+          }
           throw new Error('Failed to fetch PR details')
         }
 
@@ -118,37 +134,15 @@ export function useGitHubService() {
     [fetchPullRequests]
   )
 
-  // Mock authentication status
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [user, setUser] = useState<{ name: string; avatar?: string } | null>(
-    null
-  )
-
-  const signIn = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      // Simulate OAuth flow
-      await new Promise(resolve => setTimeout(resolve, 1000))
-
-      setIsAuthenticated(true)
-      setUser({ name: 'Demo User', avatar: 'https://github.com/github.png' })
-      toast.success('Successfully connected to GitHub!')
-
-      // Auto-fetch PRs after authentication
-      await fetchPullRequests()
-    } catch (err) {
-      toast.error('Failed to connect to GitHub')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [fetchPullRequests])
+  // Use real authentication from AuthContext
+  const signIn = useCallback(() => {
+    login() // Redirects to /api/auth/github
+  }, [login])
 
   const signOut = useCallback(() => {
-    setIsAuthenticated(false)
-    setUser(null)
+    logout()
     setPullRequests([])
-    toast.success('Disconnected from GitHub')
-  }, [])
+  }, [logout])
 
   return {
     // Data
@@ -156,7 +150,9 @@ export function useGitHubService() {
     repositories,
     authors,
     isAuthenticated,
-    user,
+    user: user
+      ? { name: user.name || user.login, avatar: user.avatar_url }
+      : null,
 
     // State
     isLoading,

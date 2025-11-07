@@ -109,3 +109,5 @@ dist/
 *.sqlite
 *.db
 *.db-journal
+CLAUDE.md
+claudetodo.txt

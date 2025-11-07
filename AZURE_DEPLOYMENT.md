@@ -1,10 +1,233 @@
-# 🚀 Azure VM Deployment Guide - Git Review Assistant
+# 🚀 Azure Deployment Guide - Git Review Assistant
 
-Complete guide for deploying the Git Review Assistant to Azure as an **alternative to ngrok** for GitHub webhook integration.
+Complete guide for deploying the Git Review Assistant to Azure with **multiple deployment options**.
+
+---
+
+## 🎯 Deployment Options
+
+This guide covers **three Azure deployment approaches**:
+
+### 1. 🐳 Azure Container Instances (Recommended)
+
+- **Simplest and fastest** - Deploy pre-built Docker containers
+- **Cost:** ~$15-30/month
+- **Time:** 30-60 minutes
+- **Best for:** Quick deployment, testing, cost optimization
+- **See:** [Docker Container Deployment](#docker-container-deployment)
+
+### 2. 🖥️ Azure VM (Traditional)
+
+- **Full control** - Manual VM setup with Nginx, PM2
+- **Cost:** ~$30-70/month
+- **Time:** 2-3 hours
+- **Best for:** Learning infrastructure, custom configuration
+- **See:** [VM Deployment Guide](#vm-deployment-guide) (original guide below)
+
+### 3. ☁️ Azure App Service
+
+- **Managed platform** - PaaS deployment, no server management
+- **Cost:** ~$13+/month
+- **Time:** 1-2 hours
+- **Best for:** Enterprise scenarios, auto-scaling needs
+- **See:** [App Service Deployment](#app-service-deployment)
+
+---
+
+## 🐳 Docker Container Deployment
+
+### Quick Start with Azure CLI
+
+**Prerequisites:**
+
+- Azure CLI installed
+- Docker installed locally
+- GitHub repository with Dockerfiles
+
+#### Step 1: Automated Deployment Script
+
+Use the provided deployment script for one-command deployment:
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/Code-Review-Assistant.git
+cd Code-Review-Assistant
+
+# Set environment variables
+cp .env.example .env
+# Edit .env with your API keys
+
+# Run deployment script
+./deploy-azure.sh
+```
+
+The script will:
+
+1. Create Azure Resource Group
+2. Create Azure Container Registry
+3. Build and push Docker images
+4. Deploy backend container
+5. Deploy frontend container
+6. Output URLs for your deployed services
+
+#### Step 2: Manual Container Deployment
+
+If you prefer manual control:
+
+```bash
+# Login to Azure
+az login
+
+# Create resource group
+az group create \
+  --name git-review-assistant-rg \
+  --location eastus
+
+# Create container registry
+az acr create \
+  --resource-group git-review-assistant-rg \
+  --name gitreviewassistant \
+  --sku Basic \
+  --admin-enabled true
+
+# Get ACR credentials
+az acr credential show --name gitreviewassistant
+
+# Build and push images
+cd backend
+docker build -t gitreviewassistant.azurecr.io/backend:latest .
+
+cd ..
+docker build -t gitreviewassistant.azurecr.io/frontend:latest .
+
+# Login to ACR
+az acr login --name gitreviewassistant
+
+# Push images
+docker push gitreviewassistant.azurecr.io/backend:latest
+docker push gitreviewassistant.azurecr.io/frontend:latest
+
+# Deploy backend container
+az container create \
+  --resource-group git-review-assistant-rg \
+  --name git-review-backend \
+  --image gitreviewassistant.azurecr.io/backend:latest \
+  --registry-login-server gitreviewassistant.azurecr.io \
+  --registry-username [ACR_USERNAME] \
+  --registry-password [ACR_PASSWORD] \
+  --dns-name-label git-review-backend \
+  --ports 8000 \
+  --cpu 1 \
+  --memory 2 \
+  --environment-variables \
+    OPENAI_API_KEY=$OPENAI_API_KEY \
+    LANGCHAIN_API_KEY=$LANGCHAIN_API_KEY \
+    GITHUB_APP_ID=$GITHUB_APP_ID
+
+# Deploy frontend container
+az container create \
+  --resource-group git-review-assistant-rg \
+  --name git-review-frontend \
+  --image gitreviewassistant.azurecr.io/frontend:latest \
+  --registry-login-server gitreviewassistant.azurecr.io \
+  --registry-username [ACR_USERNAME] \
+  --registry-password [ACR_PASSWORD] \
+  --dns-name-label git-review-frontend \
+  --ports 3000 \
+  --cpu 0.5 \
+  --memory 1 \
+  --environment-variables \
+    NEXT_PUBLIC_API_URL=http://git-review-backend.eastus.azurecontainer.io:8000
+
+# Get URLs
+az container show \
+  --resource-group git-review-assistant-rg \
+  --name git-review-backend \
+  --query ipAddress.fqdn
+
+az container show \
+  --resource-group git-review-assistant-rg \
+  --name git-review-frontend \
+  --query ipAddress.fqdn
+```
+
+#### Step 3: GitHub Actions Automation
+
+The repository includes a GitHub Actions workflow for automated deployment:
+
+```yaml
+# .github/workflows/deploy-azure.yml
+# Triggers on push to main branch
+# Automatically builds and deploys containers
+```
+
+**Setup GitHub Actions:**
+
+1. Create Azure service principal:
+
+```bash
+az ad sp create-for-rbac --name "git-review-assistant" \
+  --role contributor \
+  --scopes /subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/git-review-assistant-rg \
+  --sdk-auth
+```
+
+2. Add secrets to GitHub repository:
+   - `AZURE_CREDENTIALS` - Output from above command
+   - `OPENAI_API_KEY`
+   - `LANGCHAIN_API_KEY`
+   - `GITHUB_APP_ID`
+   - `GH_CLIENT_ID`
+   - `GH_CLIENT_SECRET`
+   - `GITHUB_PRIVATE_KEY`
+   - `GITHUB_WEBHOOK_SECRET`
+
+3. Push to main branch - automatic deployment!
+
+### Docker Deployment Resources
+
+- **Deployment Script:** `deploy-azure.sh`
+- **Container Template:** `azure-container-instances.yaml`
+- **GitHub Workflow:** `.github/workflows/deploy-azure.yml`
+- **Parameters File:** `azure-parameters.json`
+
+### Docker Deployment Benefits
+
+- ✅ **Fast deployment** - Minutes vs hours
+- ✅ **Consistent environment** - Same as local development
+- ✅ **Easy updates** - Rebuild and redeploy
+- ✅ **Cost effective** - Pay only for container runtime
+- ✅ **No server management** - Azure handles infrastructure
+- ✅ **Auto-restart** - Containers restart on failure
+- ✅ **Health checks** - Built-in monitoring
+
+### Docker Deployment Costs
+
+**Azure Container Instances Pricing (East US):**
+
+- Backend (1 vCPU, 2 GB RAM): ~$36/month (730 hours)
+- Frontend (0.5 vCPU, 1 GB RAM): ~$14/month (730 hours)
+- **Total: ~$50/month**
+
+**Additional Costs:**
+
+- Azure Container Registry (Basic): $5/month
+- Bandwidth: ~$2-5/month
+- **Grand Total: ~$57-60/month**
+
+Compare to VM deployment: ~$30-70/month + setup time
 
 ---
 
 ## 📋 Table of Contents
+
+### Docker Deployment (Recommended)
+
+- [Docker Container Deployment](#docker-container-deployment)
+- [Container Quick Start](#quick-start-with-azure-cli)
+- [GitHub Actions Automation](#github-actions-automation)
+
+### VM Deployment (Traditional)
 
 1. [Prerequisites](#prerequisites)
 2. [Phase 1: Create Azure VM](#phase-1-create-azure-vm)
@@ -16,6 +239,12 @@ Complete guide for deploying the Git Review Assistant to Azure as an **alternati
 8. [Phase 7: Process Management with PM2](#phase-7-process-management-with-pm2)
 9. [Troubleshooting](#troubleshooting)
 10. [Cost Optimization](#cost-optimization)
+
+---
+
+# VM Deployment Guide
+
+The following sections cover traditional Azure VM deployment. For Docker deployment (recommended), see above.
 
 ---
 

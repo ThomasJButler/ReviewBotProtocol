@@ -44,12 +44,6 @@ const navigation = [
     icon: GitPullRequest,
     description: 'GitHub PR management',
   },
-  {
-    name: 'Reports',
-    href: '/reports',
-    icon: FileText,
-    description: 'Analytics and insights',
-  },
 ]
 
 export default function Navigation() {

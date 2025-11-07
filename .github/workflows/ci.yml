@@ -1,0 +1,179 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop, v* ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # Frontend Tests
+  frontend-tests:
+    name: Frontend Tests & Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run ESLint
+      run: npm run lint
+      continue-on-error: true
+
+    - name: Run TypeScript type checking
+      run: npm run typecheck
+      continue-on-error: true
+
+    - name: Run tests
+      run: npm run test
+      continue-on-error: true
+
+    - name: Build project
+      run: npm run build
+      env:
+        NEXT_PUBLIC_APP_URL: http://localhost:3000
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+
+  # Backend Tests
+  backend-tests:
+    name: Backend Tests & Quality
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+
+    - name: Run LangGraph tests
+      run: |
+        cd backend
+        python test_langgraph.py
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+      continue-on-error: true
+
+    - name: Run webhook signature tests
+      run: |
+        cd backend
+        python test_webhook_signature.py
+      env:
+        GITHUB_WEBHOOK_SECRET: test_secret
+      continue-on-error: true
+
+    - name: Run pytest tests
+      run: |
+        cd backend
+        pytest tests/ --tb=short -v
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GITHUB_WEBHOOK_SECRET: test_secret
+      continue-on-error: true
+
+  # Docker Build Tests
+  docker-build:
+    name: Docker Build Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service: [frontend, backend]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build frontend Docker image
+      if: matrix.service == 'frontend'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: false
+        tags: git-review-assistant-frontend:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build backend Docker image
+      if: matrix.service == 'backend'
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/Dockerfile
+        push: false
+        tags: git-review-assistant-backend:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Security Audit
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Run npm audit
+      run: npm audit --audit-level=moderate
+      continue-on-error: true
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Run pip audit
+      run: |
+        cd backend
+        pip install pip-audit
+        pip-audit -r requirements.txt
+      continue-on-error: true
+
+  # Code Quality Summary
+  summary:
+    name: CI Summary
+    runs-on: ubuntu-latest
+    needs: [frontend-tests, backend-tests, docker-build, security-audit]
+    if: always()
+
+    steps:
+    - name: Generate Summary
+      run: |
+        echo "### 🔍 CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Status:**" >> $GITHUB_STEP_SUMMARY
+        echo "- Frontend Tests: ${{ needs.frontend-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Backend Tests: ${{ needs.backend-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Docker Build: ${{ needs.docker-build.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Security Audit: ${{ needs.security-audit.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY

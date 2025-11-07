@@ -32,7 +32,6 @@ import {
   FileText,
   Plus,
   Minus,
-  Eye,
   MessageSquare,
   GitBranch,
 } from 'lucide-react'
@@ -106,6 +105,11 @@ export default function PullRequestsPage() {
   }, [searchTerm, stateFilter, repoFilter])
 
   const filteredPRs = pullRequests
+
+  // Get unique repositories from fetched PRs
+  const availableRepositories = Array.from(
+    new Set(pullRequests.map(pr => pr.repository))
+  ).sort()
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -181,9 +185,11 @@ export default function PullRequestsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Repositories</SelectItem>
-                  <SelectItem value="frontend-app">frontend-app</SelectItem>
-                  <SelectItem value="backend-api">backend-api</SelectItem>
-                  <SelectItem value="data-processor">data-processor</SelectItem>
+                  {availableRepositories.map(repo => (
+                    <SelectItem key={repo} value={repo}>
+                      {repo}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 
@@ -232,7 +238,10 @@ export default function PullRequestsPage() {
             {filteredPRs.map(pr => (
               <Card
                 key={pr.id}
-                className="glass-effect hover:border-matrix-green/30 transition-colors"
+                className="glass-effect hover:border-matrix-green/30 transition-colors cursor-pointer"
+                onClick={() => {
+                  window.location.href = `/review?pr=${pr.number}&repo=${pr.repository}`
+                }}
               >
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between mb-4">
@@ -288,10 +297,14 @@ export default function PullRequestsPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={e => {
+                          e.stopPropagation()
+                          window.open(pr.url, '_blank')
+                        }}
+                      >
                         <ExternalLink className="h-4 w-4" />
                       </Button>
                     </div>

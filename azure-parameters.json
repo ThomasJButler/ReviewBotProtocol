@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "openaiApiKey": {
+      "value": "YOUR_OPENAI_API_KEY"
+    },
+    "langchainApiKey": {
+      "value": "YOUR_LANGCHAIN_API_KEY"
+    },
+    "githubAppId": {
+      "value": "YOUR_GITHUB_APP_ID"
+    },
+    "githubClientId": {
+      "value": "YOUR_GITHUB_CLIENT_ID"
+    },
+    "githubClientSecret": {
+      "value": "YOUR_GITHUB_CLIENT_SECRET"
+    },
+    "githubPrivateKey": {
+      "value": "YOUR_GITHUB_PRIVATE_KEY_BASE64"
+    },
+    "githubWebhookSecret": {
+      "value": "YOUR_GITHUB_WEBHOOK_SECRET"
+    },
+    "acrUsername": {
+      "value": "gitreviewassistant"
+    },
+    "acrPassword": {
+      "value": "YOUR_ACR_PASSWORD"
+    },
+    "location": {
+      "value": "eastus"
+    }
+  }
+}

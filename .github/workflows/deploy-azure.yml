@@ -1,0 +1,191 @@
+name: Deploy to Azure Container Instances
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  AZURE_RESOURCE_GROUP: git-review-assistant-rg
+  AZURE_LOCATION: eastus
+  ACR_NAME: gitreviewassistant
+  BACKEND_IMAGE: backend
+  FRONTEND_IMAGE: frontend
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create Resource Group
+      run: |
+        az group create \
+          --name ${{ env.AZURE_RESOURCE_GROUP }} \
+          --location ${{ env.AZURE_LOCATION }}
+
+    - name: Create Azure Container Registry
+      run: |
+        az acr create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name ${{ env.ACR_NAME }} \
+          --sku Basic \
+          --admin-enabled true \
+          || echo "ACR already exists"
+
+    - name: Get ACR Credentials
+      id: acr-creds
+      run: |
+        ACR_USERNAME=$(az acr credential show --name ${{ env.ACR_NAME }} --query username --output tsv)
+        ACR_PASSWORD=$(az acr credential show --name ${{ env.ACR_NAME }} --query passwords[0].value --output tsv)
+        echo "::add-mask::$ACR_PASSWORD"
+        echo "username=$ACR_USERNAME" >> $GITHUB_OUTPUT
+        echo "password=$ACR_PASSWORD" >> $GITHUB_OUTPUT
+
+    - name: Login to ACR
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.ACR_NAME }}.azurecr.io
+        username: ${{ steps.acr-creds.outputs.username }}
+        password: ${{ steps.acr-creds.outputs.password }}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/Dockerfile
+        push: true
+        tags: |
+          ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE }}:latest
+          ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+        cache-from: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE }}:buildcache
+        cache-to: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE }}:buildcache,mode=max
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: |
+          ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE }}:latest
+          ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+        cache-from: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE }}:buildcache
+        cache-to: type=registry,ref=${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE }}:buildcache,mode=max
+
+    - name: Deploy Backend Container
+      run: |
+        # Generate unique DNS label
+        DNS_SUFFIX=$(date +%s)
+
+        # Delete existing container if it exists
+        az container delete \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name git-review-backend \
+          --yes \
+          || echo "No existing backend container"
+
+        # Create new container
+        az container create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name git-review-backend \
+          --image ${{ env.ACR_NAME }}.azurecr.io/${{ env.BACKEND_IMAGE }}:latest \
+          --registry-login-server ${{ env.ACR_NAME }}.azurecr.io \
+          --registry-username ${{ steps.acr-creds.outputs.username }} \
+          --registry-password ${{ steps.acr-creds.outputs.password }} \
+          --dns-name-label git-review-backend-${DNS_SUFFIX} \
+          --ports 8000 \
+          --cpu 1 \
+          --memory 2 \
+          --environment-variables \
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }} \
+            LANGCHAIN_PROJECT=git-review-assistant \
+            LANGCHAIN_TRACING_V2=true \
+            GITHUB_APP_ID=${{ secrets.GITHUB_APP_ID }} \
+            GITHUB_CLIENT_ID=${{ secrets.GH_CLIENT_ID }} \
+            GITHUB_CLIENT_SECRET=${{ secrets.GH_CLIENT_SECRET }} \
+            GITHUB_PRIVATE_KEY="${{ secrets.GITHUB_PRIVATE_KEY }}" \
+            GITHUB_WEBHOOK_SECRET=${{ secrets.GITHUB_WEBHOOK_SECRET }} \
+            ENVIRONMENT=production \
+            USE_MOCK_REVIEWER=false
+
+        # Get backend FQDN
+        BACKEND_FQDN=$(az container show \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name git-review-backend \
+          --query ipAddress.fqdn \
+          --output tsv)
+
+        echo "BACKEND_FQDN=$BACKEND_FQDN" >> $GITHUB_ENV
+        echo "Backend deployed at: https://${BACKEND_FQDN}:8000"
+
+    - name: Deploy Frontend Container
+      run: |
+        # Generate unique DNS label
+        DNS_SUFFIX=$(date +%s)
+
+        # Delete existing container if it exists
+        az container delete \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name git-review-frontend \
+          --yes \
+          || echo "No existing frontend container"
+
+        # Create new container
+        az container create \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name git-review-frontend \
+          --image ${{ env.ACR_NAME }}.azurecr.io/${{ env.FRONTEND_IMAGE }}:latest \
+          --registry-login-server ${{ env.ACR_NAME }}.azurecr.io \
+          --registry-username ${{ steps.acr-creds.outputs.username }} \
+          --registry-password ${{ steps.acr-creds.outputs.password }} \
+          --dns-name-label git-review-frontend-${DNS_SUFFIX} \
+          --ports 3000 \
+          --cpu 0.5 \
+          --memory 1 \
+          --environment-variables \
+            NEXT_PUBLIC_APP_URL=https://git-review-frontend-${DNS_SUFFIX}.${{ env.AZURE_LOCATION }}.azurecontainer.io \
+            NEXT_PUBLIC_API_URL=https://${{ env.BACKEND_FQDN }}:8000 \
+            GITHUB_CLIENT_ID=${{ secrets.GH_CLIENT_ID }} \
+            GITHUB_CLIENT_SECRET=${{ secrets.GH_CLIENT_SECRET }} \
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+
+        # Get frontend FQDN
+        FRONTEND_FQDN=$(az container show \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --name git-review-frontend \
+          --query ipAddress.fqdn \
+          --output tsv)
+
+        echo "Frontend deployed at: https://${FRONTEND_FQDN}:3000"
+
+    - name: Deployment Summary
+      run: |
+        echo "### 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Backend URL:** https://${{ env.BACKEND_FQDN }}:8000" >> $GITHUB_STEP_SUMMARY
+        echo "**Frontend URL:** https://$(az container show --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name git-review-frontend --query ipAddress.fqdn --output tsv):3000" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ⚠️ Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "1. Update GitHub App webhook URL" >> $GITHUB_STEP_SUMMARY
+        echo "2. Update GitHub App callback URL" >> $GITHUB_STEP_SUMMARY
+        echo "3. Test the deployment" >> $GITHUB_STEP_SUMMARY
+
+    - name: Logout from Azure
+      if: always()
+      run: |
+        az logout
