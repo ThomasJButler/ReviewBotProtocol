@@ -844,7 +844,7 @@ class ReviewWorkflow:
     def _format_main_pr_comment(self, state: ReviewWorkflowState) -> str:
         """Format the main PR comment."""
         comment = f"""
-# 🤖 AI Code Review Results
+# 🤖 ReviewBot Protocol Results
 
 {state.get('pr_summary', 'No summary available')}
 

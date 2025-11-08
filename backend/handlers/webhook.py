@@ -398,7 +398,7 @@ async def post_initial_status_check(
             repo_full_name,
             commit_sha,
             state="pending",
-            description="AI code review in progress...",
+            description="ReviewBot Protocol analysis in progress...",
             context="git-review-assistant/review"
         )
 

@@ -1,6 +1,6 @@
-# AI Code Review Assistant - UI Components
+# ReviewBot Protocol - UI Components
 
-This directory contains all the UI components for the AI Code Review Assistant, built with a cyber/matrix aesthetic and modern React patterns.
+This directory contains all the UI components for the ReviewBot Protocol, built with a cyber/matrix aesthetic and modern React patterns.
 
 ## 🎨 Design System
 
@@ -137,7 +137,6 @@ Monaco Editor with matrix theme and advanced features:
 
 ```tsx
 import { CodeEditor } from '@/components/review'
-
 ;<CodeEditor
   value={code}
   onChange={setCode}
@@ -165,7 +164,6 @@ Drag & drop file upload with progress tracking:
 
 ```tsx
 import { FileUpload } from '@/components/review'
-
 ;<FileUpload
   onFilesSelected={handleFiles}
   selectedFiles={files}
@@ -193,7 +191,6 @@ GitHub pull request selection interface:
 
 ```tsx
 import { PRSelector } from '@/components/review'
-
 ;<PRSelector
   onPRSelected={handlePRSelection}
   selectedPR={currentPR}
@@ -218,7 +215,6 @@ Comprehensive results display with categorized findings:
 
 ```tsx
 import { ReviewResults } from '@/components/review'
-
 ;<ReviewResults
   results={reviewData}
   isLoading={false}
@@ -245,7 +241,6 @@ Navigation header with GitHub integration:
 
 ```tsx
 import { Header } from '@/components/layout'
-
 ;<Header user={currentUser} onSignIn={handleSignIn} onSignOut={handleSignOut} />
 ```
 
@@ -285,7 +280,6 @@ Complete review interface combining all components:
 
 ```tsx
 import { ReviewInterface } from '@/components/review'
-
 ;<ReviewInterface
   onReviewComplete={handleResults}
   maxFiles={10}

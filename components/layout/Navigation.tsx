@@ -64,8 +64,10 @@ export default function Navigation() {
               <div className="absolute -top-1 -right-1 h-3 w-3 bg-matrix-green rounded-full animate-pulse"></div>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">AI Code Review</h1>
-              <p className="text-xs text-gray-400">Powered by AI</p>
+              <h1 className="text-xl font-bold text-white">
+                ReviewBot Protocol
+              </h1>
+              <p className="text-xs text-gray-400">AI-Powered Code Analysis</p>
             </div>
           </Link>
 

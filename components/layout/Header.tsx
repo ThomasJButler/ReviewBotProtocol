@@ -112,9 +112,11 @@ export default function Header({
               </div>
               <div className="hidden sm:block">
                 <h1 className="text-xl font-bold text-white group-hover:text-matrix-green transition-colors">
-                  AI Code Review
+                  ReviewBot Protocol
                 </h1>
-                <p className="text-xs text-gray-400 -mt-1">Powered by AI</p>
+                <p className="text-xs text-gray-400 -mt-1">
+                  AI-Powered Code Analysis
+                </p>
               </div>
             </Link>
 

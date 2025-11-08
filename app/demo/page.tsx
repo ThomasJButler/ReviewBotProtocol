@@ -192,8 +192,8 @@ export default function UserProfile({ id, name, email }: UserProps) {
             🎨 Component Showcase
           </h1>
           <p className="text-xl text-gray-400 max-w-3xl mx-auto">
-            A comprehensive showcase of all UI components built for the AI Code
-            Review Assistant with cyber/matrix aesthetic
+            A comprehensive showcase of all UI components built for the
+            ReviewBot Protocol with cyber/matrix aesthetic
           </p>
         </div>
 
@@ -449,7 +449,7 @@ export default function UserProfile({ id, name, email }: UserProps) {
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>AI Code Review Settings</DialogTitle>
+                    <DialogTitle>ReviewBot Protocol Settings</DialogTitle>
                     <DialogDescription>
                       Configure your code review preferences and analysis
                       options.

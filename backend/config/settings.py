@@ -13,8 +13,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "ReviewBot Protocol API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    SECRET_KEY: str
+    SECRET_KEY: str = "dev-secret-key-change-in-production"  # Default for development
     ALLOWED_ORIGINS: str = "http://localhost:3000,https://localhost:3000"
+    BACKEND_URL: str = "http://localhost:8000"
 
     # Server Configuration
     HOST: str = "0.0.0.0"
@@ -27,12 +28,16 @@ class Settings(BaseSettings):
     GITHUB_WEBHOOK_SECRET: str
     GITHUB_CLIENT_ID: Optional[str] = None
     GITHUB_CLIENT_SECRET: Optional[str] = None
+    WEBHOOK_ENDPOINT_SECRET: Optional[str] = None  # For webhook verification
 
     # OpenAI Configuration
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_TEMPERATURE: float = 0.1
     OPENAI_MAX_TOKENS: int = 4000
+
+    # Anthropic Configuration (Optional)
+    ANTHROPIC_API_KEY: Optional[str] = None
 
     # LangChain Configuration (Course Requirements)
     LANGCHAIN_API_KEY: Optional[str] = None

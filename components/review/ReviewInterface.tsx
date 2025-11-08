@@ -157,8 +157,10 @@ export default function ReviewInterface({
             <Sparkles className="h-6 w-6 text-matrix-cyan absolute -top-1 -right-1 animate-pulse" />
           </div>
           <div>
-            <h1 className="text-4xl font-bold text-white">AI Code Review</h1>
-            <p className="text-gray-400">Powered by advanced AI analysis</p>
+            <h1 className="text-4xl font-bold text-white">
+              ReviewBot Protocol
+            </h1>
+            <p className="text-gray-400">AI-Powered Code Analysis</p>
           </div>
         </div>
         <p className="text-lg text-gray-300 max-w-2xl mx-auto">
