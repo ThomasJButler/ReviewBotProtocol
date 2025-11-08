@@ -2,6 +2,8 @@
 
 > **Portfolio Project**: AI-powered GitHub PR reviews with a custom dashboard.
 
+<img width="1272" height="895" alt="image" src="https://github.com/user-attachments/assets/c5f6f9cb-7f4f-44b5-8a70-a0bea3e25a7e" />
+
 ## What Is This?
 
 ReviewBot Protocol is a full-stack AI code review system that automatically analyses GitHub pull requests and provides intelligent feedback. Think of it as understanding how tools like CodeRabbit work by building one from scratch.
