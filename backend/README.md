@@ -1,6 +1,6 @@
-# Git Review Assistant Backend
+# ReviewBot Protocol Backend
 
-FastAPI backend for the Git Review Assistant - an AI-powered code review system with GitHub integration.
+FastAPI backend for ReviewBot Protocol - an AI-powered code review system with GitHub integration.
 
 ## Features
 

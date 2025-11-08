@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatTimeAgo, getStateIcon } from '@/lib/utils'
+import { formatTimeAgo } from '@/lib/utils'
 import { useGitHubService, type PullRequest } from '@/hooks/useGitHubService'
 import {
   GitPullRequest,
@@ -311,7 +311,7 @@ export default function PRSelector({
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {pr.labels.slice(0, 2).map((label, index) => (
+                    {pr.labels?.slice(0, 2).map((label, index) => (
                       <Badge key={index} variant="outline" className="text-xs">
                         {label}
                       </Badge>

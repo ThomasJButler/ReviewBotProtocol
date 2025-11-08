@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 import json
 import time
+# Ensure config is imported to load settings
 from typing import Dict, Any
 
 from config.logging import get_logger, security_logger, review_logger
@@ -397,7 +398,7 @@ async def post_initial_status_check(
             repo_full_name,
             commit_sha,
             state="pending",
-            description="AI code review in progress...",
+            description="ReviewBot Protocol analysis in progress...",
             context="git-review-assistant/review"
         )
 

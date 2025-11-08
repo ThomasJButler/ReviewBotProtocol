@@ -116,7 +116,7 @@ export default function Footer({ className, minimal = false }: FooterProps) {
             <div className="flex items-center gap-3">
               <Bot className="h-6 w-6 text-matrix-green" />
               <span className="text-gray-400 text-sm">
-                © {currentYear} AI Code Review. Made with{' '}
+                © {currentYear} ReviewBot Protocol. Made with{' '}
                 <Heart className="h-4 w-4 text-red-500 inline mx-1" />
                 for developers.
               </span>
@@ -157,8 +157,12 @@ export default function Footer({ className, minimal = false }: FooterProps) {
                 <Sparkles className="h-4 w-4 text-matrix-cyan absolute -top-1 -right-1" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-white">AI Code Review</h3>
-                <p className="text-xs text-gray-400">Powered by Advanced AI</p>
+                <h3 className="text-xl font-bold text-white">
+                  ReviewBot Protocol
+                </h3>
+                <p className="text-xs text-gray-400">
+                  AI-Powered Code Analysis
+                </p>
               </div>
             </div>
 
@@ -329,7 +333,9 @@ export default function Footer({ className, minimal = false }: FooterProps) {
         <div className="container mx-auto px-4 py-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-4 text-sm text-gray-400">
-              <span>© {currentYear} AI Code Review. All rights reserved.</span>
+              <span>
+                © {currentYear} ReviewBot Protocol. All rights reserved.
+              </span>
               <span className="hidden sm:inline">•</span>
               <span className="flex items-center gap-1">
                 Made with <Heart className="h-4 w-4 text-red-500" /> and{' '}

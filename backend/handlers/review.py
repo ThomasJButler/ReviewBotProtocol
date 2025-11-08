@@ -10,7 +10,8 @@ from config.logging import get_logger, review_logger
 from config.settings import settings
 from models.review import (
     ManualReviewRequest, FileReviewRequest, PRReviewRequest,
-    ReviewResponse, ReviewResultResponse, ReviewListResponse, ReviewStatsResponse
+    ReviewResponse, ReviewResultResponse, ReviewListResponse, ReviewStatsResponse,
+    ReviewHistoryResponse, ReviewHistoryItem, UserStatsResponse, QueueStatusResponse
 )
 from models.api import APIResponse, APIStatus, PaginationMeta
 from models.github import PRAnalysisRequest
@@ -292,19 +293,28 @@ async def list_reviews(
                 offset=offset
             )
 
-        # Convert to response format
+        # Convert to response format with proper field mapping
         review_dicts = []
         for review in reviews:
+            # Serialize datetime fields properly
+            created_at = review.created_at if isinstance(review.created_at, datetime) else datetime.fromisoformat(str(review.created_at))
+            completed_at = review.completed_at if review.completed_at and isinstance(review.completed_at, datetime) else None
+            if completed_at is None and review.completed_at:
+                try:
+                    completed_at = datetime.fromisoformat(str(review.completed_at))
+                except:
+                    completed_at = None
+
             review_dicts.append({
                 "id": str(review.id),
                 "type": review.type,
                 "status": review.status,
                 "repository": review.repository,
                 "pr_number": review.pr_number,
-                "overall_score": review.overall_score,
-                "total_issues": review.total_issues,
-                "created_at": review.created_at,
-                "completed_at": review.completed_at,
+                "overall_score": review.overall_score if review.overall_score is not None else 0.0,
+                "total_issues": review.total_issues if review.total_issues is not None else 0,
+                "created_at": created_at.isoformat() if created_at else datetime.utcnow().isoformat(),
+                "completed_at": completed_at.isoformat() if completed_at else None,
                 "processing_time": review.processing_time
             })
 
@@ -313,23 +323,14 @@ async def list_reviews(
         has_next = len(reviews) == per_page
         has_prev = page > 1
 
-        pagination = PaginationMeta(
-            page=page,
-            per_page=per_page,
-            total=total_count,
-            pages=(total_count + per_page - 1) // per_page,
-            has_next=has_next,
-            has_prev=has_prev
-        )
-
-        return ReviewListResponse(
-            reviews=review_dicts,
-            total=total_count,
-            page=page,
-            per_page=per_page,
-            has_next=has_next,
-            has_prev=has_prev
-        )
+        return {
+            "reviews": review_dicts,
+            "total": total_count,
+            "page": page,
+            "per_page": per_page,
+            "has_next": has_next,
+            "has_prev": has_prev
+        }
 
     except Exception as e:
         logger.error(f"Failed to list reviews: {str(e)}")
@@ -384,7 +385,7 @@ async def get_review_statistics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@review_router.get("/history")
+@review_router.get("/history", response_model=ReviewHistoryResponse)
 async def get_review_history(
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     repository: Optional[str] = Query(None, description="Filter by repository"),
@@ -442,36 +443,42 @@ async def get_review_history(
         # Format reviews for response
         review_history = []
         for review in reviews:
-            review_history.append({
-                "id": str(review.id),
-                "type": review.type,
-                "status": review.status,
-                "repository": review.repository,
-                "pr_number": review.pr_number,
-                "overall_score": review.overall_score,
-                "letter_grade": review.metrics.get("letter_grade") if review.metrics else None,
-                "total_issues": review.total_issues,
-                "security_issues": review.security_issues_count,
-                "performance_issues": review.performance_issues_count,
-                "quality_issues": review.quality_issues_count,
-                "created_at": review.created_at,
-                "processing_time": review.processing_time,
-                "ai_model_used": review.ai_model_used,
-                "code_suggestions": review.metrics.get("code_suggestions", []) if review.metrics else [],
-                "priority_fixes": review.metrics.get("priority_fixes", []) if review.metrics else [],
-            })
+            # Serialize datetime properly
+            created_at = review.created_at if isinstance(review.created_at, datetime) else datetime.fromisoformat(str(review.created_at))
 
-        return {
-            "reviews": review_history,
-            "pagination": {
+            # Handle metrics field (could be dict or JSON string)
+            metrics = review.metrics if isinstance(review.metrics, dict) else {}
+
+            review_history.append(ReviewHistoryItem(
+                id=str(review.id),
+                type=review.type,
+                status=review.status,
+                repository=review.repository,
+                pr_number=review.pr_number,
+                overall_score=review.overall_score,
+                letter_grade=metrics.get("letter_grade") if metrics else None,
+                total_issues=review.total_issues if review.total_issues is not None else 0,
+                security_issues=review.security_issues_count if hasattr(review, 'security_issues_count') else 0,
+                performance_issues=review.performance_issues_count if hasattr(review, 'performance_issues_count') else 0,
+                quality_issues=review.quality_issues_count if hasattr(review, 'quality_issues_count') else 0,
+                created_at=created_at,
+                processing_time=review.processing_time,
+                ai_model_used=review.ai_model_used,
+                code_suggestions=metrics.get("code_suggestions", []) if metrics else [],
+                priority_fixes=metrics.get("priority_fixes", []) if metrics else []
+            ))
+
+        return ReviewHistoryResponse(
+            reviews=review_history,
+            pagination={
                 "total": total_count,
                 "page": page,
                 "per_page": per_page,
-                "pages": (total_count + per_page - 1) // per_page,
+                "pages": (total_count + per_page - 1) // per_page if total_count > 0 else 0,
                 "has_next": (page * per_page) < total_count,
                 "has_prev": page > 1
             },
-            "filters_applied": {
+            filters_applied={
                 "user_id": user_id,
                 "repository": repository,
                 "status": status,
@@ -479,14 +486,14 @@ async def get_review_history(
                 "max_score": max_score,
                 "days": days
             }
-        }
+        )
 
     except Exception as e:
         logger.error(f"Failed to get review history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@review_router.get("/stats/user")
+@review_router.get("/stats/user", response_model=UserStatsResponse)
 async def get_user_statistics(
     user_id: str = Query(..., description="User ID"),
     days: int = Query(30, ge=1, le=365, description="Days to look back"),
@@ -510,16 +517,19 @@ async def get_user_statistics(
         )
 
         if not user_reviews:
-            return {
-                "user_id": user_id,
-                "total_reviews": 0,
-                "average_score": 0,
-                "total_issues_found": 0,
-                "improvement_trend": 0,
-                "top_issues": [],
-                "repositories_reviewed": [],
-                "review_frequency": "No reviews yet"
-            }
+            return UserStatsResponse(
+                user_id=user_id,
+                total_reviews=0,
+                average_score=0.0,
+                total_issues_found=0,
+                improvement_trend=0.0,
+                top_issues=[],
+                repositories_reviewed=[],
+                review_frequency="No reviews yet",
+                best_review=0.0,
+                worst_review=0.0,
+                recent_activity={"last_7_days": 0, "last_30_days": 0}
+            )
 
         # Calculate statistics
         total_reviews = len(user_reviews)
@@ -555,25 +565,25 @@ async def get_user_statistics(
         else:
             review_frequency = "No reviews"
 
-        return {
-            "user_id": user_id,
-            "total_reviews": total_reviews,
-            "average_score": round(average_score, 2),
-            "total_issues_found": total_issues,
-            "improvement_trend": round(improvement_trend, 2),
-            "top_issues": [
+        return UserStatsResponse(
+            user_id=user_id,
+            total_reviews=total_reviews,
+            average_score=round(average_score, 2),
+            total_issues_found=total_issues,
+            improvement_trend=round(improvement_trend, 2),
+            top_issues=[
                 {"category": k, "count": v}
                 for k, v in sorted(issue_counts.items(), key=lambda x: x[1], reverse=True)
             ],
-            "repositories_reviewed": repositories,
-            "review_frequency": review_frequency,
-            "best_review": max(user_reviews, key=lambda r: r.overall_score).overall_score if user_reviews else 0,
-            "worst_review": min(user_reviews, key=lambda r: r.overall_score).overall_score if user_reviews else 0,
-            "recent_activity": {
+            repositories_reviewed=repositories,
+            review_frequency=review_frequency,
+            best_review=max(user_reviews, key=lambda r: r.overall_score).overall_score if user_reviews else 0.0,
+            worst_review=min(user_reviews, key=lambda r: r.overall_score).overall_score if user_reviews else 0.0,
+            recent_activity={
                 "last_7_days": sum(1 for r in user_reviews if (end_date - r.created_at).days <= 7),
                 "last_30_days": sum(1 for r in user_reviews if (end_date - r.created_at).days <= 30)
             }
-        }
+        )
 
     except Exception as e:
         logger.error(f"Failed to get user statistics: {str(e)}")
@@ -866,16 +876,16 @@ async def review_code_direct(
         raise HTTPException(status_code=500, detail=f"Review failed: {str(e)}")
 
 
-@review_router.get("/queue/status")
+@review_router.get("/queue/status", response_model=QueueStatusResponse)
 async def get_queue_status():
     """Get current queue status and statistics."""
     try:
         stats = await queue_processor.get_queue_stats()
-        return {
-            "queue_stats": stats,
-            "worker_status": "running" if queue_processor.is_running else "stopped",
-            "timestamp": get_utc_timestamp()
-        }
+        return QueueStatusResponse(
+            queue_stats=stats,
+            worker_status="running" if queue_processor.is_running else "stopped",
+            timestamp=get_utc_timestamp()
+        )
 
     except Exception as e:
         logger.error(f"Failed to get queue status: {str(e)}")

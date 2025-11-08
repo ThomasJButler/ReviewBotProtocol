@@ -18,7 +18,6 @@ import {
   Bot,
   Zap,
   Shield,
-  Settings,
   User,
   LogOut,
   Menu,
@@ -78,12 +77,6 @@ export default function Header({
       icon: Github,
       current: pathname === '/pull-requests',
     },
-    {
-      name: 'Reports',
-      href: '/reports',
-      icon: FileText,
-      current: pathname === '/reports',
-    },
   ]
 
   // Close mobile menu when route changes
@@ -119,9 +112,11 @@ export default function Header({
               </div>
               <div className="hidden sm:block">
                 <h1 className="text-xl font-bold text-white group-hover:text-matrix-green transition-colors">
-                  AI Code Review
+                  ReviewBot Protocol
                 </h1>
-                <p className="text-xs text-gray-400 -mt-1">Powered by AI</p>
+                <p className="text-xs text-gray-400 -mt-1">
+                  AI-Powered Code Analysis
+                </p>
               </div>
             </Link>
 
@@ -215,15 +210,6 @@ export default function Header({
                     </div>
 
                     <div className="p-2">
-                      <Link
-                        href="/settings"
-                        className="flex items-center gap-2 px-3 py-2 rounded-md text-sm text-gray-300 hover:text-white hover:bg-white/5 transition-colors"
-                        onClick={() => setIsUserMenuOpen(false)}
-                      >
-                        <Settings className="h-4 w-4" />
-                        Settings
-                      </Link>
-
                       <a
                         href={user.githubUrl}
                         target="_blank"

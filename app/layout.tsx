@@ -9,14 +9,55 @@ import { AuthProvider } from '@/contexts/AuthContext'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'AI Code Review Assistant',
-  description: 'AI-powered code review system with GitHub integration',
-  keywords: ['AI', 'code review', 'GitHub', 'security', 'development'],
+  title: 'ReviewBot Protocol',
+  description:
+    'AI-powered code review protocol with automated PR analysis and security scanning',
+  keywords: [
+    'AI',
+    'code review',
+    'GitHub',
+    'security',
+    'development',
+    'ReviewBot',
+    'protocol',
+  ],
   authors: [{ name: 'Tom Butler' }],
+  icons: {
+    icon: [
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-64x64.png', sizes: '64x64', type: 'image/png' },
+    ],
+    shortcut: '/favicon-32x32.png',
+    apple: '/favicon-256x256.png',
+    other: [
+      {
+        rel: 'icon',
+        type: 'image/svg+xml',
+        url: '/favicon.svg',
+      },
+    ],
+  },
   openGraph: {
-    title: 'AI Code Review Assistant',
-    description: 'AI-powered code review system with GitHub integration',
+    title: 'ReviewBot Protocol',
+    description:
+      'AI-powered code review protocol with automated PR analysis and security scanning',
     type: 'website',
+    images: [
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'ReviewBot Protocol - AI-Powered Code Review',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'ReviewBot Protocol',
+    description:
+      'AI-powered code review protocol with automated PR analysis and security scanning',
+    images: ['/twitter-card.png'],
   },
 }
 

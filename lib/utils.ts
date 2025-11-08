@@ -57,79 +57,23 @@ export function formatTimeAgo(date: string | Date): string {
 }
 
 export function getStateIcon(state: string) {
+  // Returns color class instead of emoji for consistent styling
   switch (state.toLowerCase()) {
     case 'open':
-      return '🟢'
+      return 'text-green-500'
     case 'closed':
-      return '🔴'
+      return 'text-red-500'
     case 'merged':
-      return '🟣'
+      return 'text-purple-500'
     case 'draft':
-      return '⚪'
+      return 'text-gray-400'
     default:
-      return '⚫'
+      return 'text-gray-500'
   }
 }
 
-export function getFileInfo(file: File) {
-  const extension = file.name.split('.').pop()?.toLowerCase() || ''
-
-  const fileTypes: Record<
-    string,
-    { icon: string; color: string; label: string }
-  > = {
-    // JavaScript & TypeScript
-    js: { icon: '📄', color: 'text-yellow-400', label: 'JavaScript' },
-    jsx: { icon: '⚛️', color: 'text-blue-400', label: 'React JSX' },
-    ts: { icon: '📘', color: 'text-blue-600', label: 'TypeScript' },
-    tsx: { icon: '⚛️', color: 'text-blue-600', label: 'React TSX' },
-
-    // Web Technologies
-    html: { icon: '🌐', color: 'text-orange-500', label: 'HTML' },
-    css: { icon: '🎨', color: 'text-blue-500', label: 'CSS' },
-    scss: { icon: '🎨', color: 'text-pink-500', label: 'SCSS' },
-    sass: { icon: '🎨', color: 'text-pink-500', label: 'Sass' },
-    less: { icon: '🎨', color: 'text-blue-600', label: 'Less' },
-
-    // Backend Languages
-    py: { icon: '🐍', color: 'text-green-500', label: 'Python' },
-    java: { icon: '☕', color: 'text-red-600', label: 'Java' },
-    cs: { icon: '🔷', color: 'text-purple-600', label: 'C#' },
-    cpp: { icon: '⚙️', color: 'text-blue-700', label: 'C++' },
-    c: { icon: '⚙️', color: 'text-blue-600', label: 'C' },
-    go: { icon: '🐹', color: 'text-cyan-500', label: 'Go' },
-    rs: { icon: '🦀', color: 'text-orange-600', label: 'Rust' },
-    php: { icon: '🐘', color: 'text-purple-500', label: 'PHP' },
-    rb: { icon: '💎', color: 'text-red-500', label: 'Ruby' },
-    swift: { icon: '🍎', color: 'text-orange-500', label: 'Swift' },
-    kt: { icon: '🎯', color: 'text-purple-700', label: 'Kotlin' },
-    scala: { icon: '⚡', color: 'text-red-700', label: 'Scala' },
-
-    // Data & Config
-    json: { icon: '📋', color: 'text-yellow-600', label: 'JSON' },
-    xml: { icon: '📄', color: 'text-orange-600', label: 'XML' },
-    yaml: { icon: '📝', color: 'text-purple-400', label: 'YAML' },
-    yml: { icon: '📝', color: 'text-purple-400', label: 'YAML' },
-    toml: { icon: '⚙️', color: 'text-gray-600', label: 'TOML' },
-    ini: { icon: '⚙️', color: 'text-gray-500', label: 'INI' },
-
-    // Documentation
-    md: { icon: '📖', color: 'text-blue-300', label: 'Markdown' },
-    txt: { icon: '📄', color: 'text-gray-400', label: 'Text' },
-
-    // Database
-    sql: { icon: '🗃️', color: 'text-blue-800', label: 'SQL' },
-
-    // Shell Scripts
-    sh: { icon: '💻', color: 'text-green-400', label: 'Shell Script' },
-    bash: { icon: '💻', color: 'text-green-500', label: 'Bash Script' },
-    ps1: { icon: '💻', color: 'text-blue-400', label: 'PowerShell' },
-
-    // Default
-    default: { icon: '📄', color: 'text-gray-400', label: 'File' },
-  }
-
-  return fileTypes[extension] || fileTypes.default
+export function getStateLabel(state: string) {
+  return state.toUpperCase()
 }
 
 export function calculateComplexity(code: string): number {

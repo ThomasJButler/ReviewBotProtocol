@@ -1,4 +1,4 @@
-"""Configuration settings for the Git Review Assistant backend."""
+"""Configuration settings for the ReviewBot Protocol backend."""
 
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
@@ -10,11 +10,12 @@ class Settings(BaseSettings):
     """Application settings with environment variable support."""
 
     # App Configuration
-    APP_NAME: str = "Git Review Assistant API"
+    APP_NAME: str = "ReviewBot Protocol API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
-    SECRET_KEY: str
+    SECRET_KEY: str = "dev-secret-key-change-in-production"  # Default for development
     ALLOWED_ORIGINS: str = "http://localhost:3000,https://localhost:3000"
+    BACKEND_URL: str = "http://localhost:8000"
 
     # Server Configuration
     HOST: str = "0.0.0.0"
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     GITHUB_WEBHOOK_SECRET: str
     GITHUB_CLIENT_ID: Optional[str] = None
     GITHUB_CLIENT_SECRET: Optional[str] = None
+    WEBHOOK_ENDPOINT_SECRET: Optional[str] = None  # For webhook verification
 
     # OpenAI Configuration
     OPENAI_API_KEY: str
@@ -34,9 +36,12 @@ class Settings(BaseSettings):
     OPENAI_TEMPERATURE: float = 0.1
     OPENAI_MAX_TOKENS: int = 4000
 
+    # Anthropic Configuration (Optional)
+    ANTHROPIC_API_KEY: Optional[str] = None
+
     # LangChain Configuration (Course Requirements)
     LANGCHAIN_API_KEY: Optional[str] = None
-    LANGCHAIN_PROJECT: str = "git-review-assistant"
+    LANGCHAIN_PROJECT: str = "reviewbot-protocol"
     LANGCHAIN_TRACING_V2: bool = True
 
     # Database Configuration

@@ -351,7 +351,7 @@ class QueueProcessor:
 
         # Initialize clients
         github_client = GitHubClient(installation_id)
-        ai_reviewer = AIReviewer()
+        ai_reviewer = AIReviewer(use_langgraph=True)  # Enable LangGraph workflow for course compliance
 
         # Get PR information
         pr_info = await github_client.get_pr_info(repo_full_name, pr_number)
@@ -364,8 +364,13 @@ class QueueProcessor:
             logger.warning(f"No files found for PR #{pr_number}")
             return
 
-        # Run AI review
-        review_results = await ai_reviewer.review_pr_files(pr_files)
+        # Run AI review with LangGraph workflow support
+        review_results = await ai_reviewer.review_pr_files(
+            files=pr_files,
+            pr_number=pr_number,
+            pr_title=pr_info.get("title", ""),
+            pr_description=pr_info.get("body", "")
+        )
 
         # Post review comments
         comments_posted = 0
