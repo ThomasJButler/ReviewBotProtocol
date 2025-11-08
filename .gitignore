@@ -109,8 +109,15 @@ dist/
 *.sqlite
 *.db
 *.db-journal
-CLAUDE.md
+
+# Test artifacts and temporary dev files
+**/api-test-report-*.md
+FIXES_SUMMARY*.md
+WHERE_I_LEFT_OFF*.md
+*-simple.py
+test_*.py
+!backend/tests/test_*.py
+!backend/tests/**/test_*.py
+
+# Temporary todo files
 claudetodo.txt
-BRANDING.md
-CLAUDE.md
-TESTING_REPORT.md
