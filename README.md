@@ -1,114 +1,100 @@
 # ReviewBot Protocol
 
-> **Portfolio Project**: A full-stack AI-powered code review system built to demonstrate modern development capabilities and understanding of AI systems from the ground up.
+> **Portfolio Project**: AI-powered GitHub PR reviews with a custom dashboard.
 
-## What's This All About?
+Built as part of the **Codecademy "Mastering Generative AI & Agents for Developers"** bootcamp.
 
-This is a **portfolio showcase project** designed to demonstrate full-stack development skills and deep understanding of how AI code review systems actually work under the hood. It's not trying to replace established tools like CodeRabbit (which is brilliant and probably what you should use day-to-day), but rather shows how you'd build something similar from scratch.
+## What Is This?
 
-The project demonstrates expertise in:
+ReviewBot Protocol is a full-stack AI code review system that automatically analyses GitHub pull requests and provides intelligent feedback. Think of it as understanding how tools like CodeRabbit work by building one from scratch.
 
-- **Full-stack architecture** (Next.js 15 + FastAPI)
-- **AI integration** (LangChain + LangGraph + OpenAI)
-- **GitHub API integration** with automated PR reviews
-- **Security scanning** and vulnerability detection
-- **Modern UI/UX** with a cyber/matrix aesthetic
-- **Production deployment** strategies
+The system catches common issues before human reviewers need to look at the code, saving development time and improving code quality through automated analysis.
 
-## Core Feature
+## Why This Matters
 
-1. **GitHub PR Review**: Automated Custom PR analysis with inline comments (like CodeRabbit)
+**Time Savings**: Automated reviews catch security vulnerabilities, performance issues, and code quality problems instantly, rather than waiting for manual review.
+
+**Learning Through Building**: This project demonstrates how modern AI-powered developer tools actually work under the hood, from webhook integration to LangChain workflows.
+
+**Real-World Application**: Shows integration of multiple complex systems (GitHub API, AI models, full-stack architecture) working together in a practical use case.
+
+## Features
+
+### Automated PR Reviews
+- GitHub webhook integration triggers automatic analysis when PRs are opened or updated
+- AI-generated inline comments posted directly to pull requests
+- Review summary with security, performance, and quality scores
+
+### Custom Dashboard
+- Review history and analytics
+- GitHub OAuth authentication
+- Repository management interface
 
 ### AI-Powered Analysis
-
-- **Security Scanning**: OWASP Top 10, secret detection, vulnerability analysis
-- **Performance Review**: Algorithm complexity, memory usage, optimisation suggestions
-- **Code Quality**: Style consistency, best practices, maintainability metrics
+- **Security**: OWASP Top 10 vulnerabilities, secret detection, dependency analysis
+- **Performance**: Algorithm complexity, memory usage, optimisation suggestions
+- **Quality**: Code style, best practices, maintainability metrics
 - **Documentation**: Missing docs, unclear naming, test coverage gaps
-
-### GitHub Integration
-
-- OAuth authentication and repository access
-- Automated webhook processing for PR reviews
-- Inline comments posted directly to pull requests
-- Status checks integration (pass/fail based on review score)
 
 ## Tech Stack
 
-**Frontend** (Next.js 15)
-
-- TypeScript with strict mode
-- Tailwind CSS with custom cyber theme
+**Frontend**
+- Next.js 15 with App Router
+- TypeScript (strict mode)
+- Tailwind CSS with custom cyber/matrix theme
 - Shadcn/ui components
-- React Context + Zustand for state management
 
-**Backend** (FastAPI)
-
-- Python 3.11+ with async/await
+**Backend**
+- FastAPI (Python 3.11+)
 - LangChain + LangGraph for AI workflows
 - SQLAlchemy for database operations
-- GitHub API v3/GraphQL integration
+- PostgreSQL/SQLite support
 
-**AI Engine**
-
+**AI Integration**
 - OpenAI GPT-4o for code analysis
 - Custom LangChain chains for different review types
-- LangGraph workflows for complex multi-step processes
-- Specialised prompts for security, performance, and quality analysis
+- LangGraph state machines for complex workflows
+- Specialised prompts for security, performance, and quality
 
-## Architecture Overview
+**GitHub Integration**
+- GitHub API v3/GraphQL
+- OAuth authentication flow
+- Webhook event processing
+- Automated PR commenting
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Next.js 15    │    │    FastAPI       │    │   GitHub API    │
-│   Frontend       │◄──►│   Backend        │◄──►│   Integration   │
-│                 │    │                  │    │                 │
-│ • React UI      │    │ • LangChain      │    │ • OAuth Flow    │
-│ • TypeScript    │    │ • AI Processing  │    │ • Webhook       │
-│ • Tailwind CSS  │    │ • Database       │    │ • PR Comments   │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │   OpenAI GPT-4   │
-                       │   AI Engine      │
-                       │                  │
-                       │ • Code Analysis  │
-                       │ • Security Scan  │
-                       │ • Performance    │
-                       └──────────────────┘
+## Quick Start
+
+### Frontend
+```bash
+npm install
+npm run dev
 ```
 
-## Project Structure
-
-```
-├── app/                    # Next.js 15 App Router
-│   ├── api/               # API routes
-│   ├── (dashboard)/       # Dashboard pages
-│   └── components/        # React components
-├── backend/               # FastAPI backend
-│   ├── main.py           # Application entry point
-│   ├── routers/          # API route handlers
-│   ├── services/         # Business logic
-│   └── models/           # Database models
-├── lib/                   # Shared utilities
-│   ├── ai/               # LangChain setup
-│   └── github/           # GitHub integration
-└── docs/                 # Documentation
+### Backend
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 ```
 
-## Course Context
+### Configuration
+Create `.env` files using the provided `.env.example` templates. You'll need:
+- OpenAI API key
+- GitHub App credentials (for PR integration)
+- LangChain API key (optional, for monitoring)
 
-This project was built as part of the **"Codecademy Mastering Generative AI & Agents for Developers"** bootcamp, demonstrating:
+## Project Context
+
+Built for the **Codecademy Generative AI & Agents** bootcamp, this project demonstrates:
 
 - LangChain integration with custom chains and prompts
 - LangGraph workflows for complex AI processing
 - GitHub automation with webhook-driven reviews
-- Multi-modal input handling (paste, upload, GitHub)
-- Production-ready deployment with proper error handling
+- Production-ready error handling and logging
+- Full-stack TypeScript/Python development
 
 ## Licence
 
-MIT Licence - feel free to use this as a starting point for your own projects.
+MIT Licence
 
-**Note**: This is a demonstration project built for portfolio purposes. For production code review needs, consider established tools like CodeRabbit, which offer more comprehensive features and professional support.
+**Note**: This is a portfolio demonstration project. For production code review needs, consider established tools like CodeRabbit, which offer more comprehensive features and professional support.
