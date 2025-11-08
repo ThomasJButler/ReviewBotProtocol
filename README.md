@@ -18,6 +18,8 @@ Built for the **Codecademy Generative AI & Agents** bootcamp, this project demon
 - Production-ready error handling and logging
 - Full-stack TypeScript/Python development
 
+- No live deployment, due to the sensitive nature of project. 
+
 ## Why This Is Useful
 
 **Time Savings**: Automated reviews catch security vulnerabilities, performance issues, and code quality problems instantly, rather than waiting for manual review.
