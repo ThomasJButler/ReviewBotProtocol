@@ -2,15 +2,21 @@
 
 > **Portfolio Project**: AI-powered GitHub PR reviews with a custom dashboard.
 
-Built as part of the **Codecademy "Mastering Generative AI & Agents for Developers"** bootcamp.
-
 ## What Is This?
 
 ReviewBot Protocol is a full-stack AI code review system that automatically analyses GitHub pull requests and provides intelligent feedback. Think of it as understanding how tools like CodeRabbit work by building one from scratch.
 
 The system catches common issues before human reviewers need to look at the code, saving development time and improving code quality through automated analysis.
 
-## Why This Matters
+Built for the **Codecademy Generative AI & Agents** bootcamp, this project demonstrates:
+
+- LangChain integration with custom chains and prompts
+- LangGraph workflows for complex AI processing
+- GitHub automation with webhook-driven reviews
+- Production-ready error handling and logging
+- Full-stack TypeScript/Python development
+
+## Why This Is Useful
 
 **Time Savings**: Automated reviews catch security vulnerabilities, performance issues, and code quality problems instantly, rather than waiting for manual review.
 
@@ -61,37 +67,6 @@ The system catches common issues before human reviewers need to look at the code
 - OAuth authentication flow
 - Webhook event processing
 - Automated PR commenting
-
-## Quick Start
-
-### Frontend
-```bash
-npm install
-npm run dev
-```
-
-### Backend
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-
-### Configuration
-Create `.env` files using the provided `.env.example` templates. You'll need:
-- OpenAI API key
-- GitHub App credentials (for PR integration)
-- LangChain API key (optional, for monitoring)
-
-## Project Context
-
-Built for the **Codecademy Generative AI & Agents** bootcamp, this project demonstrates:
-
-- LangChain integration with custom chains and prompts
-- LangGraph workflows for complex AI processing
-- GitHub automation with webhook-driven reviews
-- Production-ready error handling and logging
-- Full-stack TypeScript/Python development
 
 ## Licence
 
