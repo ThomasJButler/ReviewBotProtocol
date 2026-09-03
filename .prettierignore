@@ -1,0 +1,10 @@
+# Prettier owns the frontend only. The backend, the docs and the scripts are
+# formatted by their own tools.
+.next
+node_modules
+package-lock.json
+backend
+docs
+scripts
+public
+README.md

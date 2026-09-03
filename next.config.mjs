@@ -1,16 +1,12 @@
+import { dirname } from 'path'
+import { fileURLToPath } from 'url'
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Enable standalone output for Docker
-  output: 'standalone',
-
-  experimental: {
-    serverActions: {
-      allowedOrigins: ["localhost:3000"],
-    },
-  },
-  env: {
-    CUSTOM_KEY: process.env.CUSTOM_KEY,
-  },
+  reactStrictMode: true,
+  // This repository holds the backend too, so pin the tracing root here rather
+  // than letting Next guess from whichever lockfile it finds first.
+  outputFileTracingRoot: dirname(fileURLToPath(import.meta.url)),
 }
 
 export default nextConfig
