@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'v*']
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend tests and audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - name: Install
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Test
+        run: python -m pytest -q
+      - name: Audit
+        run: pip install pip-audit && pip-audit -r requirements.txt
+
+  frontend:
+    name: Frontend lint, types, build
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Audit
+        run: npm audit --audit-level=high

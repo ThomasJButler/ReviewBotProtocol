@@ -1,151 +1,129 @@
-"""Configuration settings for the ReviewBot Protocol backend."""
+"""Configuration for the ReviewBot Protocol backend.
 
-from pydantic_settings import BaseSettings
-from pydantic import field_validator
-from typing import List, Optional
+Everything comes from environment variables or a .env file next to the
+backend. There is deliberately no setting for any cloud inference provider:
+the model is a local Ollama instance, and startup refuses to run if LangSmith
+tracing is switched on in the environment, because that would send prompts
+(and therefore code) off the machine."""
+
+import base64
 import os
-from pathlib import Path
+from typing import List
+from urllib.parse import urlparse
+
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+TRACING_VARS = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING")
+ALWAYS_FATAL_VARS = ("LANGCHAIN_HANDLER",)
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+TRACING_KEY_VARS = ("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")
+CLOUD_KEY_VARS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY", "SENTRY_DSN")
+
+
+class LocalOnlyViolation(RuntimeError):
+    """Raised at startup when the environment would let data leave the machine."""
+
 
 class Settings(BaseSettings):
-    """Application settings with environment variable support."""
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True, extra="ignore")
 
-    # App Configuration
-    APP_NAME: str = "ReviewBot Protocol API"
-    APP_VERSION: str = "1.0.0"
+    APP_NAME: str = "ReviewBot Protocol"
+    APP_VERSION: str = "1.1.0"
     DEBUG: bool = False
-    SECRET_KEY: str = "dev-secret-key-change-in-production"  # Default for development
-    ALLOWED_ORIGINS: str = "http://localhost:3000,https://localhost:3000"
-    BACKEND_URL: str = "http://localhost:8000"
 
-    # Server Configuration
-    HOST: str = "0.0.0.0"
+    HOST: str = "127.0.0.1"
     PORT: int = 8000
-    WORKERS: int = 1
+    ALLOWED_HOSTS: str = "localhost,127.0.0.1"
+    ALLOWED_ORIGINS: str = "http://localhost:3000"
 
-    # GitHub App Configuration
     GITHUB_APP_ID: str
     GITHUB_PRIVATE_KEY: str
     GITHUB_WEBHOOK_SECRET: str
-    GITHUB_CLIENT_ID: Optional[str] = None
-    GITHUB_CLIENT_SECRET: Optional[str] = None
-    WEBHOOK_ENDPOINT_SECRET: Optional[str] = None  # For webhook verification
+    GITHUB_API_BASE_URL: str = "https://api.github.com"
 
-    # OpenAI Configuration
-    OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "gpt-4o"
-    OPENAI_TEMPERATURE: float = 0.1
-    OPENAI_MAX_TOKENS: int = 4000
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    OLLAMA_MODEL: str = "qwen3.5:9b"
+    OLLAMA_NUM_CTX: int = 16384
+    OLLAMA_NUM_PREDICT: int = 2000
+    OLLAMA_TEMPERATURE: float = 0.1
+    OLLAMA_KEEP_ALIVE: str = "30m"
+    OLLAMA_TIMEOUT_SECONDS: int = 600
 
-    # Anthropic Configuration (Optional)
-    ANTHROPIC_API_KEY: Optional[str] = None
+    REVIEW_TIMEOUT_SECONDS: int = 900
+    REVIEW_DRAFTS: bool = False
+    MAX_FILES_PER_REVIEW: int = 25
+    MAX_PATCH_BYTES: int = 32_000
+    MAX_WEBHOOK_BODY_BYTES: int = 2 * 1024 * 1024
+    MAX_INLINE_COMMENTS: int = 25
+    MIN_FINDING_CONFIDENCE: float = 0.5
 
-    # LangChain Configuration (Course Requirements)
-    LANGCHAIN_API_KEY: Optional[str] = None
-    LANGCHAIN_PROJECT: str = "reviewbot-protocol"
-    LANGCHAIN_TRACING_V2: bool = True
+    LOCAL_API_TOKEN: str = ""
+    STRICT_LOCAL: bool = True
 
-    # Database Configuration
+    LOG_LEVEL: str = "INFO"
+    LOG_PROMPTS: bool = False
+
     DATABASE_URL: str = "sqlite:///./reviews.db"
     DATABASE_ECHO: bool = False
 
-    # Redis Configuration (for queuing and caching)
-    REDIS_URL: str = "redis://localhost:6379"
-    REDIS_DB: int = 0
-    REDIS_PASSWORD: Optional[str] = None
-
-    # Rate Limiting
-    GITHUB_API_RATE_LIMIT: int = 5000  # per hour
-    REVIEW_RATE_LIMIT: int = 100  # per hour per user
-
-    # Security
-    WEBHOOK_TIMEOUT: int = 30  # seconds
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
-    MAX_FILES_PER_PR: int = 100
-
-    # Monitoring & Logging
-    LOG_LEVEL: str = "INFO"
-    SENTRY_DSN: Optional[str] = None
-    STRUCTURED_LOGGING: bool = True
-
-    # Review Engine Settings
-    SECURITY_SCAN_ENABLED: bool = True
-    PERFORMANCE_ANALYSIS_ENABLED: bool = True
-    QUALITY_ANALYSIS_ENABLED: bool = True
-    MAX_REVIEW_TIME: int = 300  # seconds
+    @property
+    def allowed_hosts_list(self) -> List[str]:
+        return [h.strip() for h in self.ALLOWED_HOSTS.split(",") if h.strip()]
 
     @property
     def allowed_origins_list(self) -> List[str]:
-        """Get ALLOWED_ORIGINS as a list."""
-        if isinstance(self.ALLOWED_ORIGINS, str):
-            return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
-        return self.ALLOWED_ORIGINS
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     @field_validator("GITHUB_PRIVATE_KEY", mode="before")
     @classmethod
     def parse_private_key(cls, v):
-        """Parse GitHub private key, handling both file path and direct content."""
+        """Accept PEM text, a path to a PEM file, or base64-encoded PEM."""
         if not v:
             return v
-
-        # If it looks like a file path, read the file
-        if v.startswith("/") or v.startswith("./"):
-            try:
-                with open(v, "r") as f:
+        if v.startswith("/") or v.startswith("./") or v.startswith("~"):
+            path = os.path.expanduser(v)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
                     return f.read()
-            except FileNotFoundError:
-                pass
-
-        # Handle base64 encoded keys or direct PEM content
-        if not v.startswith("-----BEGIN"):
-            # Assume it's base64 encoded
-            import base64
+        if "-----BEGIN" not in v:
             try:
-                return base64.b64decode(v).decode("utf-8")
+                decoded = base64.b64decode(v).decode("utf-8")
+                if "-----BEGIN" in decoded:
+                    return decoded
             except Exception:
                 pass
+        return v.replace("\\n", "\n")
 
-        return v
-
-    @field_validator("DEBUG", mode="before")
+    @field_validator("DEBUG", "REVIEW_DRAFTS", "LOG_PROMPTS", "STRICT_LOCAL", mode="before")
     @classmethod
-    def parse_debug(cls, v):
-        """Parse debug flag from string or boolean."""
+    def parse_bool(cls, v):
         if isinstance(v, str):
-            return v.lower() in ("true", "1", "yes", "on")
+            return v.strip().lower() in ("true", "1", "yes", "on")
         return bool(v)
 
-    @property
-    def is_production(self) -> bool:
-        """Check if running in production mode."""
-        return not self.DEBUG
-
-    @property
-    def database_config(self) -> dict:
-        """Get database configuration."""
-        return {
-            "url": self.DATABASE_URL,
-            "echo": self.DATABASE_ECHO,
-            "pool_pre_ping": True,
-            "pool_recycle": 300,
-        }
-
-    @property
-    def redis_config(self) -> dict:
-        """Get Redis configuration."""
-        return {
-            "url": self.REDIS_URL,
-            "db": self.REDIS_DB,
-            "password": self.REDIS_PASSWORD,
-            "decode_responses": True,
-            "retry_on_timeout": True,
-        }
-
-    model_config = {
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "case_sensitive": True
-    }
+    @model_validator(mode="after")
+    def refuse_to_leak(self):
+        """The local-only guard. Tracing variables are always fatal because
+        langchain-core would post every prompt to LangSmith. Cloud API keys
+        are fatal only under STRICT_LOCAL (the default); nothing here reads
+        them, but their presence contradicts the deployment claim."""
+        for name in TRACING_VARS:
+            if os.environ.get(name, "").strip().lower() == "true":
+                raise LocalOnlyViolation(f"{name} is set to true; ReviewBot refuses to start with LangSmith tracing enabled")
+        for name in ALWAYS_FATAL_VARS:
+            if os.environ.get(name):
+                raise LocalOnlyViolation(f"{name} is set; ReviewBot refuses to start with a LangChain tracing handler configured")
+        if self.STRICT_LOCAL:
+            host = (urlparse(self.OLLAMA_BASE_URL).hostname or "").lower()
+            if host not in LOOPBACK_HOSTS:
+                raise LocalOnlyViolation(
+                    f"OLLAMA_BASE_URL points at {host!r}; under STRICT_LOCAL the model must be on this machine (loopback)")
+            for name in TRACING_KEY_VARS + CLOUD_KEY_VARS:
+                if os.environ.get(name):
+                    raise LocalOnlyViolation(
+                        f"{name} is present in the environment; unset it or set STRICT_LOCAL=false (nothing in ReviewBot uses it)")
+        return self
 
 
-# Global settings instance
 settings = Settings()

@@ -1,417 +1,98 @@
-# ReviewBot Protocol Backend
+# ReviewBot Protocol backend
 
-FastAPI backend for ReviewBot Protocol - an AI-powered code review system with GitHub integration.
+A FastAPI service that receives GitHub pull request webhooks, reviews the diff with a model running locally in Ollama, and posts the review back to the pull request as one review comment with inline notes. No inference API key exists anywhere in its configuration; during a review the only network peer is api.github.com.
 
-## Features
+## What it does, precisely
 
-- **GitHub Integration**: Webhook-driven PR reviews with automated inline comments
-- **AI-Powered Analysis**: LangChain + OpenAI GPT-4o for intelligent code reviews
-- **Security Scanning**: OWASP Top 10 vulnerability detection
-- **Performance Analysis**: Algorithm complexity and optimization suggestions
-- **Quality Assessment**: Code maintainability and best practices
-- **Background Processing**: Async queue system for handling multiple reviews
-- **Rate Limiting**: GitHub API rate limiting and user quotas
-- **Database Storage**: Review history and metrics tracking
+1. GitHub sends a `pull_request` webhook (opened, synchronize, reopened, ready_for_review). The body is capped, the HMAC-SHA256 signature is verified over the raw bytes, the delivery id is recorded (a repeat is ignored), and the request returns 202. Nothing slow happens in the request.
+2. A single worker takes the job. The same head SHA is never reviewed twice; a newer push replaces a waiting job or cancels the one in flight; every job has a deadline.
+3. It fetches the PR and its changed files with a GitHub App installation token. Deleted, binary, generated, vendored, non-code and oversized files are skipped, and so is anything secret-bearing by name (`.env`, `*.pem`, `id_rsa`, `*.tfvars` and so on).
+4. Every patch is redacted (API keys, tokens, private keys, passwords in URLs and assignments) before it reaches the model, the posted comment, the log or the database.
+5. One structured model call per file: the diff goes inside a delimited data block that the system prompt declares untrusted, and the model must answer with JSON matching a fixed schema. Findings are then dropped unless the quoted evidence really is in the diff and confidence clears a floor.
+6. The findings are rendered as one pull request review (event COMMENT, never approve or request changes), sanitised (no HTML, links only to github.com, mentions neutralised, bounded length), with a footer naming the model. Fork PRs are reviewed the same way and labelled.
+7. The review, its findings and timing are stored in SQLite for the dashboard. Patches are not stored.
 
-## Architecture
+## Requirements
+
+- Python 3.13 (3.11 and 3.12 should work; 3.14 does not have wheels for every dependency yet)
+- Ollama on the same machine, with a model pulled (`ollama pull qwen3.5:9b` to start; see Models)
+- A GitHub App you own (see below)
+
+## Setup
+
+```
+cd backend
+python3.13 -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+cp .env.example .env    # fill in GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, LOCAL_API_TOKEN
+.venv/bin/python main.py
+```
+
+The service binds 127.0.0.1:8000 by default. To receive webhooks you expose `POST /webhook/github` through a tunnel or a reverse proxy and add that hostname to `ALLOWED_HOSTS`. Do not expose anything else; the dashboard API under `/api` is meant for the local frontend only.
+
+### GitHub App
+
+Create a GitHub App (Settings, Developer settings, GitHub Apps, New GitHub App):
+
+- Webhook URL: your public URL for `/webhook/github`. Webhook secret: a long random value (`openssl rand -hex 32`), the same one you put in `.env`.
+- Repository permissions: Pull requests, Read and write. Metadata, Read. Nothing else.
+- Subscribe to events: Pull request. Nothing else.
+- Generate a private key and point `GITHUB_PRIVATE_KEY` at the downloaded `.pem`.
+- Install the App on selected repositories, never on all repositories.
+
+A `ping` event arrives when the webhook is saved; it is answered with `{"status": "pong"}` and shows up under `/api/deliveries`.
+
+## Models
+
+Set `OLLAMA_MODEL`. Any Ollama chat model works; these were assessed for this job on an Apple M1 Max with 32 GB:
+
+| Model | Disk | Notes |
+|---|---|---|
+| `qwen3.5:9b` | 6.6 GB | fast (about 33 tokens per second measured), finds obvious issues, a triage layer rather than an unattended reviewer |
+| `qwen3-coder:30b` | 19 GB | mixture-of-experts coder, the recommended primary when disk allows; run with `OLLAMA_NUM_CTX=16384` |
+| `qwen3.6:27b` | 17 GB | dense, thinking-capable, slower (about 12 to 16 tokens per second) |
+
+Thinking is switched off for the review call; the output is constrained to the JSON schema by Ollama's `format` parameter. Keep `OLLAMA_NUM_CTX` constant for a model, because changing it reloads the model.
+
+Recommended Ollama server settings on the host: `OLLAMA_NO_CLOUD=1`, `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, `OLLAMA_MAX_LOADED_MODELS=1`, and leave `OLLAMA_HOST` unset so it stays on loopback. Run `ollama serve` from a terminal or a service rather than the desktop app if you want no update checks at all (the app polls ollama.com hourly for its own updates; no prompt content is sent).
+
+## What leaves the machine, and what is stored
+
+Leaves the machine: requests to `api.github.com` only (fetch the PR and its files, post the review). Nothing is sent to any model provider, error tracker or tracing service, and the process refuses to start if the environment says otherwise (`STRICT_LOCAL`, on by default, fails on `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LANGCHAIN_API_KEY`, `LANGSMITH_API_KEY`, `SENTRY_DSN` and on any LangSmith tracing variable set to true).
+
+Stored locally in `reviews.db`: repository, PR number and title, head SHA, model, timings and token counts, the skipped files with reasons, the posted review body, and each finding (path, line, severity, title, quoted evidence, recommendation, confidence). Patches are not stored. Logs go to stdout and never contain diffs, prompts or model output unless `LOG_PROMPTS=true`.
+
+## Proving it
+
+- `.venv/bin/python -m pytest` runs the suite, including a whole review through the real code against a fake GitHub API and a fake model with a socket-level guard that blocks every host except loopback.
+- `REVIEWBOT_E2E=1 .venv/bin/python -m pytest -m e2e` does the same with the real Ollama and model.
+- `../scripts/prove-local.sh` builds a container holding the backend, Ollama and a small model, then runs one review with `docker run --network none`.
+
+## Limits
+
+`MAX_FILES_PER_REVIEW` (25), `MAX_PATCH_BYTES` (40 000), `MAX_WEBHOOK_BODY_BYTES` (2 MiB), `MAX_INLINE_COMMENTS` (25), `REVIEW_TIMEOUT_SECONDS` (900), `MIN_FINDING_CONFIDENCE` (0.5). Draft PRs are skipped unless `REVIEW_DRAFTS=true`.
+
+## API for the dashboard
+
+All routes need `Authorization: Bearer <LOCAL_API_TOKEN>`. With no token configured they answer 503.
+
+- `GET /api/reviews?repository=&limit=&offset=`
+- `GET /api/reviews/{id}`
+- `POST /api/reviews/{id}/feedback` with `{"useful": true | false | null}`
+- `GET /api/deliveries?limit=`
+- `GET /api/status` (Ollama reachability and loaded models, queue depth, database, limits)
+
+`GET /health` is public and returns only `{"status": "ok", "version": ...}`.
+
+## Layout
 
 ```
 backend/
-├── main.py                  # FastAPI app entry point
-├── config/                  # Configuration and logging
-├── handlers/               # API route handlers
-├── services/               # Business logic services
-├── models/                 # Pydantic models
-├── database/               # Database models and repositories
-└── utils/                  # Utility functions
+  main.py                 app, middleware, lifespan (starts the queue)
+  config/settings.py      all settings and the local-only guard
+  handlers/webhook.py     the public route
+  handlers/review.py      the dashboard API
+  services/               redaction, diff parsing, prompt, schema, reviewer, renderer, queue, workflow, runner, GitHub client
+  database/               SQLAlchemy models and repositories
+  tests/                  pytest suite
 ```
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- Redis (for background processing)
-- PostgreSQL (optional, defaults to SQLite)
-- GitHub App credentials
-- OpenAI API key
-
-### Installation
-
-1. **Clone and navigate to backend**:
-
-   ```bash
-   cd backend
-   ```
-
-2. **Run the automated setup script**:
-
-   ```bash
-   ./setup.sh
-   ```
-
-   Or manually create virtual environment:
-
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate  # Linux/Mac
-   # or
-   .venv\Scripts\activate     # Windows
-   ```
-
-3. **Install dependencies**:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment**:
-
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-5. **Run the application**:
-   ```bash
-   python main.py
-   ```
-
-The API will be available at `http://localhost:8000`
-
-### Docker Setup
-
-1. **Using Docker Compose** (recommended):
-
-   ```bash
-   docker-compose up -d
-   ```
-
-2. **Using Docker only**:
-   ```bash
-   docker build -t git-review-assistant-backend .
-   docker run -p 8000:8000 --env-file .env git-review-assistant-backend
-   ```
-
-## Configuration
-
-### Required Environment Variables
-
-```bash
-# GitHub App Configuration
-GITHUB_APP_ID="your-app-id"
-GITHUB_PRIVATE_KEY="your-private-key"
-GITHUB_WEBHOOK_SECRET="your-webhook-secret"
-
-# OpenAI Configuration
-OPENAI_API_KEY="sk-your-api-key"
-
-# LangChain Configuration (Course Requirements)
-LANGCHAIN_API_KEY="ls__your-langsmith-key"
-```
-
-### Optional Configuration
-
-```bash
-# Database (defaults to SQLite)
-DATABASE_URL="postgresql+asyncpg://user:pass@localhost/db"
-
-# Redis (for background processing)
-REDIS_URL="redis://localhost:6379"
-
-# Security
-SECRET_KEY="your-secret-key"
-```
-
-## API Endpoints
-
-### Health & Status
-
-- `GET /health` - Basic health check
-- `GET /health/detailed` - Detailed health with dependency status
-- `GET /metrics` - Application metrics
-
-### Webhooks
-
-- `POST /webhook/github` - GitHub webhook endpoint
-
-### Reviews
-
-- `POST /review/manual` - Manual code review
-- `POST /review/files` - Multi-file review
-- `POST /review/pr` - GitHub PR review
-- `GET /review/{id}` - Get review results
-- `GET /review/` - List reviews
-- `GET /review/stats/overview` - Review statistics
-
-### Authentication
-
-- `GET /auth/github/login` - GitHub OAuth login URL
-- `POST /auth/github/callback` - GitHub OAuth callback
-- `POST /auth/token` - Create access token
-- `GET /auth/me` - Current user info
-
-## GitHub App Setup
-
-1. **Create GitHub App**:
-   - Go to GitHub Settings > Developer settings > GitHub Apps
-   - Click "New GitHub App"
-
-2. **Configure App**:
-
-   ```
-   App name: Git Review Assistant
-   Homepage URL: https://your-app.com
-   Webhook URL: https://your-api.com/webhook/github
-   Webhook secret: [generate secure secret]
-   ```
-
-3. **Set Permissions**:
-   - Repository permissions:
-     - Pull requests: Read & Write
-     - Contents: Read
-     - Issues: Write
-     - Metadata: Read
-
-4. **Subscribe to Events**:
-   - Pull request
-   - Pull request review
-   - Pull request review comment
-
-5. **Generate and Download Private Key**
-
-6. **Install App** on target repositories
-
-## LangChain Integration
-
-The backend uses LangChain for AI-powered code analysis:
-
-```python
-# Security Analysis Chain
-security_chain = LLMChain(
-    llm=ChatOpenAI(model="gpt-4o"),
-    prompt=security_prompt,
-    output_key="security_analysis"
-)
-
-# Performance Analysis Chain
-performance_chain = LLMChain(
-    llm=ChatOpenAI(model="gpt-4o"),
-    prompt=performance_prompt,
-    output_key="performance_analysis"
-)
-```
-
-### LangSmith Monitoring
-
-Set up LangSmith for tracing and monitoring:
-
-```bash
-LANGCHAIN_API_KEY="ls__your-key"
-LANGCHAIN_PROJECT="git-review-assistant"
-LANGCHAIN_TRACING_V2=true
-```
-
-## Background Processing
-
-The system uses Redis for background job processing:
-
-```python
-# Add review to queue
-await add_review_to_queue(
-    review_request=analysis_request,
-    installation_id=installation_id,
-    priority="high"
-)
-
-# Start background workers
-await queue_processor.start_workers(num_workers=2)
-```
-
-## Security Features
-
-### Vulnerability Scanning
-
-Built-in security scanner detects:
-
-- SQL Injection vulnerabilities
-- XSS vulnerabilities
-- Command Injection
-- Path Traversal
-- Hardcoded secrets
-- Weak cryptography
-- And more...
-
-### Authentication
-
-- JWT-based authentication
-- GitHub OAuth integration
-- API key authentication
-- Rate limiting per user
-
-### Webhook Security
-
-- GitHub webhook signature verification
-- Request timeout handling
-- Payload size limits
-
-## Database Schema
-
-### Reviews Table
-
-```sql
-CREATE TABLE reviews (
-    id UUID PRIMARY KEY,
-    type VARCHAR(50) NOT NULL,
-    status VARCHAR(50) NOT NULL,
-    repository VARCHAR(255),
-    pr_number INTEGER,
-    overall_score FLOAT,
-    total_issues INTEGER,
-    created_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    processing_time FLOAT
-);
-```
-
-### Review Issues Table
-
-```sql
-CREATE TABLE review_issues (
-    id UUID PRIMARY KEY,
-    review_id UUID REFERENCES reviews(id),
-    category VARCHAR(50) NOT NULL,
-    severity VARCHAR(20) NOT NULL,
-    title VARCHAR(255) NOT NULL,
-    message TEXT NOT NULL,
-    file_path VARCHAR(512),
-    line_number INTEGER,
-    suggestion TEXT
-);
-```
-
-## Deployment
-
-### Railway Deployment
-
-1. **Connect Repository**:
-   - Link GitHub repository to Railway
-   - Set root directory to `/backend`
-
-2. **Environment Variables**:
-
-   ```bash
-   GITHUB_APP_ID=your-app-id
-   GITHUB_PRIVATE_KEY=your-private-key
-   GITHUB_WEBHOOK_SECRET=your-webhook-secret
-   OPENAI_API_KEY=sk-your-api-key
-   SECRET_KEY=your-secret-key
-   ```
-
-3. **Add Database**:
-   - Add PostgreSQL plugin
-   - DATABASE_URL will be set automatically
-
-4. **Add Redis**:
-   - Add Redis plugin
-   - REDIS_URL will be set automatically
-
-### Render Deployment
-
-1. **Create Web Service**:
-   - Connect GitHub repository
-   - Set build command: `pip install -r requirements.txt`
-   - Set start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-
-2. **Environment Variables**:
-   - Add all required environment variables
-   - Add database and Redis add-ons
-
-## Development
-
-### Running Tests
-
-```bash
-# Install test dependencies
-pip install pytest pytest-asyncio httpx
-
-# Run tests
-pytest
-
-# Run with coverage
-pytest --cov=. --cov-report=html
-```
-
-### Code Quality
-
-```bash
-# Format code
-black .
-isort .
-
-# Lint code
-flake8 .
-mypy .
-
-# Security audit
-bandit -r .
-safety check
-```
-
-### Database Migrations
-
-```bash
-# Create migration
-alembic revision --autogenerate -m "description"
-
-# Apply migrations
-alembic upgrade head
-
-# Downgrade
-alembic downgrade -1
-```
-
-## Monitoring & Logging
-
-### Structured Logging
-
-```python
-from config.logging import get_logger
-
-logger = get_logger(__name__)
-logger.info("Review started", repository="owner/repo", pr_number=123)
-```
-
-### Health Checks
-
-- `/health` - Basic health check
-- `/health/detailed` - Database, GitHub API, and AI service status
-- `/metrics` - Prometheus-compatible metrics
-
-### Sentry Integration
-
-Set `SENTRY_DSN` for error tracking and performance monitoring.
-
-## API Rate Limits
-
-- GitHub API: 5,000 requests/hour (authenticated)
-- OpenAI API: Based on your plan
-- Review API: 100 requests/hour per user
-
-## Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Make changes with tests
-4. Submit pull request
-
-## License
-
-See LICENSE file in the project root.
-
-## Support
-
-For issues and questions:
-
-- GitHub Issues: [Repository Issues](https://github.com/your-username/git-review-assistant/issues)
-- Documentation: [Project Wiki](https://github.com/your-username/git-review-assistant/wiki)

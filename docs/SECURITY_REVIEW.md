@@ -18,6 +18,8 @@ The intended end state is a tool that runs entirely on the owner's machine, wher
 
 ## Summary
 
+Status at 2026-09-03 after the backend rewrite, the frontend rebuild and the docs pass: 89 fixed, 1 mitigated, 1 informational.
+
 | Severity | Count |
 |---|---|
 | critical | 1 |
@@ -64,7 +66,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/queue_processor.py:149
 - Difficulty for an attacker: trivial
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): single-worker queue in services/review_queue.py, the webhook returns 202 (tests: test_webhook, test_queue).
 
 What it is.
 
@@ -90,7 +92,7 @@ Verification: 3 adversarial verifiers, 1 refuted.
 - Where: backend/services/ai_reviewer.py:292
 - Difficulty for an attacker: trivial
 - Category: llm-pipeline
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): prompts are real templates; test_review_generation asserts the diff, file name and language are in the human message.
 
 What it is.
 
@@ -118,7 +120,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/services/queue_processor.py:378
 - Difficulty for an attacker: trivial
 - Category: llm-pipeline
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): results are FileReviewResult objects consumed by the renderer and runner (tests: test_workflow, test_runner).
 
 What it is.
 
@@ -144,7 +146,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/handlers/review.py:719
 - Difficulty for an attacker: trivial
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): those endpoints no longer exist; the dashboard API is token-gated (test_api).
 
 What it is.
 
@@ -170,7 +172,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/handlers/review.py:195
 - Difficulty for an attacker: easy
 - Category: authz-endpoints
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): every /api route requires LOCAL_API_TOKEN; there is no delete route (test_api).
 
 What it is.
 
@@ -196,7 +198,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/services/ai_reviewer.py:979
 - Difficulty for an attacker: easy
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): one review at a time, by construction of the queue.
 
 What it is.
 
@@ -222,7 +224,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/services/github_client.py:91
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): services/github_app_auth.py mints installation tokens with an RS256 App JWT over httpx (test_github_client).
 
 What it is.
 
@@ -248,7 +250,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/services/queue_processor.py:431
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): commit statuses removed entirely, with the permission.
 
 What it is.
 
@@ -274,7 +276,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/config/settings.py:34
 - Difficulty for an attacker: trivial
 - Category: local-inference-migration/requirements-gap
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): no cloud settings exist; STRICT_LOCAL refuses to boot if a cloud key is present (test_settings).
 
 What it is.
 
@@ -300,7 +302,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/review_workflow.py:150
 - Difficulty for an attacker: trivial
 - Category: local-inference-migration/throughput
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): one structured call per file, run by the worker under REVIEW_TIMEOUT_SECONDS.
 
 What it is.
 
@@ -326,7 +328,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/github_client.py:9
 - Difficulty for an attacker: easy
 - Category: test-design
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the proof is a socket-level guard (test_runner, test_no_egress) plus docker run --network none (scripts/prove-local.sh).
 
 What it is.
 
@@ -352,7 +354,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/README.md:169
 - Difficulty for an attacker: trivial
 - Category: permissions-manifest-mismatch
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): statuses removed; backend/README.md lists the two permissions actually needed.
 
 What it is.
 
@@ -378,7 +380,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/webhook.py:244
 - Difficulty for an attacker: trivial
 - Category: merge-gating
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): statuses removed.
 
 What it is.
 
@@ -404,7 +406,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/queue_processor.py:317
 - Difficulty for an attacker: trivial
 - Category: retry-amplification
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): no whole-review retries; the client retries one request once on 401 or a short Retry-After.
 
 What it is.
 
@@ -430,7 +432,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: scripts/quick-setup.sh:109
 - Difficulty for an attacker: trivial
 - Category: environment-reproducibility
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): backend/README.md names Python 3.13; scripts/quick-setup.sh removed.
 
 What it is.
 
@@ -456,7 +458,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/review_workflow.py:278
 - Difficulty for an attacker: trivial
 - Category: data-exposure
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): startup refuses LangSmith tracing variables; patches are redacted before they enter chain inputs.
 
 What it is.
 
@@ -482,7 +484,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/ai_reviewer.py:1081
 - Difficulty for an attacker: trivial
 - Category: data-exposure
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): services/redaction.py runs before the prompt, the comment, the log and the database (test_redaction, test_runner).
 
 What it is.
 
@@ -508,7 +510,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/utils/helpers.py:286
 - Difficulty for an attacker: easy
 - Category: data-exposure
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): services/comment_renderer.sanitise on every model string; evidence is redacted before the model sees it.
 
 What it is.
 
@@ -534,7 +536,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/github/stats/route.ts:39
 - Difficulty for an attacker: trivial
 - Category: correctness
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the stats proxy and its backend endpoint are gone; the dashboard reads /api/reviews and /api/status.
 
 What it is.
 
@@ -560,7 +562,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/review/pr/route.ts:122
 - Difficulty for an attacker: trivial
 - Category: correctness
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the /review/pr endpoint is gone; reviews are triggered by webhooks only.
 
 What it is.
 
@@ -586,7 +588,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/review.py:195
 - Difficulty for an attacker: trivial
 - Category: correctness
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the shadowed route is gone; /api/reviews lists reviews.
 
 What it is.
 
@@ -614,7 +616,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/webhook.py:54
 - Difficulty for an attacker: trivial
 - Category: webhook-auth
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): read_body_capped rejects over MAX_WEBHOOK_BODY_BYTES with 413 before the HMAC check (test_webhook).
 
 What it is.
 
@@ -636,7 +638,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/handlers/webhook.py:104
 - Difficulty for an attacker: moderate
 - Category: webhook-auth
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): delivery ids are stored in webhook_deliveries; a repeat answers 200 duplicate and does nothing (test_webhook).
 
 What it is.
 
@@ -658,7 +660,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/main.py:69
 - Difficulty for an attacker: trivial
 - Category: authz-endpoints
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): ALLOWED_HOSTS setting; the proxy is deleted in Phase 5 (test_webhook covers a configured public host).
 
 What it is.
 
@@ -680,7 +682,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/handlers/webhook.py:223
 - Difficulty for an attacker: trivial
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): dedupe by head SHA, supersede pending, cancel in flight (test_queue).
 
 What it is.
 
@@ -702,7 +704,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/services/review_workflow.py:920
 - Difficulty for an attacker: trivial
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): recursion_limit set from the file count; empty file sets route straight to synthesis (test_workflow, 40 files).
 
 What it is.
 
@@ -724,7 +726,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/handlers/auth.py:112
 - Difficulty for an attacker: trivial
 - Category: authz-endpoints
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the mock auth endpoints are deleted; the only credential is LOCAL_API_TOKEN, compared in constant time.
 
 What it is.
 
@@ -746,7 +748,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/main.py:173
 - Difficulty for an attacker: trivial
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): /health returns status and version only; /api/status is gated and never runs a generation.
 
 What it is.
 
@@ -768,7 +770,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/main.py:98
 - Difficulty for an attacker: trivial
 - Category: data-logging
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the request log records method, path and status only.
 
 What it is.
 
@@ -790,7 +792,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/handlers/review.py:876
 - Difficulty for an attacker: easy
 - Category: data-logging
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): sentry-sdk removed; STRICT_LOCAL refuses SENTRY_DSN.
 
 What it is.
 
@@ -812,7 +814,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/services/github_client.py:189
 - Difficulty for an attacker: easy
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): list_pull_files follows Link headers at 100 per page (test_github_client).
 
 What it is.
 
@@ -834,7 +836,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/services/github_client.py:169
 - Difficulty for an attacker: easy
 - Category: dos-limits
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): one bounded retry per request; the inert rate limiter is gone.
 
 What it is.
 
@@ -856,7 +858,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: package.json:45
 - Difficulty for an attacker: easy
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): next 15.5.25, react 19, eslint 9; npm audit runs in CI at the high level.
 
 What it is.
 
@@ -878,7 +880,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/requirements.txt:39
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): python-jose removed; no JWT auth remains apart from the GitHub App JWT signed with PyJWT.
 
 What it is.
 
@@ -900,7 +902,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/requirements.txt:22
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): langchain 1.3.18, langchain-core 1.6.1, langgraph 1.2.11.
 
 What it is.
 
@@ -922,7 +924,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: package.json:33
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): every unused package removed; the runtime set is next, react, next-themes, radix-ui, shadcn, lucide-react and three utilities.
 
 What it is.
 
@@ -944,7 +946,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/handlers/review.py:300
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the handler no longer exists.
 
 What it is.
 
@@ -966,7 +968,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/config/settings.py:45
 - Difficulty for an attacker: trivial
 - Category: local-inference-migration/data-egress
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the setting no longer exists; a tracing variable set to true stops startup (test_settings).
 
 What it is.
 
@@ -988,7 +990,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: .gitignore:118
 - Difficulty for an attacker: trivial
 - Category: tooling-trap
-- Status: Open
+- Status: Fixed 2026-09-03 (commit 92460dc): .gitignore ignores only root-level scratch files.
 
 What it is.
 
@@ -1010,7 +1012,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: package.json:17
 - Difficulty for an attacker: easy
 - Category: test-infrastructure
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): pytest suite in backend/tests and .github/workflows/ci.yml with no continue-on-error; the frontend jobs land with Phase 5.
 
 What it is.
 
@@ -1032,7 +1034,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: package.json:35
 - Difficulty for an attacker: moderate
 - Category: test-design
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): socket-level guard in the tests and Dockerfile.local with --network none.
 
 What it is.
 
@@ -1054,7 +1056,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/README.md:173
 - Difficulty for an attacker: moderate
 - Category: excess-permission
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): backend/README.md lists Pull requests and Metadata only.
 
 What it is.
 
@@ -1076,7 +1078,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/github_client.py:434
 - Difficulty for an attacker: trivial
 - Category: app-vs-pat
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): those routes no longer exist.
 
 What it is.
 
@@ -1098,7 +1100,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/auth/github/route.ts:20
 - Difficulty for an attacker: trivial
 - Category: token-scope
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): no GitHub OAuth in the dashboard; it reads only the local backend with LOCAL_API_TOKEN from the server environment.
 
 What it is.
 
@@ -1120,7 +1122,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/README.md:47
 - Difficulty for an attacker: trivial
 - Category: documentation / broken-setup-path
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): backend/README.md rewritten.
 
 What it is.
 
@@ -1142,7 +1144,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/requirements.txt:1
 - Difficulty for an attacker: trivial
 - Category: supply-chain / process
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): .github/workflows/ci.yml and .github/dependabot.yml added; exact pins in requirements.txt.
 
 What it is.
 
@@ -1164,7 +1166,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/review_workflow.py:628
 - Difficulty for an attacker: trivial
 - Category: data-exposure
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): services/redaction.is_excluded_path skips secret-bearing files, and the review says so (test_redaction, test_runner).
 
 What it is.
 
@@ -1186,7 +1188,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/security_scanner.py:340
 - Difficulty for an attacker: easy
 - Category: data-exposure
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the scanner is replaced by redaction that never echoes the match.
 
 What it is.
 
@@ -1208,7 +1210,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/review/route.ts:226
 - Difficulty for an attacker: easy
 - Category: dead-code-attack-surface
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): app/api/** deleted.
 
 What it is.
 
@@ -1230,7 +1232,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/review/route.ts:113
 - Difficulty for an attacker: trivial
 - Category: contract-drift
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): deleted with the route.
 
 What it is.
 
@@ -1252,7 +1254,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/webhook/github/route.ts:3
 - Difficulty for an attacker: moderate
 - Category: architecture
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): the proxy is gone; the tunnel or reverse proxy points at the backend's webhook route.
 
 What it is.
 
@@ -1274,7 +1276,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/webhook/github/route.ts:14
 - Difficulty for an attacker: easy
 - Category: config
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): deleted with the proxy; the root .env.example holds only BACKEND_URL and LOCAL_API_TOKEN.
 
 What it is.
 
@@ -1296,7 +1298,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/auth.py:112
 - Difficulty for an attacker: easy
 - Category: dead-code
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): handlers/auth.py and handlers/github.py deleted.
 
 What it is.
 
@@ -1318,7 +1320,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: scripts/validate-env.js:186
 - Difficulty for an attacker: easy
 - Category: config
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): scripts/validate-env.js removed.
 
 What it is.
 
@@ -1340,7 +1342,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/auth/github/callback/route.ts:105
 - Difficulty for an attacker: moderate
 - Category: auth
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): no cookie session; nothing about the user is stored in the browser except the theme choice.
 
 What it is.
 
@@ -1366,7 +1368,7 @@ Full evidence for these is in the review transcript; each is stated here with it
 - Where: backend/handlers/webhook.py:178
 - Difficulty for an attacker: trivial
 - Category: webhook-auth
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): missing headers 400, bad signature 401, bad JSON 400, schema mismatch 400, ping 200, unknown event 200 ignored, and unhandled errors are a generic 500 (test_webhook).
 
 What it is.
 
@@ -1388,7 +1390,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/utils/crypto.py:54
 - Difficulty for an attacker: moderate
 - Category: webhook-auth
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the failure log records the event name and body size only.
 
 What it is.
 
@@ -1410,7 +1412,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/ai_reviewer.py:337
 - Difficulty for an attacker: easy
 - Category: llm-pipeline
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): PR content enters only inside the data block with delimiters defanged, output is schema-constrained, findings are checked against the diff, and the renderer sanitises (test_review_generation).
 
 What it is.
 
@@ -1432,7 +1434,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 - Where: backend/services/ai_reviewer.py:1217
 - Difficulty for an attacker: easy
 - Category: llm-pipeline
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): parse_file_review is lenient and validated; scalars and prose yield no findings (test_review_generation).
 
 What it is.
 
@@ -1454,7 +1456,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: backend/services/ai_reviewer.py:1256
 - Difficulty for an attacker: trivial
 - Category: llm-pipeline
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the code is gone; the summary is a template and the footer says the findings are model output.
 
 What it is.
 
@@ -1476,7 +1478,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/main.py:64
 - Difficulty for an attacker: trivial
 - Category: authz-endpoints
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): openapi_url follows DEBUG (test_api).
 
 What it is.
 
@@ -1498,7 +1500,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/review.py:78
 - Difficulty for an attacker: trivial
 - Category: data-logging
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): handlers return fixed messages; the global handler returns a generic body.
 
 What it is.
 
@@ -1520,7 +1522,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/auth.py:132
 - Difficulty for an attacker: hard
 - Category: data-logging
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the mock callback is gone.
 
 What it is.
 
@@ -1542,7 +1544,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/requirements.txt:2
 - Difficulty for an attacker: moderate
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): fastapi 0.141.1 with starlette 1.6.
 
 What it is.
 
@@ -1564,7 +1566,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: scripts/quick-setup.sh:70
 - Difficulty for an attacker: moderate
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): scripts/quick-setup.sh removed.
 
 What it is.
 
@@ -1586,7 +1588,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/requirements.txt:6
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): those packages are removed or current.
 
 What it is.
 
@@ -1608,7 +1610,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/requirements.txt:29
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): 14 exact runtime pins; dev tools in requirements-dev.txt. Transitive versions are not locked.
 
 What it is.
 
@@ -1630,7 +1632,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: package.json:22
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): package.json scripts are dev, build, start, lint, typecheck, format and check; the docker and jest scripts are gone.
 
 What it is.
 
@@ -1652,7 +1654,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: README.md:52
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the docs pass (2026-09-03): README.md and backend/README.md rewritten; versions stated are the pinned ones.
 
 What it is.
 
@@ -1674,7 +1676,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/review.py:254
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the endpoint and models are gone.
 
 What it is.
 
@@ -1696,7 +1698,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/review.py:583
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the code is gone; all timestamps are timezone-aware.
 
 What it is.
 
@@ -1718,7 +1720,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/metrics_service.py:60
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): metrics_service.py deleted.
 
 What it is.
 
@@ -1740,7 +1742,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/demo/page.tsx:31
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): the demo page and its imports are gone; npm run typecheck and next build pass in CI.
 
 What it is.
 
@@ -1762,7 +1764,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/github_client.py:328
 - Difficulty for an attacker: easy
 - Category: config-drift
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): statuses removed.
 
 What it is.
 
@@ -1784,7 +1786,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/README.md:183
 - Difficulty for an attacker: moderate
 - Category: install-scope
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): backend/README.md says selected repositories, never all.
 
 What it is.
 
@@ -1806,7 +1808,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/requirements.txt:35
 - Difficulty for an attacker: trivial
 - Category: unused-dependency
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): aiopg removed.
 
 What it is.
 
@@ -1828,7 +1830,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/security_scanner.py:231
 - Difficulty for an attacker: moderate
 - Category: insufficient-validation
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): redaction covers sk-proj-, github_pat_, OPENSSH and ENCRYPTED PEM, URL passwords and generic assignments (test_redaction).
 
 What it is.
 
@@ -1850,7 +1852,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: vercel.json:18
 - Difficulty for an attacker: moderate
 - Category: dead-config
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): vercel.json deleted.
 
 What it is.
 
@@ -1872,7 +1874,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/health/route.ts:14
 - Difficulty for an attacker: trivial
 - Category: correctness
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): deleted.
 
 What it is.
 
@@ -1894,7 +1896,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/handlers/webhook.py:62
 - Difficulty for an attacker: hard
 - Category: webhook-auth
-- Status: Open
+- Status: Mitigated 2026-09-03: test_webhook and test_signature pin the check and CI runs them on every push.
 
 What it is.
 
@@ -1916,7 +1918,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/api/webhook/github/route.ts:60
 - Difficulty for an attacker: trivial
 - Category: webhook-auth
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): the proxy is gone.
 
 What it is.
 
@@ -1938,7 +1940,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/mock_reviewer.py:19
 - Difficulty for an attacker: trivial
 - Category: llm-pipeline
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): the whole pipeline is local; test_runner proves a review completes with every non-loopback socket blocked.
 
 What it is.
 
@@ -1960,7 +1962,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: vercel.json:18
 - Difficulty for an attacker: hard
 - Category: authz-endpoints
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): backend CORS allows no credentials and an explicit method and header list; vercel.json goes in Phase 5.
 
 What it is.
 
@@ -1982,7 +1984,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/ai_reviewer.py:1239
 - Difficulty for an attacker: hard
 - Category: data-logging
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): raw model output and prompts are logged only under LOG_PROMPTS=true, after redaction.
 
 What it is.
 
@@ -2004,7 +2006,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: components/review/CodeEditor.tsx:285
 - Difficulty for an attacker: hard
 - Category: data-logging
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): the code editor is gone; no console logging of content.
 
 What it is.
 
@@ -2026,7 +2028,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: app/globals.css:5
 - Difficulty for an attacker: hard
 - Category: data-logging
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): no font is loaded from a network; the production HTML references no external host.
 
 What it is.
 
@@ -2048,7 +2050,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: docs/GITHUB_APP_SETUP.md:131
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: No action needed: informational.
 
 What it is.
 
@@ -2070,7 +2072,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: WHERE_I_LEFT_OFF.md:1
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the docs pass (2026-09-03): README.md says what works, what is deliberately absent, and that one person has run it end to end.
 
 What it is.
 
@@ -2092,7 +2094,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: scripts/generate-social-images.js:21
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Open
+- Status: Fixed in the frontend rebuild (2026-09-03): the image scripts and puppeteer are gone.
 
 What it is.
 
@@ -2114,7 +2116,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/review_workflow.py:863
 - Difficulty for an attacker: trivial
 - Category: gaps-critic-prep
-- Status: Open
+- Status: Fixed in the backend rewrite (2026-09-03): one name everywhere; the User-Agent is ReviewBot-Protocol.
 
 What it is.
 
@@ -2129,6 +2131,21 @@ Fix.
 Introduce a single APP_DISPLAY_NAME / STATUS_CONTEXT constant (settings.APP_NAME exists) and use it in comments, statuses, User-Agent and docs; fix the README support links.
 
 Verification: 1 adversarial verifier, 0 refuted.
+
+## Second round: review of the rewrite
+
+The rewritten backend was itself put through the same adversarial process on 2026-09-03 (four Opus reviewers with distinct lenses: security, correctness, GitHub API contract against the official docs, and test gaps; then verifiers per finding). 64 raw findings, 56 after merge, all 56 confirmed, none refuted. Every one was fixed the same day and the suite grew from 111 to 166 tests. The ones worth knowing about:
+
+- The delimiter defence had a hole: a four-bracket `<<<<DIFF_DATA_END>>>` collapsed into the exact delimiter after the single-pass replace, so a PR author could forge the end of the untrusted block. Now the delimiters carry a per-request random nonce, anything in PR content that resembles a marker (any bracket run, any suffix) is rewritten to a bracket-free token, and the rendered prompt is checked for exactly one begin and one end before the model is called; a failed check skips the file and says so. Tests cover four-bracket, five-bracket, spaced and nonce-suffixed forgeries in both filenames and diffs.
+- The private-key redaction could swallow the rest of a patch when no END marker followed, and collapsed lines so comment line numbers drifted. Redaction is now line-preserving throughout and bounded per block.
+- Redaction now also catches unquoted assignments, npm and Slack app tokens, Azure account keys and passwords containing `@`, and no longer skips a real secret just because it contains the word `example`. Model output is redacted as well as PR content.
+- The sanitiser no longer has a 200-character tag limit to pad past; it also neutralises `www.` and e-mail autolinks, reference-style link definitions and every `@` mention, and quoted evidence goes inside a code span so it keeps its angle brackets.
+- The GitHub client only sends the installation token to the configured API host (a hostile Link header is refused), treats redirects as errors, merges `per_page` into every page, reports truncation, backs off using the rate-limit reset header, and only folds inline comments into the body when GitHub's 422 is actually about a comment line.
+- The queue survives any exception a worker raises, abandons a worker that ignores cancellation after a grace period, refuses jobs while shutting down, reports whether its loop is alive, and rows left running by a crash are marked interrupted at the next start so GitHub's redelivery is accepted.
+- The runner abandons a job when the PR head moved (before and after the model calls), counts files the model failed on separately and says so in the posted review, and picks the riskiest files before applying the file cap.
+- Fork detection fails closed when the source repository has been deleted; repository names are validated against a pattern before they reach an API path; a non-ASCII dashboard token is a 401 rather than a 500; every `/api` route is gated at the router, and a test walks the routes to prove it.
+
+The verified findings and votes of both rounds are kept in the session transcript; the durable record is this file and the tests named above.
 
 ## Refuted findings
 
@@ -2326,9 +2343,18 @@ Repository permissions: Pull requests, read and write (fetch files, post review 
 
 ## The local claim and how it will be proved
 
-After the migration the only permitted network peer during a review is api.github.com. Two automated proofs are planned: a pytest that installs a socket-level guard allowing only loopback and a fake GitHub host, then runs a full review through the real code path; and a Docker run with no network at all (fake GitHub API, Ollama and a small model inside the container) that must complete a review. Patching an HTTP client is not a proof, because this codebase currently contains five separate HTTP stacks. The commands will be recorded here when they exist.
+After the migration the only network peer during a review is api.github.com. Three proofs exist:
+
+1. `cd backend && .venv/bin/python -m pytest tests/test_runner.py tests/test_no_egress.py` runs a whole review through the real code (fake GitHub served by respx, fake model) with a socket-level guard that raises on any connection or DNS lookup outside loopback. Passes.
+2. `REVIEWBOT_E2E=1 .venv/bin/python -m pytest -m e2e` runs the real reviewer against the real Ollama under the same guard. Passed 2026-09-03 with qwen3.5:9b in 14 seconds.
+3. `scripts/prove-local.sh` builds Dockerfile.local (the backend, Ollama, qwen3.5:0.8b and a loopback fake GitHub) and runs one review with `docker run --network none`; the entrypoint first proves it cannot reach the internet. Passed 2026-09-03 (exit 0, review posted, secret redacted, `.env` skipped).
+
+Patching an HTTP client would not be a proof; the guard sits below every HTTP stack in the process.
 
 ## Change log
 
 - 2026-09-03: initial review written from the Phase 0 investigation.
 - 2026-09-03: SR-01 fixed (requirements resolvable). SR-03 reproduced with a recording fake model. Test suite added under backend/tests with strict expected failures for the open findings it covers.
+- 2026-09-03: backend rewritten on LangChain 1.x with a local Ollama model; statuses updated for every finding; the local claim now has three proofs.
+- 2026-09-03: frontend rebuilt on shadcn/ui (four screens, server-side token, no external requests); README and backend README rewritten; remaining statuses updated.
+- 2026-09-03: second adversarial round on the rewritten backend: 56 findings, all fixed; see "Second round".

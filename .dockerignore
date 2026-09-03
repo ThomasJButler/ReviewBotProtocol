@@ -1,0 +1,13 @@
+node_modules
+.next
+backend/.venv
+backend/tests
+backend/reviews.db
+backend/.env
+.git
+public
+app
+components
+hooks
+contexts
+lib

@@ -1,41 +1,18 @@
-"""The 'fully local' proof, part one: a socket-level guard.
+"""The 'fully local' proof.
 
-Patching an HTTP client proves nothing here because the process contains
-several HTTP stacks. The guard sits below all of them. The first two tests
-prove the guard itself works; the end-to-end review test is skipped until the
-Ollama pipeline exists (Phase 4 step 8) and REVIEWBOT_E2E=1 is set."""
+Part one: the socket guard itself. Part two: no cloud SDK is installed and no
+tracer is armed. Part three: the production model client is local. Part
+four: a real review through the real Ollama with the guard active, run only
+when REVIEWBOT_E2E=1. Only part four is an end-to-end proof of egress; the
+rest pin the configuration that makes it true."""
 
+import importlib.util
 import os
 import socket
 
 import pytest
 
-
-class EgressBlocked(RuntimeError):
-    pass
-
-
-@pytest.fixture
-def no_egress(monkeypatch):
-    """Allow only loopback and an explicit allow-list of hosts."""
-    allowed_hosts = {"127.0.0.1", "localhost", "::1"}
-    real_connect = socket.socket.connect
-    real_getaddrinfo = socket.getaddrinfo
-
-    def guarded_getaddrinfo(host, *args, **kwargs):
-        if str(host) not in allowed_hosts:
-            raise EgressBlocked(f"DNS lookup for {host!r} blocked by the egress guard")
-        return real_getaddrinfo(host, *args, **kwargs)
-
-    def guarded_connect(self, address):
-        host = address[0] if isinstance(address, tuple) else str(address)
-        if host not in allowed_hosts:
-            raise EgressBlocked(f"connect to {host!r} blocked by the egress guard")
-        return real_connect(self, address)
-
-    monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
-    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
-    return allowed_hosts
+from tests.conftest import DIFF, EgressBlocked
 
 
 def test_guard_blocks_a_public_host(no_egress):
@@ -47,20 +24,43 @@ def test_guard_allows_loopback(no_egress):
     srv = socket.socket()
     srv.bind(("127.0.0.1", 0))
     srv.listen(1)
-    port = srv.getsockname()[1]
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=1):
+        with socket.create_connection(("127.0.0.1", srv.getsockname()[1]), timeout=1):
             pass
     finally:
         srv.close()
 
 
-def test_no_cloud_sdk_is_importable_after_migration():
-    """Documents the target state. Today these modules ARE importable, which is the point."""
-    pytest.xfail("Phase 4 step 1: openai, langchain_openai and sentry_sdk are removed from the runtime environment")
+@pytest.mark.parametrize("module", ["openai", "langchain_openai", "anthropic", "sentry_sdk", "langchain_community"])
+def test_no_cloud_sdk_is_installed(module):
+    assert importlib.util.find_spec(module) is None, f"{module} must not be in the runtime environment"
+
+
+def test_langsmith_tracing_is_off_after_importing_the_app(app):
+    from langsmith import utils as ls_utils
+    assert ls_utils.tracing_is_enabled() is False
+
+
+def test_production_model_client_is_local_and_configured():
+    from config.settings import settings
+    from services.llm import build_chat_model
+    llm = build_chat_model(settings)
+    assert llm.base_url.startswith("http://127.0.0.1")
+    assert llm.model == settings.OLLAMA_MODEL
+    assert llm.num_ctx == settings.OLLAMA_NUM_CTX and llm.num_predict == settings.OLLAMA_NUM_PREDICT
+    assert llm.reasoning is False and llm.validate_model_on_init is False
+    assert llm.temperature == settings.OLLAMA_TEMPERATURE
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(os.environ.get("REVIEWBOT_E2E") != "1", reason="set REVIEWBOT_E2E=1 with Ollama running")
-def test_full_review_completes_with_egress_blocked(no_egress):
-    pytest.xfail("Phase 4 step 8: full review through the local pipeline against a fake GitHub server")
+@pytest.mark.skipif(os.environ.get("REVIEWBOT_E2E") != "1", reason="set REVIEWBOT_E2E=1 with Ollama running on 127.0.0.1")
+async def test_real_model_review_completes_with_egress_blocked(no_egress):
+    from config.settings import settings
+    from services.ai_reviewer import FileReviewer
+    from services.llm import build_chat_model, ollama_health
+    local = settings.model_copy(update={"OLLAMA_MODEL": os.environ.get("REVIEWBOT_E2E_MODEL", "qwen3.5:9b")})
+    health = await ollama_health(local)
+    assert health["reachable"] and health["model_present"], health
+    result = await FileReviewer(build_chat_model(local), local).review_file("app.py", "python", "modified", DIFF)
+    assert result.parse_ok and result.error is None
+    assert any(f.line == 2 for f in result.review.findings), [f.model_dump() for f in result.review.findings]

@@ -1,6 +1,6 @@
 # Local inference migration: design
 
-Status: proposed, 2026-09-03. This is the Phase 3 checkpoint document. Nothing in it is implemented yet; Phase 4 implements it step by step, and this file is updated as decisions change.
+Status: agreed 2026-09-03 (Phase 3 checkpoint passed); backend implemented the same day. See "Implementation notes" at the end for what differs from the design.
 
 ## Goal
 
@@ -56,7 +56,7 @@ New:
 Rewritten:
 - services/ai_reviewer.py: one method review_file(file) that runs prompt | llm.with_structured_output(FileReview, method="json_schema"), with a JSON-parse fallback if the model returns text. Six chains become one call.
 - services/review_workflow.py: the StateGraph stays. Nodes: parse_files, prioritise, analyse_file (loops over files), synthesise, summarise, build_comment, finalise. recursion_limit is set explicitly to 10 + 3 x file count. Routers are bounds-checked. files_reviewed becomes a list of FileReview dicts.
-- services/github_client.py: httpx only. Pagination on /files (per_page 100, Link header). post_review(event="COMMENT", body, comments) for one review per run instead of one API call per finding. Status context "reviewbot-protocol/review" if statuses are kept at all (open question 1).
+- services/github_client.py: httpx only. Pagination on /files (per_page 100, Link header). post_review(event="COMMENT", body, comments) for one review per run instead of one API call per finding. No status calls.
 - handlers/webhook.py: body read with a hard cap (413 above MAX_WEBHOOK_BODY_BYTES) before the HMAC check, ping handled, unknown events acknowledged without raising, delivery id persisted and duplicates answered 200 with "duplicate" and no work, then enqueue and return 202.
 - handlers/review.py: read-only endpoints for the dashboard (list, detail, feedback, status) behind a LOCAL_API_TOKEN dependency; the paste/upload/pr/manual endpoints are deleted.
 - config/settings.py: see settings table.
@@ -126,7 +126,7 @@ Post-processing per finding: drop it if line is outside any hunk of the new file
 - Per-comment cap 2 000 characters, summary cap 6 000 characters, at most 25 inline comments per review.
 - Fixed footer: "Generated locally by ReviewBot Protocol using <model> via Ollama. Findings are model output and may be wrong; verify before acting."
 - The event is always COMMENT. The bot never approves and never requests changes.
-- Commit status: see open question 1. If kept, the state is always "success" with the description "review posted (N findings)"; it never encodes the model's verdict, so branch protection cannot be gamed through the model.
+- No commit statuses. The App does not hold the Commit statuses permission.
 - Fork PRs are reviewed like any other PR, with "from fork <owner/repo>" in the summary. The App credential is only ever used to comment.
 
 ## Settings
@@ -173,12 +173,40 @@ The desktop app's server is what is running today on 127.0.0.1:11434 and it hono
 
 ## What changes for the operator
 
-- GitHub App permissions: Pull requests read and write, Metadata read. Commit statuses write only if statuses are kept. Issues write is removed. Subscribe to pull_request only. Install on selected repositories.
+- GitHub App permissions: Pull requests read and write, Metadata read. Commit statuses and Issues are removed. Subscribe to pull_request only. Install on selected repositories.
 - Webhook URL points at the backend's /webhook/github through the tunnel or reverse proxy.
 - Environment: no OpenAI or LangSmith variables; OLLAMA_MODEL and LOCAL_API_TOKEN added.
 
-## Open questions
+## Decisions (2026-09-03)
 
-1. Commit statuses: keep a neutral "review posted" status, or drop statuses entirely and the permission with them? Recommendation: drop. Less scope, one fewer thing to misread as a verdict.
-2. Fork PRs: review with comment only (recommended), or skip PRs from forks entirely?
-3. Primary model: free about 13 GB more and pull qwen3-coder:30b now, or start on qwen3.5:9b and revisit?
+1. Commit statuses are dropped entirely, and the Commit statuses permission with them. The review is a normal PR review thread; nothing the model says can gate a merge.
+2. Fork PRs are reviewed like any other PR, comment only, with the fork named in the summary. The App credential is only ever used to comment.
+3. The build targets qwen3.5:9b first. qwen3-coder:30b stays the documented primary for when disk allows; switching is the OLLAMA_MODEL setting.
+
+## Implementation notes (2026-09-03)
+
+What landed, and where it differs from the design above:
+
+- The per-file metadata (file name, language, change type) sits inside the data block, not above it, and any occurrence of the delimiter strings in PR content is softened (`<<<` becomes `<<`) so PR content cannot forge the end of the block. Control characters and newlines are stripped from file names before they enter the prompt.
+- The chain is `prompt | ChatOllama.bind(format=schema)` with a lenient parser on our side rather than `with_structured_output`, so a model that adds a fence or one bad field loses one finding, not the whole review. Findings are then dropped unless the quoted evidence is actually in the diff, the line can take a comment, and confidence clears MIN_FINDING_CONFIDENCE; a finding quoted from the right line but with the wrong number is moved to the right line.
+- No commit statuses (decision 1). The App needs Pull requests read and write and Metadata read only.
+- The review is posted as one pull request review (event COMMENT) with inline comments, and if GitHub rejects the inline comments (422) the same notes are folded into the body and posted again without them.
+- The queue is an in-process single worker (services/review_queue.py): duplicate head SHA is ignored, a newer head SHA replaces a pending job or cancels the one in flight, every job runs under REVIEW_TIMEOUT_SECONDS.
+- Replay protection is the webhook_deliveries table keyed on X-GitHub-Delivery; a repeat answers 200 with status "duplicate" and does nothing.
+- The body is read with a hard cap before the signature check; over the cap is 413.
+- The local-only guard: startup refuses if any LangSmith tracing variable is "true"; under STRICT_LOCAL (default) it also refuses if OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, SENTRY_DSN, LANGCHAIN_API_KEY or LANGSMITH_API_KEY is present. Set STRICT_LOCAL=false if your shell carries keys for other projects.
+- Dependencies: langchain 1.3.18, langchain-core 1.6.1, langgraph 1.2.11, langchain-ollama 1.1.0 (ollama 0.6.2), fastapi 0.141.1, httpx 0.28.1, pydantic 2.13.5, SQLAlchemy 2.0.52, PyJWT 2.13.0, structlog 26.1.0. No OpenAI, Anthropic, Sentry or LangChain community packages are installed; a test asserts they are not importable.
+
+Proof status:
+- backend/tests/test_runner.py runs a whole review (fake GitHub via respx, fake model) under the socket-level guard: passes.
+- backend/tests/test_no_egress.py with REVIEWBOT_E2E=1 runs the real reviewer against the real Ollama (qwen3.5:9b) under the same guard: passed on 2026-09-03 in 14 s, one finding at the correct line.
+- scripts/prove-local.sh builds Dockerfile.local (Ollama, qwen3.5:0.8b, the backend, a loopback fake GitHub) and runs one review with `docker run --network none`. Passed on 2026-09-03: the entrypoint confirmed no route out, the review completed in 4.5 s and was posted, the planted key was redacted from everything posted, and `.env` was skipped. The 0.8B stand-in found nothing in the diff, which is a statement about that model, not about egress; the host e2e with qwen3.5:9b found the injection at the right line.
+
+## After the second review round (2026-09-03)
+
+- Delimiters carry a per-request nonce; PR content that looks like a marker is neutralised; the prompt boundary is asserted before every model call.
+- Redaction is line-preserving, covers unquoted assignments and more token shapes, and is applied to model output too.
+- MAX_PATCH_BYTES defaults to 32 000 and a patch is skipped when its estimated tokens plus the prompt overhead and the output budget would not fit OLLAMA_NUM_CTX.
+- The queue exposes liveness, abandons stuck workers after a grace period, and the backend reconciles rows left running at startup. Deliveries whose review failed or was interrupted accept GitHub's redelivery.
+- STRICT_LOCAL also refuses a non-loopback OLLAMA_BASE_URL and a LANGCHAIN_HANDLER variable.
+- 166 tests, including one that boots the real lifespan (real queue, real runner, fake GitHub, fake model) and drives a signed webhook to a completed review, and one that walks every route to prove the token gate.

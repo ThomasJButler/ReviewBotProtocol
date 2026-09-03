@@ -1,331 +1,111 @@
-"""Main FastAPI application for ReviewBot Protocol backend."""
+"""ReviewBot Protocol backend. One public route (the webhook), a token-gated
+dashboard API, a single-worker review queue, and a local model."""
 
-from fastapi import FastAPI, Request, HTTPException, Depends, status
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-import time
-import os
-import uvicorn
-import sentry_sdk
-from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
-from sentry_sdk.integrations.fastapi import FastApiIntegration
 
+from config.logging import get_logger
 from config.settings import settings
-from config.logging import get_logger, configure_logging
+from database.connection import close_db, init_db
+from database.repositories.review_repository import ReviewRepository
+from database.repositories.webhook_repository import WebhookRepository
+from handlers.review import api_router
 from handlers.webhook import webhook_router
-from handlers.review import review_router
-from handlers.auth import auth_router
-from handlers.github import github_router
-from database.connection import init_db, close_db
+from services.llm import build_chat_model
+from services.review_queue import ReviewJob, ReviewQueue
+from services.review_runner import RunnerDeps, run_review
 
-# Configure logging
-configure_logging()
 logger = get_logger(__name__)
 
-# Initialize Sentry if DSN is provided
-if settings.SENTRY_DSN:
-    sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
-        integrations=[
-            FastApiIntegration(),
-            SqlalchemyIntegration(),
-        ],
-        traces_sample_rate=0.1 if settings.is_production else 1.0,
-        environment="production" if settings.is_production else "development",
-    )
+
+def _on_result(job: ReviewJob, ok: bool, err) -> None:
+    if ok:
+        logger.info("review finished", repo=job.repo, pr=job.pr_number)
+    else:
+        logger.warning("review did not complete", repo=job.repo, pr=job.pr_number, reason=type(err).__name__ if err else "unknown")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # Startup
-    logger.info("Starting ReviewBot Protocol API", version=settings.APP_VERSION)
+    logger.info("starting", app=settings.APP_NAME, version=settings.APP_VERSION, model=settings.OLLAMA_MODEL,
+                ollama=settings.OLLAMA_BASE_URL, host=settings.HOST, port=settings.PORT)
+    session_factory = await init_db()
+    async with session_factory() as session:
+        fixed = await ReviewRepository(session).mark_interrupted()
+        fixed += await WebhookRepository(session).mark_interrupted()
+    if fixed:
+        logger.warning("marked rows left running by a previous run as interrupted", rows=fixed)
+    if set(settings.allowed_hosts_list) <= {"localhost", "127.0.0.1", "::1"}:
+        logger.warning("ALLOWED_HOSTS is loopback only; add the public webhook hostname before pointing GitHub at this backend")
+    deps = RunnerDeps(settings=settings, llm=build_chat_model(settings), session_factory=session_factory)
+    queue = ReviewQueue(worker=lambda job: run_review(job, deps), timeout_seconds=settings.REVIEW_TIMEOUT_SECONDS,
+                        on_result=_on_result)
+    await queue.start()
+    app.state.deps = deps
+    app.state.queue = queue
+    try:
+        yield
+    finally:
+        pending = queue.pending_jobs
+        await queue.stop()
+        if pending:
+            async with session_factory() as session:
+                for job in pending:
+                    await WebhookRepository(session).mark(job.delivery_id, "interrupted")
+            logger.warning("jobs left in the queue at shutdown; GitHub redelivery will be accepted", jobs=len(pending))
+        await close_db()
+        logger.info("stopped")
 
-    # Initialize database
-    await init_db()
-    logger.info("Database initialized")
 
-    yield
-
-    # Shutdown
-    logger.info("Shutting down Git Review Assistant API")
-    await close_db()
-
-
-# Create FastAPI application
 app = FastAPI(
     title=settings.APP_NAME,
-    description="AI-powered code review system with GitHub integration",
+    description="Local-first GitHub pull request review bot",
     version=settings.APP_VERSION,
-    debug=settings.DEBUG,
     lifespan=lifespan,
     docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    redoc_url=None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
-# Security middleware
-if settings.is_production:
-    app.add_middleware(
-        TrustedHostMiddleware,
-        allowed_hosts=["*.railway.app", "*.render.com", "*.herokuapp.com", "localhost"]
-    )
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["*"],
-)
-
-
-# Custom middleware for logging and metrics
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log all HTTP requests with timing."""
-    start_time = time.time()
-
-    # Get client info
-    client_ip = request.client.host
-    user_agent = request.headers.get("user-agent", "unknown")
-
-    logger.info(
-        "Request started",
-        method=request.method,
-        url=str(request.url),
-        client_ip=client_ip,
-        user_agent=user_agent
-    )
-
-    try:
-        response = await call_next(request)
-        process_time = time.time() - start_time
-
-        logger.info(
-            "Request completed",
-            method=request.method,
-            url=str(request.url),
-            status_code=response.status_code,
-            process_time=process_time,
-            client_ip=client_ip
-        )
-
-        response.headers["X-Process-Time"] = str(process_time)
-        return response
-
-    except Exception as e:
-        process_time = time.time() - start_time
-        logger.error(
-            "Request failed",
-            method=request.method,
-            url=str(request.url),
-            error=str(e),
-            process_time=process_time,
-            client_ip=client_ip
-        )
-        raise
+    response = await call_next(request)
+    logger.info("request", method=request.method, path=request.url.path, status=response.status_code)
+    return response
 
 
-# Global exception handler
+# Middleware added later wraps everything added earlier, so the host check goes last to run first.
+app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins_list, allow_credentials=False,
+                   allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "X-Local-Token"])
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
+
+
 @app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Handle unexpected exceptions."""
-    logger.error(
-        "Unhandled exception",
-        url=str(request.url),
-        method=request.method,
-        error=str(exc),
-        error_type=type(exc).__name__
-    )
-
+async def unhandled(request: Request, exc: Exception):
+    logger.error("unhandled exception", path=request.url.path, error=type(exc).__name__)
+    body = {"error": "internal server error"}
     if settings.DEBUG:
-        # In debug mode, show the actual error
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": "Internal server error",
-                "detail": str(exc),
-                "type": type(exc).__name__
-            }
-        )
-    else:
-        # In production, hide internal details
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "Internal server error"}
-        )
+        body["type"] = type(exc).__name__
+    headers = {}
+    origin = request.headers.get("origin")
+    if origin and origin in settings.allowed_origins_list:
+        headers["Access-Control-Allow-Origin"] = origin
+    return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content=body, headers=headers)
 
 
-# Health check endpoints
-@app.get("/health", tags=["health"])
-async def health_check():
-    """Basic health check endpoint."""
-    return {
-        "status": "healthy",
-        "version": settings.APP_VERSION,
-        "timestamp": time.time()
-    }
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": settings.APP_VERSION}
 
 
-@app.get("/health/detailed", tags=["health"])
-async def detailed_health_check():
-    """Detailed health check with dependency status."""
-    from database.connection import get_db_health
-    from services.github_client import get_github_health
-    from services.ai_reviewer import get_ai_health
-
-    health_status = {
-        "status": "healthy",
-        "version": settings.APP_VERSION,
-        "timestamp": time.time(),
-        "checks": {}
-    }
-
-    # Check database
-    try:
-        db_health = await get_db_health()
-        health_status["checks"]["database"] = {
-            "status": "healthy" if db_health else "unhealthy",
-            "details": db_health
-        }
-    except Exception as e:
-        health_status["checks"]["database"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-
-    # Check GitHub API
-    try:
-        github_health = await get_github_health()
-        health_status["checks"]["github"] = {
-            "status": "healthy" if github_health["accessible"] else "unhealthy",
-            "details": github_health
-        }
-    except Exception as e:
-        health_status["checks"]["github"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-
-    # Check AI service
-    try:
-        ai_health = await get_ai_health()
-        health_status["checks"]["ai"] = {
-            "status": "healthy" if ai_health["available"] else "unhealthy",
-            "details": ai_health
-        }
-    except Exception as e:
-        health_status["checks"]["ai"] = {
-            "status": "unhealthy",
-            "error": str(e)
-        }
-
-    # Overall status
-    unhealthy_checks = [
-        check for check in health_status["checks"].values()
-        if check["status"] == "unhealthy"
-    ]
-
-    if unhealthy_checks:
-        health_status["status"] = "degraded" if len(unhealthy_checks) < len(health_status["checks"]) else "unhealthy"
-
-    return health_status
-
-
-@app.get("/metrics", tags=["monitoring"])
-async def get_metrics():
-    """Basic metrics endpoint."""
-    # TODO: Implement proper metrics collection
-    return {
-        "requests_total": 0,
-        "requests_failed": 0,
-        "reviews_completed": 0,
-        "avg_response_time": 0.0
-    }
-
-
-@app.get("/status", tags=["health"])
-async def get_status():
-    """Simple configuration status endpoint (instructor-compatible)."""
-    try:
-        # Check if OpenAI is configured
-        openai_configured = bool(settings.OPENAI_API_KEY)
-
-        # Check if GitHub is configured
-        github_configured = bool(settings.GITHUB_APP_ID and settings.GITHUB_PRIVATE_KEY)
-
-        # Check if LangChain is configured
-        langchain_configured = bool(settings.LANGCHAIN_API_KEY) if hasattr(settings, 'LANGCHAIN_API_KEY') else False
-
-        return {
-            "status": "operational",
-            "openai_configured": openai_configured,
-            "github_configured": github_configured,
-            "langchain_configured": langchain_configured,
-            "openai_model": settings.OPENAI_MODEL,
-            "server": f"{settings.HOST}:{settings.PORT}",
-            "version": settings.APP_VERSION,
-            "mode": "production" if not settings.DEBUG else "development",
-            "demo_mode": "DEMO_MODE" in os.environ and os.environ.get("DEMO_MODE", "false").lower() == "true"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "openai_configured": False,
-            "github_configured": False
-        }
-
-
-# Include API routers
-app.include_router(
-    webhook_router,
-    prefix="/webhook",
-    tags=["webhook"]
-)
-
-app.include_router(
-    review_router,
-    prefix="/review",
-    tags=["review"]
-)
-
-app.include_router(
-    auth_router,
-    prefix="/auth",
-    tags=["authentication"]
-)
-
-app.include_router(
-    github_router,
-    prefix="/github",
-    tags=["github"]
-)
-
-
-# Root endpoint
-@app.get("/", tags=["root"])
-async def root():
-    """Root endpoint with API information."""
-    return {
-        "name": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "description": "AI-powered code review system with GitHub integration",
-        "docs_url": "/docs" if settings.DEBUG else None,
-        "health_url": "/health"
-    }
+app.include_router(webhook_router, prefix="/webhook", tags=["webhook"])
+app.include_router(api_router, prefix="/api", tags=["dashboard"])
 
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        workers=settings.WORKERS if settings.is_production else 1,
-        log_level=settings.LOG_LEVEL.lower(),
-        access_log=True,
-    )
+    import uvicorn
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.DEBUG, log_level=settings.LOG_LEVEL.lower())

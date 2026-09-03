@@ -1,8 +1,3 @@
-"""Unit tests for the HMAC check in utils/crypto.py. These describe the
-behaviour we rely on; the last one is a required fix (SR: non-ASCII header)."""
-
-import pytest
-
 from tests.conftest import TEST_WEBHOOK_SECRET, sign
 from utils.crypto import verify_github_signature
 
@@ -48,6 +43,5 @@ def test_empty_secret_fails_closed(monkeypatch):
     assert verify_github_signature(BODY, sign(BODY, secret=TEST_WEBHOOK_SECRET)) is False
 
 
-@pytest.mark.xfail(strict=True, reason="SR: hmac.compare_digest raises TypeError on non-ASCII str; must return False")
 def test_non_ascii_signature_header_returns_false():
     assert verify_github_signature(BODY, "sha256=é" + "0" * 63) is False
