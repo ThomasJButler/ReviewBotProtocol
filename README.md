@@ -1,79 +1,90 @@
 # ReviewBot Protocol
 
-> **Portfolio Project**: AI-powered GitHub PR reviews with a custom dashboard.
+A GitHub App that reviews pull requests with a language model running on your own machine, and a small local dashboard to see what it said. Nothing about the code you review is sent to a model provider. During a review the only network peer is api.github.com, and there is a test that fails if that stops being true.
 
-<img width="1272" height="895" alt="image" src="https://github.com/user-attachments/assets/c5f6f9cb-7f4f-44b5-8a70-a0bea3e25a7e" />
+Built by Tom Butler as a demonstration of private, local AI: AI you own rather than AI you rent. It started as a Codecademy bootcamp project on OpenAI and was rebuilt in September 2026 to run entirely on Ollama, after a security review of the original (see docs/SECURITY_REVIEW.md, which is unsparing).
 
-## What Is This?
+## What it does
 
-ReviewBot Protocol is a full-stack AI code review system that automatically analyses GitHub pull requests and provides intelligent feedback. Think of it as understanding how tools like CodeRabbit work by building one from scratch.
+1. You install the App on selected repositories. When a pull request is opened, pushed to, reopened or marked ready for review, GitHub sends a webhook to the backend.
+2. The backend verifies the signature, ignores replays, and queues one review per PR head. A single worker fetches the changed files with an installation token.
+3. Secret-bearing files are skipped outright. Every other patch is redacted (API keys, tokens, private keys, passwords) before a model sees it.
+4. One structured call per file to a local Ollama model. The diff is inside a delimited data block the model is told is untrusted; the answer must fit a fixed JSON schema; findings that quote lines not in the diff are dropped.
+5. One review is posted to the PR (a comment review, never an approval), sanitised so the model cannot inject HTML, off-site links or mentions, with a footer naming the model.
+6. The dashboard shows what was reviewed, what was said, and lets you mark each review useful or not.
 
-The system catches common issues before human reviewers need to look at the code, saving development time and improving code quality through automated analysis.
+## What it deliberately does not do
 
-Built for the **Codecademy Generative AI & Agents** bootcamp, this project demonstrates:
+- It never approves, requests changes, or sets commit statuses. Nothing the model says can gate a merge.
+- It has no cloud fallback. If Ollama is down, reviews fail visibly and are recorded as failed.
+- It has no manual paste-your-code mode, no GitHub OAuth, no multi-user anything. It is a tool for one person's repositories.
+- It is not a product. It is well tested for what it does, and it has been run end to end on real pull requests by exactly one person.
 
-- LangChain integration with custom chains and prompts
-- LangGraph workflows for complex AI processing
-- GitHub automation with webhook-driven reviews
-- Production-ready error handling and logging
-- Full-stack TypeScript/Python development
+## Privacy, stated precisely
 
-- No live deployment, due to the sensitive nature of project. 
+Leaves the machine: HTTPS requests to api.github.com to read the PR, its files, and post the review. That is the complete list.
 
-## Why This Is Useful
+Never leaves the machine: the diff, the prompt, the model's output. The backend refuses to start if the environment contains a LangSmith tracing flag or an OpenAI, Anthropic, Google, Mistral or Sentry key (`STRICT_LOCAL`, on by default). No telemetry, no analytics, no fonts or scripts from a CDN in the dashboard. Next.js telemetry is disabled in the scripts.
 
-**Time Savings**: Automated reviews catch security vulnerabilities, performance issues, and code quality problems instantly, rather than waiting for manual review.
+Stored on your disk (SQLite): repository, PR number and title, head SHA, model, timings, token counts, the skipped files, the posted review body, and each finding. Patches are not stored. Logs never contain diffs or model output unless you set `LOG_PROMPTS=true`.
 
-**Learning Through Building**: This project demonstrates how modern AI-powered developer tools actually work under the hood, from webhook integration to LangChain workflows.
+Ollama: bound to loopback. The desktop app checks ollama.com hourly for updates of itself (never prompt content); run `ollama serve` from a terminal with `OLLAMA_NO_CLOUD=1` if you want no outbound connection at all.
 
-**Real-World Application**: Shows integration of multiple complex systems (GitHub API, AI models, full-stack architecture) working together in a practical use case.
+### The proof
 
-## Features
+Three checks, all in the repository:
 
-### Automated PR Reviews
-- GitHub webhook integration triggers automatic analysis when PRs are opened or updated
-- AI-generated inline comments posted directly to pull requests
-- Review summary with security, performance, and quality scores
+- `backend/tests/test_runner.py` runs a whole review through the real code against a fake GitHub API and a fake model with a socket-level guard that blocks every host except loopback. It runs in CI.
+- `REVIEWBOT_E2E=1 pytest -m e2e` does the same with the real Ollama and model on your machine.
+- `scripts/prove-local.sh` builds a container with the backend, Ollama and a small model, then runs one review with `docker run --network none`. The entrypoint first proves the container cannot reach the internet. Last run: 2026-09-03, passed.
 
-### Custom Dashboard
-- Review history and analytics
-- GitHub OAuth authentication
-- Repository management interface
+## Quick start
 
-### AI-Powered Analysis
-- **Security**: OWASP Top 10 vulnerabilities, secret detection, dependency analysis
-- **Performance**: Algorithm complexity, memory usage, optimisation suggestions
-- **Quality**: Code style, best practices, maintainability metrics
-- **Documentation**: Missing docs, unclear naming, test coverage gaps
+You need Python 3.13, Node 22, Ollama, and a GitHub App you own.
 
-## Tech Stack
+Backend:
 
-**Frontend**
-- Next.js 15 with App Router
-- TypeScript (strict mode)
-- Tailwind CSS with custom cyber/matrix theme
-- Shadcn/ui components
+```
+cd backend
+python3.13 -m venv .venv
+.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+cp .env.example .env      # GitHub App id, private key path, webhook secret, and a LOCAL_API_TOKEN
+ollama pull qwen3.5:9b
+.venv/bin/python main.py  # 127.0.0.1:8000
+```
 
-**Backend**
-- FastAPI (Python 3.11+)
-- LangChain + LangGraph for AI workflows
-- SQLAlchemy for database operations
-- PostgreSQL/SQLite support
+Dashboard:
 
-**AI Integration**
-- OpenAI GPT-4o for code analysis
-- Custom LangChain chains for different review types
-- LangGraph state machines for complex workflows
-- Specialised prompts for security, performance, and quality
+```
+npm install
+cp .env.example .env.local   # BACKEND_URL and the same LOCAL_API_TOKEN
+npm run dev                   # http://localhost:3000
+```
 
-**GitHub Integration**
-- GitHub API v3/GraphQL
-- OAuth authentication flow
-- Webhook event processing
-- Automated PR commenting
+Expose only `POST /webhook/github` on the backend to the internet (a tunnel or a reverse proxy), add that hostname to `ALLOWED_HOSTS`, and point the App's webhook at it. The full App setup, permissions (Pull requests read and write, Metadata read, nothing else) and all settings are in backend/README.md and on the dashboard's Setup page.
+
+## Choosing a model
+
+The honest trade-off: a local model is not GPT-4o, and a small one is a triage layer, not an unattended reviewer.
+
+| Model | Disk | On an M1 Max 32 GB | What to expect |
+|---|---|---|---|
+| `qwen3.5:9b` | 6.6 GB | about 33 tokens per second, fully on GPU | catches obvious injection, hard-coded secrets and clear bugs; misses subtle logic; can over-report style |
+| `qwen3-coder:30b` | 19 GB | mixture-of-experts, 45 to 60 tokens per second estimated | the recommended primary when you have the disk; needs `OLLAMA_NUM_CTX=16384` on 32 GB |
+| `qwen3.6:27b` | 17 GB | dense, 12 to 16 tokens per second estimated | strongest on benchmarks; slow enough that a 20-file PR takes a while |
+
+Vendor benchmark numbers and the reasoning behind these picks are in docs/LOCAL_MIGRATION.md. Findings are checked against the diff before posting, which removes most of what a small model invents; it does not make a small model clever.
+
+## Repository layout
+
+```
+backend/     FastAPI service: webhook, queue, redaction, review pipeline, dashboard API, tests
+app/ components/ lib/   Next.js dashboard (four screens: reviews, review detail, status, setup)
+docs/        SECURITY_REVIEW.md (91 findings and their status), LOCAL_MIGRATION.md (design), FRONTEND_PLAN.md
+scripts/     prove-local.sh and the container proof
+.github/     CI (tests, lint, types, build, audits) and Dependabot
+```
 
 ## Licence
 
-MIT Licence
-
-**Note**: This is a portfolio demonstration project. For production code review needs, consider established tools like CodeRabbit, which offer more comprehensive features and professional support.
+MIT.
