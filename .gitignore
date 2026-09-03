@@ -115,9 +115,8 @@ dist/
 FIXES_SUMMARY*.md
 WHERE_I_LEFT_OFF*.md
 *-simple.py
-test_*.py
-!backend/tests/test_*.py
-!backend/tests/**/test_*.py
+/test_*.py
+/simple_pattern_test.py
 
 # Temporary todo files
 claudetodo.txt
