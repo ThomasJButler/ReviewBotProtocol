@@ -8,10 +8,10 @@ def test_api_tokens_are_masked():
             "+aws = AKIAABCDEFGHIJKLMNOP\n"
             "+g = 'AIza" + "c" * 35 + "'\n"
             "+//registry.npmjs.org/:_authToken=npm_" + "d" * 36 + "\n"
-            "+SLACK_APP=xapp-1-A0123456789-" + "e" * 20 + "\n"
+            "+SLACK_APP=xapp-" + "1-A0123456789-" + "e" * 20 + "\n"
             "+conn = 'DefaultEndpointsProtocol=https;AccountName=x;AccountKey=" + "f" * 60 + "=='\n")
     out, counts = redact(text)
-    for leaked in ("sk-proj-abcdef", "ghp_aaaa", "github_pat_bbb", "AKIAABCDEFGHIJKLMNOP", "AIzaccc", "npm_dddd", "xapp-1-A0123456789-eeee", "ffffffffff"):
+    for leaked in ("sk-proj-abcdef", "ghp_aaaa", "github_pat_bbb", "AKIAABCDEFGHIJKLMNOP", "AIzaccc", "npm_dddd", "xapp-" + "1-A0123456789-eeee", "ffffffffff"):
         assert leaked not in out, leaked
     assert counts["openai-key"] == 1 and counts["github-token"] == 2 and counts["npm-token"] == 1
     assert counts["slack-token"] == 1 and counts["azure-key"] == 1

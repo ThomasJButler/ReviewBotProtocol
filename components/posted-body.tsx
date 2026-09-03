@@ -10,17 +10,11 @@ import * as React from 'react'
 
 const INLINE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]\n]+\]\([^()\s]+\))/g
 
-function isGitHubUrl(raw: string): boolean {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return false
-  }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
-  const host = url.hostname.toLowerCase()
-  return host === 'github.com' || host.endsWith('.github.com')
-}
+import { isGitHubUrl } from '@/lib/utils'
+
+/** The backend caps bodies at 6000 characters; this guard keeps the renderer
+ * cheap whatever is stored. */
+const MAX_BODY = 8000
 
 function inline(text: string, key: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
@@ -67,7 +61,9 @@ const BULLET = /^[-*]\s+(.*)$/
 const NUMBER = /^\d+\.\s+(.*)$/
 
 export function PostedBody({ body }: { body: string }) {
-  const lines = body.replace(/\r\n/g, '\n').split('\n')
+  const clipped =
+    body.length > MAX_BODY ? body.slice(0, MAX_BODY) + '\n\n[truncated]' : body
+  const lines = clipped.replace(/\r\n/g, '\n').split('\n')
   const blocks: React.ReactNode[] = []
   let i = 0
 

@@ -75,6 +75,7 @@ class StubQueue:
         self.depth = 0
         self.current_job = None
         self.alive = True
+        self.abandoned = 0
         self.pending_jobs = []
         self.outcome = outcome
         self.raise_with = raise_with

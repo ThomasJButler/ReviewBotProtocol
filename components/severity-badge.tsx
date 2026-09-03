@@ -38,19 +38,43 @@ export function SeverityBadge({
   )
 }
 
+const GREEN =
+  'border-emerald-700/50 bg-emerald-700/10 text-emerald-800 dark:border-emerald-400/40 dark:text-emerald-300'
+const RED =
+  'border-red-700/50 bg-red-700/10 text-red-800 dark:border-red-400/40 dark:text-red-300'
+const BLUE =
+  'border-sky-700/50 bg-sky-700/10 text-sky-800 dark:border-sky-400/40 dark:text-sky-300'
+const GREY = 'border-border bg-muted text-muted-foreground'
+
+/* Every status the backend writes to reviews.status and webhook_deliveries.status. */
 const STATUS_STYLES: Record<string, string> = {
-  completed:
-    'border-emerald-700/50 bg-emerald-700/10 text-emerald-800 dark:border-emerald-400/40 dark:text-emerald-300',
-  failed:
-    'border-red-700/50 bg-red-700/10 text-red-800 dark:border-red-400/40 dark:text-red-300',
-  running:
-    'border-sky-700/50 bg-sky-700/10 text-sky-800 dark:border-sky-400/40 dark:text-sky-300',
+  completed: GREEN,
+  pong: GREEN,
+  failed: RED,
+  timed_out: RED,
+  running: BLUE,
+  queued: BLUE,
+  received: BLUE,
+  superseded: GREY,
+  interrupted: GREY,
+  duplicate: GREY,
+  ignored: GREY,
+  skipped_draft: GREY,
 }
 
 const STATUS_LABELS: Record<string, string> = {
   completed: 'Completed',
+  pong: 'Ping answered',
   failed: 'Failed',
+  timed_out: 'Timed out',
   running: 'Running',
+  queued: 'Queued',
+  received: 'Received',
+  superseded: 'Superseded',
+  interrupted: 'Interrupted',
+  duplicate: 'Duplicate',
+  ignored: 'Ignored',
+  skipped_draft: 'Draft, skipped',
 }
 
 /** The state of a review run. Lives here so both badges share one palette. */

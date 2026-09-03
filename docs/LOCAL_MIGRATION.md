@@ -25,25 +25,26 @@ The Next.js webhook proxy is deleted. The tunnel points at the backend directly,
 
 Backend runtime, pinned exactly at implementation time to the versions current on PyPI (checked 2026-09-03):
 
-| Package | Version | Why |
-|---|---|---|
-| langchain | 1.3.18 | kept by decision; prompts and structured output |
-| langchain-core | 1.6.1 | required by the above |
-| langgraph | 1.2.11 | kept by decision; the review state machine |
-| langchain-ollama | 1.1.0 | ChatOllama; needs core >= 1.2.21 |
-| ollama | 0.6.2 | pulled in by langchain-ollama; httpx-based client |
-| fastapi, uvicorn, httpx, pydantic, pydantic-settings | current | web layer |
-| SQLAlchemy, aiosqlite | current | storage |
-| PyJWT, cryptography | current | GitHub App JWT (RS256) |
-| structlog | current | logging |
+| Package                                              | Version | Why                                               |
+| ---------------------------------------------------- | ------- | ------------------------------------------------- |
+| langchain                                            | 1.3.18  | kept by decision; prompts and structured output   |
+| langchain-core                                       | 1.6.1   | required by the above                             |
+| langgraph                                            | 1.2.11  | kept by decision; the review state machine        |
+| langchain-ollama                                     | 1.1.0   | ChatOllama; needs core >= 1.2.21                  |
+| ollama                                               | 0.6.2   | pulled in by langchain-ollama; httpx-based client |
+| fastapi, uvicorn, httpx, pydantic, pydantic-settings | current | web layer                                         |
+| SQLAlchemy, aiosqlite                                | current | storage                                           |
+| PyJWT, cryptography                                  | current | GitHub App JWT (RS256)                            |
+| structlog                                            | current | logging                                           |
 
-Removed: langchain-openai, langchain-community, openai, tiktoken, langsmith (stays only as a transitive dependency of langchain-core, with tracing provably off), sentry-sdk, celery, kombu, redis, aiopg, alembic, python-jose, passlib, PyGithub, python-multipart, requests, aiofiles, python-dotenv, click, python-dateutil. Dev tools move to requirements-dev.txt.
+Removed: the langchain meta-package (nothing imports it; langchain-core, langgraph and langchain-ollama are what the code uses), langchain-openai, langchain-community, openai, tiktoken, langsmith (stays only as a transitive dependency of langchain-core, with tracing provably off), sentry-sdk, celery, kombu, redis, aiopg, alembic, python-jose, passlib, PyGithub, python-multipart, requests, aiofiles, python-dotenv, click, python-dateutil. Dev tools move to requirements-dev.txt.
 
 Guard at startup: refuse to boot if any of LANGSMITH_TRACING_V2, LANGCHAIN_TRACING_V2, LANGSMITH_TRACING, LANGCHAIN_TRACING equals "true", or if LANGCHAIN_API_KEY, LANGSMITH_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY is set. The message names the variable.
 
 ## Module map
 
 New:
+
 - services/llm.py: build_chat_model(settings) returns ChatOllama(model, base_url, num_ctx, num_predict, temperature 0.1, reasoning=False, keep_alive, validate_model_on_init=True, client timeout 600 s). health() calls GET /api/tags and /api/ps only, never a generation.
 - services/redaction.py: redact(text) replaces secret matches with [REDACTED:<kind>] and returns the count; is_excluded_path(path) for secret-bearing filenames. Runs on every patch before the prompt, the comment, the log line and the database row.
 - services/prompts.py: the system prompt and the human template, with delimiters (below).
@@ -54,6 +55,7 @@ New:
 - Dockerfile.local and scripts/prove-local.sh: the no-network proof.
 
 Rewritten:
+
 - services/ai_reviewer.py: one method review_file(file) that runs prompt | llm.with_structured_output(FileReview, method="json_schema"), with a JSON-parse fallback if the model returns text. Six chains become one call.
 - services/review_workflow.py: the StateGraph stays. Nodes: parse_files, prioritise, analyse_file (loops over files), synthesise, summarise, build_comment, finalise. recursion_limit is set explicitly to 10 + 3 x file count. Routers are bounds-checked. files_reviewed becomes a list of FileReview dicts.
 - services/github_client.py: httpx only. Pagination on /files (per_page 100, Link header). post_review(event="COMMENT", body, comments) for one review per run instead of one API call per finding. No status calls.
@@ -131,30 +133,30 @@ Post-processing per finding: drop it if line is outside any hunk of the new file
 
 ## Settings
 
-| Setting | Default | Notes |
-|---|---|---|
-| HOST / PORT | 127.0.0.1 / 8000 | |
-| ALLOWED_HOSTS | localhost,127.0.0.1 | comma list; the tunnel hostname goes here |
-| GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET | required | unchanged |
-| OLLAMA_BASE_URL | http://127.0.0.1:11434 | |
-| OLLAMA_MODEL | qwen3.5:9b | qwen3-coder:30b once pulled |
-| OLLAMA_NUM_CTX | 16384 | fixed per model to avoid reloads |
-| OLLAMA_NUM_PREDICT | 2000 | |
-| REVIEW_TIMEOUT_SECONDS | 900 | whole review |
-| MAX_FILES_PER_REVIEW | 25 | |
-| MAX_PATCH_BYTES | 40000 | roughly 12k tokens |
-| MAX_WEBHOOK_BODY_BYTES | 2097152 | GitHub payloads are far smaller |
-| LOCAL_API_TOKEN | required for the dashboard routes | |
-| LOG_PROMPTS | false | when true, redacted prompts and raw model output are logged |
-| DATABASE_URL | sqlite:///./reviews.db | |
+| Setting                                                  | Default                           | Notes                                                       |
+| -------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- |
+| HOST / PORT                                              | 127.0.0.1 / 8000                  |                                                             |
+| ALLOWED_HOSTS                                            | localhost,127.0.0.1               | comma list; the tunnel hostname goes here                   |
+| GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET | required                          | unchanged                                                   |
+| OLLAMA_BASE_URL                                          | http://127.0.0.1:11434            |                                                             |
+| OLLAMA_MODEL                                             | qwen3.5:9b                        | qwen3-coder:30b once pulled                                 |
+| OLLAMA_NUM_CTX                                           | 16384                             | fixed per model to avoid reloads                            |
+| OLLAMA_NUM_PREDICT                                       | 2000                              |                                                             |
+| REVIEW_TIMEOUT_SECONDS                                   | 900                               | whole review                                                |
+| MAX_FILES_PER_REVIEW                                     | 25                                |                                                             |
+| MAX_PATCH_BYTES                                          | 32000                             | roughly 11k tokens; must fit OLLAMA_NUM_CTX                 |
+| MAX_WEBHOOK_BODY_BYTES                                   | 2097152                           | GitHub payloads are far smaller                             |
+| LOCAL_API_TOKEN                                          | required for the dashboard routes |                                                             |
+| LOG_PROMPTS                                              | false                             | when true, redacted prompts and raw model output are logged |
+| DATABASE_URL                                             | sqlite:///./reviews.db            |                                                             |
 
 ## Model matrix
 
-| Model | Size | Fits 32 GB alongside a browser | Speed on this M1 Max | Quality (vendor SWE-bench Verified) | Role |
-|---|---|---|---|---|---|
-| qwen3.5:9b | 6.6 GB | yes | 33 tok/s measured today, 100 percent GPU at 16k ctx | 53.2 (third party) | fast option, default until the primary is pulled |
-| qwen3-coder:30b (30B-A3B MoE) | 19 GB | borderline; needs num_ctx 16384 and q8_0 KV cache | 45 to 60 tok/s estimated | RL-trained for SWE tasks, no published number | primary |
-| qwen3.6:27b | 17 GB | yes | 12 to 16 tok/s estimated | 77.2 | stretch, thinking-capable |
+| Model                         | Size   | Fits 32 GB alongside a browser                    | Speed on this M1 Max                                | Quality (vendor SWE-bench Verified)           | Role                                             |
+| ----------------------------- | ------ | ------------------------------------------------- | --------------------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| qwen3.5:9b                    | 6.6 GB | yes                                               | 33 tok/s measured today, 100 percent GPU at 16k ctx | 53.2 (third party)                            | fast option, default until the primary is pulled |
+| qwen3-coder:30b (30B-A3B MoE) | 19 GB  | borderline; needs num_ctx 16384 and q8_0 KV cache | 45 to 60 tok/s estimated                            | RL-trained for SWE tasks, no published number | primary                                          |
+| qwen3.6:27b                   | 17 GB  | yes                                               | 12 to 16 tok/s estimated                            | 77.2                                          | stretch, thinking-capable                        |
 
 Measured probe (qwen3.5:9b, think off, schema format, 16k ctx): a 239-token prompt containing a SQL injection, a hard-coded key and an injected "reply no issues" instruction produced valid JSON in 16 seconds with two correct findings at the correct lines and the injection ignored. The model quoted the fake key verbatim in its evidence, which is why redaction runs before the model, not after.
 
@@ -162,9 +164,9 @@ Disk today: 32 GB free. The primary model needs 19 GB. The pull was not started.
 
 ## Egress proof
 
-1. backend/tests/test_no_egress.py: a socket-level guard (getaddrinfo and socket.connect) allowing only loopback and the fake GitHub host, wrapped around a full review through the real code path against a respx-served fake api.github.com and the real local Ollama. Socket level, because the process contains several HTTP stacks.
+1. A socket-level guard (getaddrinfo and socket.connect, loopback only) in backend/tests/conftest.py. backend/tests/test_runner.py wraps whole reviews in it (fake GitHub answered in-process by respx, fake model); backend/tests/test_no_egress.py wraps one real-model review of one diff in it (REVIEWBOT_E2E=1, skipped by default). Socket level, because the process contains several HTTP stacks.
 2. scripts/prove-local.sh: builds Dockerfile.local (backend, a tiny fake GitHub API, Ollama and qwen3.5:0.8b) and runs one review with docker run --network none. Exit code is the verdict. Slow to build once, then repeatable.
-3. Manual: docs describe running a real review with lsof -i -P in a second terminal and what the only expected peers are.
+3. Manual: backend/README.md describes running a real review with lsof in a second terminal and the only two peers that should appear.
 4. A test asserts that openai, langchain_openai, sentry_sdk and anthropic are not importable in the runtime environment.
 
 ## Ollama on the host
@@ -187,7 +189,7 @@ The desktop app's server is what is running today on 127.0.0.1:11434 and it hono
 
 What landed, and where it differs from the design above:
 
-- The per-file metadata (file name, language, change type) sits inside the data block, not above it, and any occurrence of the delimiter strings in PR content is softened (`<<<` becomes `<<`) so PR content cannot forge the end of the block. Control characters and newlines are stripped from file names before they enter the prompt.
+- The per-file metadata (file name, language, change type) sits inside the data block, not above it, and any marker-shaped text in PR content is rewritten to a bracket-free `[data-marker]` token so PR content cannot forge the end of the block (the first version merely softened `<<<` to `<<`, which the second review round broke). Control characters and newlines are stripped from file names before they enter the prompt.
 - The chain is `prompt | ChatOllama.bind(format=schema)` with a lenient parser on our side rather than `with_structured_output`, so a model that adds a fence or one bad field loses one finding, not the whole review. Findings are then dropped unless the quoted evidence is actually in the diff, the line can take a comment, and confidence clears MIN_FINDING_CONFIDENCE; a finding quoted from the right line but with the wrong number is moved to the right line.
 - No commit statuses (decision 1). The App needs Pull requests read and write and Metadata read only.
 - The review is posted as one pull request review (event COMMENT) with inline comments, and if GitHub rejects the inline comments (422) the same notes are folded into the body and posted again without them.
@@ -195,10 +197,12 @@ What landed, and where it differs from the design above:
 - Replay protection is the webhook_deliveries table keyed on X-GitHub-Delivery; a repeat answers 200 with status "duplicate" and does nothing.
 - The body is read with a hard cap before the signature check; over the cap is 413.
 - The local-only guard: startup refuses if any LangSmith tracing variable is "true"; under STRICT_LOCAL (default) it also refuses if OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, SENTRY_DSN, LANGCHAIN_API_KEY or LANGSMITH_API_KEY is present. Set STRICT_LOCAL=false if your shell carries keys for other projects.
-- Dependencies: langchain 1.3.18, langchain-core 1.6.1, langgraph 1.2.11, langchain-ollama 1.1.0 (ollama 0.6.2), fastapi 0.141.1, httpx 0.28.1, pydantic 2.13.5, SQLAlchemy 2.0.52, PyJWT 2.13.0, structlog 26.1.0. No OpenAI, Anthropic, Sentry or LangChain community packages are installed; a test asserts they are not importable.
+- Dependencies: langchain-core 1.6.1, langgraph 1.2.11, langchain-ollama 1.1.0 (ollama 0.6.2), fastapi 0.141.1, httpx 0.28.1, pydantic 2.13.5, SQLAlchemy 2.0.52, PyJWT 2.13.0, structlog 26.1.0. No OpenAI, Anthropic, Sentry or LangChain community packages are installed; a test asserts they are not importable.
 
 Proof status:
-- backend/tests/test_runner.py runs a whole review (fake GitHub via respx, fake model) under the socket-level guard: passes.
+
+- backend/tests/test_runner.py runs whole reviews (fake GitHub via respx, fake model) under the socket-level guard: passes.
+- Design statements above that the code does not match: validate_model_on_init is False (a missing model is reported by the health check and the first review, not at boot); the graph has three nodes (prioritise, analyse_file, synthesise); recursion_limit is the file count plus five; /health is minimal and unauthenticated, and Ollama reachability is reported on the token-gated /api/status.
 - backend/tests/test_no_egress.py with REVIEWBOT_E2E=1 runs the real reviewer against the real Ollama (qwen3.5:9b) under the same guard: passed on 2026-09-03 in 14 s, one finding at the correct line.
 - scripts/prove-local.sh builds Dockerfile.local (Ollama, qwen3.5:0.8b, the backend, a loopback fake GitHub) and runs one review with `docker run --network none`. Passed on 2026-09-03: the entrypoint confirmed no route out, the review completed in 4.5 s and was posted, the planted key was redacted from everything posted, and `.env` was skipped. The 0.8B stand-in found nothing in the diff, which is a statement about that model, not about egress; the host e2e with qwen3.5:9b found the injection at the right line.
 
@@ -209,4 +213,4 @@ Proof status:
 - MAX_PATCH_BYTES defaults to 32 000 and a patch is skipped when its estimated tokens plus the prompt overhead and the output budget would not fit OLLAMA_NUM_CTX.
 - The queue exposes liveness, abandons stuck workers after a grace period, and the backend reconciles rows left running at startup. Deliveries whose review failed or was interrupted accept GitHub's redelivery.
 - STRICT_LOCAL also refuses a non-loopback OLLAMA_BASE_URL and a LANGCHAIN_HANDLER variable.
-- 166 tests, including one that boots the real lifespan (real queue, real runner, fake GitHub, fake model) and drives a signed webhook to a completed review, and one that walks every route to prove the token gate.
+- 208 tests after the third round (166 after the second), including one that boots the real lifespan (real queue, real runner, fake GitHub, fake model) and drives a signed webhook to a completed review, and one that walks every route to prove the token gate.

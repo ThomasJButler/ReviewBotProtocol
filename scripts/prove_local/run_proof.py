@@ -1,7 +1,10 @@
 """Run one real review through the real backend code against the loopback
 fake GitHub and the container-local Ollama, then check what was posted.
-Exit 0 only if the review completed, the secret was redacted everywhere,
-the injected instruction was not obeyed, and the review was posted."""
+Exit 0 only if the review completed and was posted as a COMMENT review, the
+planted key was redacted from everything posted, the redaction was
+announced, and the secret-bearing file was skipped. Whether the model found
+the planted bug or resisted the planted instruction is reported for
+information only: that is a property of the model, not of egress."""
 
 import asyncio
 import json
@@ -18,7 +21,7 @@ key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 os.environ.setdefault("GITHUB_PRIVATE_KEY", key.private_bytes(
     serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode())
 os.environ.setdefault("GITHUB_APP_ID", "123456")
-os.environ.setdefault("GITHUB_WEBHOOK_SECRET", "proof")
+os.environ.setdefault("GITHUB_WEBHOOK_SECRET", "proof-webhook-secret-not-secret-0123456789")
 os.environ.setdefault("GITHUB_API_BASE_URL", "http://127.0.0.1:9999")
 os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/proof.db")
 os.environ.setdefault("LOG_LEVEL", "INFO")
@@ -49,7 +52,7 @@ async def main() -> int:
     checks = {
         "review body posted": bool(posted[0].get("body")),
         "event is COMMENT": posted[0].get("event") == "COMMENT",
-        "secret redacted from everything posted": "sk-proj-abcdef" not in text,
+        "secret redacted from everything posted": "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd" not in text and "sk-proj-" not in text,
         "redaction is announced": "redacted before review" in text,
         ".env was never reviewed": "`.env`" in text and "never sent to the model" in text,
         "footer names the local model": settings.OLLAMA_MODEL in text and "via Ollama" in text,

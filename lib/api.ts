@@ -84,6 +84,8 @@ export interface Status {
   database: boolean
   queue: {
     depth: number
+    alive: boolean
+    abandoned: number
     current: { repository: string; pr_number: number; head_sha: string } | null
   }
   limits: {
@@ -122,8 +124,34 @@ export type ApiResult<T> = { ok: true; data: T } | ApiFailure
 
 const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8000'
 
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+
 export function backendUrl(): string {
   return (process.env.BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/+$/, '')
+}
+
+/** The token is only ever sent to a backend on this machine. */
+export function backendUrlProblem(): string | null {
+  let url: URL
+  try {
+    url = new URL(backendUrl())
+  } catch {
+    return `BACKEND_URL is not a valid URL: ${backendUrl()}`
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return `BACKEND_URL must be http or https, not ${url.protocol}`
+  }
+  if (!LOOPBACK.has(url.hostname)) {
+    return `BACKEND_URL points at ${url.hostname}; the dashboard only sends LOCAL_API_TOKEN to this machine (127.0.0.1 or localhost)`
+  }
+  return null
+}
+
+const REVIEW_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isReviewId(value: unknown): value is string {
+  return typeof value === 'string' && REVIEW_ID.test(value)
 }
 
 async function call<T>(
@@ -138,6 +166,10 @@ async function call<T>(
       message:
         'LOCAL_API_TOKEN is not set for the dashboard, so it cannot reach the backend API.',
     }
+  }
+  const problem = backendUrlProblem()
+  if (problem) {
+    return { ok: false, kind: 'config', message: problem }
   }
 
   let response: Response
@@ -204,7 +236,15 @@ export function listReviews(params: {
 }
 
 export function getReview(id: string): Promise<ApiResult<ReviewDetail>> {
-  return call<ReviewDetail>(`/api/reviews/${encodeURIComponent(id)}`)
+  if (!isReviewId(id)) {
+    return Promise.resolve({
+      ok: false,
+      kind: 'http',
+      message: 'Not a review id.',
+      status: 404,
+    })
+  }
+  return call<ReviewDetail>(`/api/reviews/${id}`)
 }
 
 export function getStatus(): Promise<ApiResult<Status>> {
@@ -219,7 +259,23 @@ export function setFeedback(
   id: string,
   useful: boolean | null
 ): Promise<ApiResult<{ id: string; useful: boolean | null }>> {
-  return call(`/api/reviews/${encodeURIComponent(id)}/feedback`, {
+  if (!isReviewId(id)) {
+    return Promise.resolve({
+      ok: false,
+      kind: 'http',
+      message: 'Not a review id.',
+      status: 404,
+    })
+  }
+  if (useful !== true && useful !== false && useful !== null) {
+    return Promise.resolve({
+      ok: false,
+      kind: 'http',
+      message: 'Not a valid answer.',
+      status: 400,
+    })
+  }
+  return call(`/api/reviews/${id}/feedback`, {
     method: 'POST',
     body: JSON.stringify({ useful }),
   })

@@ -16,12 +16,7 @@ import type { Review, Severity } from '@/lib/api'
 
 function Useful({ useful }: { useful: boolean | null }) {
   if (useful === null) {
-    return (
-      <span className="text-muted-foreground">
-        <span aria-hidden="true">—</span>
-        <span className="sr-only">No answer</span>
-      </span>
-    )
+    return <span className="text-muted-foreground">No answer</span>
   }
   const Icon = useful ? ThumbsUp : ThumbsDown
   return (
@@ -112,7 +107,7 @@ export function ReviewsTable({
                 </time>
               </TableCell>
               <TableCell className="font-mono text-xs">
-                {review.model ?? '—'}
+                {review.model ?? 'none'}
               </TableCell>
               <TableCell className="whitespace-nowrap tabular-nums">
                 {review.files_reviewed}

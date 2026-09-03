@@ -34,7 +34,8 @@ CLEANUP_SECONDS = 15
 
 
 class Superseded(Exception):
-    """The PR head moved while this job was running; a newer job will follow."""
+    """The PR head moved while this job was running, or this head was already
+    reviewed; nothing is posted and the job ends as 'superseded'."""
 
 
 @dataclass
@@ -117,12 +118,14 @@ def prepare_files(selected: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]],
 
 async def _finish(deps: RunnerDeps, review_id: str, delivery_id: str, review_update: Dict[str, Any],
                   delivery_status: str, findings: Optional[List[Dict[str, Any]]] = None) -> None:
+    """One transaction for the review row, its findings and the delivery row."""
     async with deps.session_factory() as session:
         repo_db = ReviewRepository(session)
-        await repo_db.update(review_id, review_update)
+        await repo_db.update(review_id, review_update, commit=False)
         if findings:
-            await repo_db.add_findings(review_id, findings)
-        await WebhookRepository(session).mark(delivery_id, status=delivery_status, review_id=review_id)
+            await repo_db.add_findings(review_id, findings, commit=False)
+        await WebhookRepository(session).mark(delivery_id, status=delivery_status, review_id=review_id, commit=False)
+        await session.commit()
 
 
 async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
@@ -130,7 +133,12 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
     review_id = str(uuid.uuid4())
     started = time.perf_counter()
     async with deps.session_factory() as session:
-        await ReviewRepository(session).create({
+        repo_db = ReviewRepository(session)
+        if await repo_db.completed_for(job.repo, job.pr_number, job.head_sha):
+            await WebhookRepository(session).mark(job.delivery_id, status="duplicate")
+            logger.info("head already reviewed, skipping", repo=job.repo, pr=job.pr_number, head=job.head_sha[:12])
+            raise Superseded("this head was already reviewed")
+        await repo_db.create({
             "id": review_id, "repository": job.repo, "pr_number": job.pr_number, "head_sha": job.head_sha,
             "is_fork": job.is_fork, "status": "running", "model": settings.OLLAMA_MODEL,
             "delivery_id": job.delivery_id or None, "started_at": get_utc_timestamp(),
@@ -171,6 +179,9 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                                  redaction_total=redaction_total, files_errored=len(errored))
         posted = await client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
         comment_url = posted.get("html_url")
+        # The review is live on GitHub now: record its URL before anything else can interrupt us.
+        async with deps.session_factory() as session:
+            await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
         duration = time.perf_counter() - started
         all_failed = bool(results) and not succeeded
 
@@ -196,22 +207,23 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
     except BaseException as e:
         elapsed = time.perf_counter() - started
         if isinstance(e, asyncio.CancelledError):
-            status = "timed_out" if elapsed >= settings.REVIEW_TIMEOUT_SECONDS - 1 else "superseded"
-            message = f"review {status.replace('_', ' ')} after {elapsed:.0f}s"
+            reason = job.cancel_reason or "superseded"
+            status = {"timeout": "timed_out", "shutdown": "interrupted"}.get(reason, "superseded")
+            message = f"review {status.replace('_', ' ')} after {elapsed:.0f}s ({reason})"
         elif isinstance(e, Superseded):
             status, message = "superseded", str(e)
         else:
             status = "failed"
             message = sanitise(redact(f"{type(e).__name__}: {e}")[0], 500)
-        try:
-            await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
-                "status": status, "error_message": message, "duration_seconds": elapsed,
-                "completed_at": get_utc_timestamp()}, status)), timeout=CLEANUP_SECONDS)
-        except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as cleanup_error:
-            logger.error("could not record the review outcome", review_id=review_id, error=type(cleanup_error).__name__)
+        if not (isinstance(e, Superseded) and "already reviewed" in str(e)):
+            try:
+                await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
+                    "status": status, "error_message": message, "duration_seconds": elapsed,
+                    "completed_at": get_utc_timestamp()}, status)), timeout=CLEANUP_SECONDS)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as cleanup_error:
+                logger.error("could not record the review outcome", review_id=review_id, error=type(cleanup_error).__name__)
         if isinstance(e, Superseded):
             logger.info("review superseded", repo=job.repo, pr=job.pr_number, reason=str(e))
-            return ReviewOutcome(review_id, 0, 0, 0, None)
         raise
     finally:
         try:

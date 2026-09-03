@@ -21,9 +21,12 @@ export const dynamic = 'force-dynamic'
 export default async function ReviewsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ repository?: string }>
+  searchParams: Promise<{ repository?: string | string[] }>
 }) {
-  const { repository } = await searchParams
+  const params = await searchParams
+  const repository = Array.isArray(params.repository)
+    ? params.repository[0]
+    : params.repository
   const [reviews, status] = await Promise.all([
     listReviews({ repository, limit: 50 }),
     getStatus(),

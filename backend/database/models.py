@@ -6,6 +6,7 @@ quoted line from a diff that has already been through redaction."""
 
 import json
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
@@ -17,6 +18,10 @@ from .connection import Base
 
 def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class JSONString(TypeDecorator):
@@ -59,7 +64,7 @@ class Review(Base):
     summary = Column(Text, nullable=True)
     useful = Column(Boolean, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False, index=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -79,7 +84,7 @@ class Finding(Base):
     evidence = Column(Text, nullable=True)
     recommendation = Column(Text, nullable=True)
     confidence = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
     review = relationship("Review", back_populates="findings")
 
@@ -93,6 +98,6 @@ class WebhookDelivery(Base):
     repository = Column(String(255), nullable=True, index=True)
     pr_number = Column(Integer, nullable=True)
     head_sha = Column(String(40), nullable=True)
-    received_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    received_at = Column(DateTime(timezone=True), default=_now, nullable=False, index=True)
     status = Column(String(20), nullable=False, default="received")  # received, queued, running, completed, failed
     review_id = Column(String(36), nullable=True)

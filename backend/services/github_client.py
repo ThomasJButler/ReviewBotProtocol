@@ -37,7 +37,7 @@ class GitHubClient:
 
     async def _client(self) -> httpx.AsyncClient:
         if self._http is None:
-            self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+            self._http = httpx.AsyncClient(timeout=30.0, follow_redirects=False)
         return self._http
 
     async def aclose(self) -> None:

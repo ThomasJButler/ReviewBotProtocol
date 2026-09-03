@@ -14,6 +14,7 @@ import { getReview, type Finding, type Severity } from '@/lib/api'
 import {
   formatDuration,
   formatWhen,
+  isGitHubUrl,
   pullRequestUrl,
   shortSha,
 } from '@/lib/utils'
@@ -109,9 +110,9 @@ export default async function ReviewDetailPage({
             Pull request on GitHub
             <ExternalLink aria-hidden="true" className="size-3.5" />
           </a>
-          {review.comment_url ? (
+          {isGitHubUrl(review.comment_url) ? (
             <a
-              href={review.comment_url}
+              href={review.comment_url ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 rounded-sm text-sm underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -128,7 +129,7 @@ export default async function ReviewDetailPage({
           <span className="font-mono text-xs">{shortSha(review.head_sha)}</span>
         </Fact>
         <Fact label="Model">
-          <span className="font-mono text-xs">{review.model ?? '—'}</span>
+          <span className="font-mono text-xs">{review.model ?? 'none'}</span>
         </Fact>
         <Fact label="Started (UTC)">
           <time dateTime={review.created_at ?? undefined}>
@@ -144,9 +145,13 @@ export default async function ReviewDetailPage({
         </Fact>
       </dl>
 
-      {review.status === 'failed' && review.error_message ? (
+      {review.status !== 'completed' && review.error_message ? (
         <div className="rounded-lg border border-border bg-muted/50 p-4">
-          <h2 className="text-sm font-semibold">The review failed</h2>
+          <h2 className="text-sm font-semibold">
+            {review.status === 'failed'
+              ? 'The review failed'
+              : 'The review did not complete'}
+          </h2>
           <p className="mt-1 font-mono text-xs break-words text-muted-foreground">
             {review.error_message}
           </p>

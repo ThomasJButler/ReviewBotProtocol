@@ -35,7 +35,8 @@ class WebhookRepository:
             return False
         return True
 
-    async def mark(self, delivery_id: Optional[str], status: str, review_id: Optional[str] = None) -> None:
+    async def mark(self, delivery_id: Optional[str], status: str, review_id: Optional[str] = None,
+                   commit: bool = True) -> None:
         if not delivery_id:
             return
         row = await self.session.get(WebhookDelivery, delivery_id)
@@ -44,7 +45,8 @@ class WebhookRepository:
         row.status = status
         if review_id:
             row.review_id = review_id
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
 
     async def mark_interrupted(self) -> int:
         result = await self.session.execute(

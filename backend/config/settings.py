@@ -103,6 +103,17 @@ class Settings(BaseSettings):
         return bool(v)
 
     @model_validator(mode="after")
+    def check_secrets(self):
+        """Catch the two ways a copied .env.example ends up with a useless secret."""
+        for name in ("GITHUB_WEBHOOK_SECRET", "LOCAL_API_TOKEN"):
+            value = getattr(self, name) or ""
+            if name == "LOCAL_API_TOKEN" and not value:
+                continue
+            if value.lstrip().startswith("#") or len(value) < 16:
+                raise ValueError(f"{name} must be at least 16 characters and not a comment; generate one with: openssl rand -hex 32")
+        return self
+
+    @model_validator(mode="after")
     def refuse_to_leak(self):
         """The local-only guard. Tracing variables are always fatal because
         langchain-core would post every prompt to LangSmith. Cloud API keys
@@ -119,6 +130,9 @@ class Settings(BaseSettings):
             if host not in LOOPBACK_HOSTS:
                 raise LocalOnlyViolation(
                     f"OLLAMA_BASE_URL points at {host!r}; under STRICT_LOCAL the model must be on this machine (loopback)")
+            if self.OLLAMA_MODEL.lower().endswith("-cloud") or ":cloud" in self.OLLAMA_MODEL.lower():
+                raise LocalOnlyViolation(
+                    f"OLLAMA_MODEL {self.OLLAMA_MODEL!r} looks like an Ollama cloud model, which would relay prompts off this machine")
             for name in TRACING_KEY_VARS + CLOUD_KEY_VARS:
                 if os.environ.get(name):
                     raise LocalOnlyViolation(

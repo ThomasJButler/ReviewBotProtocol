@@ -57,30 +57,42 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(status_code=400, detail="body is not valid JSON")
 
-    if event == "ping":
-        return _ok("pong")
-    if event != "pull_request":
-        return _ok("ignored", github_event=event)
+    deliveries = WebhookRepository(session)
+    pr = None
+    if event == "pull_request":
+        try:
+            pr = PRWebhookPayload.model_validate(payload)
+        except ValidationError:
+            raise HTTPException(status_code=400, detail="payload did not match the pull_request schema")
 
-    try:
-        pr = PRWebhookPayload.model_validate(payload)
-    except ValidationError:
-        raise HTTPException(status_code=400, detail="payload did not match the pull_request schema")
+    # Every signed delivery is recorded, so the Status page shows pings and
+    # ignored events too, and so a replay of any of them is caught.
+    recorded = await deliveries.record(
+        delivery_id, event, pr.action if pr else (payload.get("action") if isinstance(payload, dict) else None),
+        pr.repository.full_name if pr else None, pr.number if pr else None, pr.pull_request.head.sha if pr else None)
+    if not recorded:
+        logger.warning("duplicate delivery ignored", delivery_id=delivery_id, github_event=event)
+        return _ok("duplicate", delivery_id=delivery_id)
+
+    if event == "ping":
+        await deliveries.mark(delivery_id, "pong")
+        return _ok("pong")
+    if pr is None:
+        await deliveries.mark(delivery_id, "ignored")
+        return _ok("ignored", github_event=event)
 
     try:
         action = PRAction(pr.action)
     except ValueError:
         action = None
     if action not in REVIEW_TRIGGERS:
+        await deliveries.mark(delivery_id, "ignored")
         return _ok("ignored", action=pr.action)
     if pr.pull_request.draft and not settings.REVIEW_DRAFTS:
+        await deliveries.mark(delivery_id, "skipped_draft")
         return _ok("skipped_draft", pr_number=pr.number)
 
     head_sha = pr.pull_request.head.sha
-    recorded = await WebhookRepository(session).record(delivery_id, event, pr.action, pr.repository.full_name, pr.number, head_sha)
-    if not recorded:
-        logger.warning("duplicate delivery ignored", delivery_id=delivery_id, repo=pr.repository.full_name, pr=pr.number)
-        return _ok("duplicate", delivery_id=delivery_id)
 
     queue = request.app.state.queue
     try:
@@ -89,12 +101,12 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
                                      is_fork=pr.is_fork, fork_repo=pr.fork_repo)
     except Exception as e:
         logger.error("queue submit failed", error=type(e).__name__, delivery_id=delivery_id)
-        await WebhookRepository(session).mark(delivery_id, "failed")
+        await deliveries.mark(delivery_id, "failed")
         raise HTTPException(status_code=503, detail="review queue unavailable; GitHub may redeliver")
     if outcome in ("shutting_down", "queue_dead"):
-        await WebhookRepository(session).mark(delivery_id, "interrupted")
+        await deliveries.mark(delivery_id, "interrupted")
         raise HTTPException(status_code=503, detail="review queue unavailable; GitHub may redeliver")
-    await WebhookRepository(session).mark(delivery_id, "queued" if outcome != "duplicate" else "duplicate")
+    await deliveries.mark(delivery_id, "queued" if outcome != "duplicate" else "duplicate")
     logger.info("webhook accepted", repo=pr.repository.full_name, pr=pr.number, action=pr.action,
                 head=head_sha[:12], fork=pr.is_fork, outcome=outcome, delivery_id=delivery_id)
     return _ok("queued", 202, outcome=outcome, repository=pr.repository.full_name, pr_number=pr.number, head_sha=head_sha)

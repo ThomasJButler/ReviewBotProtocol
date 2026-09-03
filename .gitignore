@@ -88,6 +88,17 @@ temp/
 backend/.venv/
 backend/.env
 backend/logs/
+backend/*.db.lock
+
+# Private keys and secrets, wherever they land
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.env.*
+!.env.example
 
 # Python
 __pycache__/

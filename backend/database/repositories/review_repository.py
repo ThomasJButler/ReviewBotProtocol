@@ -20,21 +20,29 @@ class ReviewRepository:
         await self.session.refresh(review)
         return review
 
-    async def update(self, review_id: str, data: Dict[str, Any]) -> Optional[Review]:
+    async def update(self, review_id: str, data: Dict[str, Any], commit: bool = True) -> Optional[Review]:
         review = await self.session.get(Review, review_id)
         if review is None:
             return None
         for key, value in data.items():
             if hasattr(review, key):
                 setattr(review, key, value)
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
         return review
 
-    async def add_findings(self, review_id: str, findings: List[Dict[str, Any]]) -> int:
+    async def add_findings(self, review_id: str, findings: List[Dict[str, Any]], commit: bool = True) -> int:
         for f in findings:
             self.session.add(Finding(review_id=review_id, **f))
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
         return len(findings)
+
+    async def completed_for(self, repository: str, pr_number: int, head_sha: str) -> Optional[Review]:
+        """A completed review of exactly this head, if one exists."""
+        stmt = select(Review).where(Review.repository == repository, Review.pr_number == pr_number,
+                                    Review.head_sha == head_sha, Review.status == "completed").limit(1)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get(self, review_id: str) -> Optional[Review]:
         stmt = select(Review).options(selectinload(Review.findings)).where(Review.id == review_id)

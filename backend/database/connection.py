@@ -33,6 +33,14 @@ def _async_url(url: str) -> str:
     return url
 
 
+def database_path(database_url: Optional[str] = None) -> Optional[Path]:
+    """The SQLite file the settings point at, or None for a non-file database."""
+    url = _async_url(database_url or settings.DATABASE_URL)
+    if url.startswith("sqlite+aiosqlite:///") and ":memory:" not in url:
+        return Path(url[len("sqlite+aiosqlite:///"):])
+    return None
+
+
 async def init_db(database_url: Optional[str] = None) -> async_sessionmaker:
     global engine, AsyncSessionLocal
     url = _async_url(database_url or settings.DATABASE_URL)

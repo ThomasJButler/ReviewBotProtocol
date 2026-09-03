@@ -12,6 +12,7 @@ function describe(state: ApiResult<Status>): {
 } {
   if (!state.ok) return { text: 'Backend unreachable', tone: 'bad' }
   const { queue, ollama } = state.data
+  if (!queue.alive) return { text: 'Review worker stopped', tone: 'bad' }
   const queueText =
     queue.depth === 1 ? '1 job queued' : `${queue.depth} jobs queued`
   if (!ollama.reachable) {

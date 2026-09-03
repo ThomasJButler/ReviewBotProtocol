@@ -163,7 +163,23 @@ export default async function StatusPage() {
             </CardHeader>
             <CardContent>
               <dl className="divide-y divide-border">
+                <Row
+                  label="Worker"
+                  value={
+                    <YesNo
+                      value={status.data.queue.alive}
+                      yes="Running"
+                      no="Stopped"
+                    />
+                  }
+                />
                 <Row label="Depth" value={status.data.queue.depth} />
+                {status.data.queue.abandoned > 0 ? (
+                  <Row
+                    label="Stuck workers"
+                    value={status.data.queue.abandoned}
+                  />
+                ) : null}
                 <Row
                   label="Current job"
                   value={
@@ -271,9 +287,9 @@ export default async function StatusPage() {
                       {delivery.event}
                       {delivery.action ? `.${delivery.action}` : ''}
                     </TableCell>
-                    <TableCell>{delivery.repository ?? '—'}</TableCell>
+                    <TableCell>{delivery.repository ?? 'none'}</TableCell>
                     <TableCell className="tabular-nums">
-                      {delivery.pr_number ? `#${delivery.pr_number}` : '—'}
+                      {delivery.pr_number ? `#${delivery.pr_number}` : 'none'}
                     </TableCell>
                     <TableCell>
                       <ReviewStatusBadge status={delivery.status} />
@@ -287,7 +303,7 @@ export default async function StatusPage() {
                           Open
                         </Link>
                       ) : (
-                        '—'
+                        'none'
                       )}
                     </TableCell>
                   </TableRow>
@@ -303,9 +319,10 @@ export default async function StatusPage() {
         <p className="max-w-prose text-sm text-muted-foreground">
           A review reads the diff from GitHub, thinks locally and writes the
           comment back. Nothing else leaves the machine. Two commands prove it:
-          the first wraps a whole review in a socket-level guard that allows
-          loopback only, the second runs a real review inside a container with
-          no network at all.
+          the first runs whole reviews (GitHub answered in-process, a fake
+          model) inside a socket-level guard that allows loopback only, the
+          second runs a real review with a real model inside a container with no
+          network at all.
         </p>
         <CopySnippet
           text="cd backend && .venv/bin/python -m pytest tests/test_no_egress.py"

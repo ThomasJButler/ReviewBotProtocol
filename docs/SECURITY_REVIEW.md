@@ -21,12 +21,12 @@ The intended end state is a tool that runs entirely on the owner's machine, wher
 Status at 2026-09-03 after the backend rewrite, the frontend rebuild and the docs pass: 89 fixed, 1 mitigated, 1 informational.
 
 | Severity | Count |
-|---|---|
-| critical | 1 |
-| high | 21 |
-| medium | 34 |
-| low | 24 |
-| info | 11 |
+| -------- | ----- |
+| critical | 1     |
+| high     | 21    |
+| medium   | 34    |
+| low      | 24    |
+| info     | 11    |
 
 The four findings that matter most are not classic vulnerabilities but total failures of the product path, in execution order: the GitHub client cannot mint a token (SR-08), the LangGraph result shape crashes its consumers (SR-04), the prompts never contain the code (SR-03), and the status logic is inverted (SR-14, SR-09). Each masks the next, which is why the two highest-impact security findings (inline execution in the webhook request, and unauthenticated paid endpoints) were downgraded from critical to high by the verifiers: today they cannot fully fire. They become critical the moment the pipeline is repaired, so they are fixed in the same change.
 
@@ -42,7 +42,7 @@ The four findings that matter most are not classic vulnerabilities but total fai
 
 What it is.
 
-Three exact pins in the same file contradict each other. backend/requirements.txt:21 pins langchain==0.3.13, :23 pins langchain-core==0.3.28, :24 pins langchain-community==0.3.27. The published metadata for langchain-community 0.3.27 declares requires_dist entries 'langchain<1.0.0,>=0.3.26' and 'langchain-core<1.0.0,>=0.3.66'. Under PEP 440, 0.3.13 < 0.3.26 and 0.3.28 < 0.3.66, so both pins violate it. pip's resolver has no candidate set and terminates with ResolutionImpossible. This is not host-specific: it fails on 3.11, 3.12, 3.13 and 3.14 alike, and it fails before any wheel is downloaded. langchain-community cannot simply be deleted from the file either, because it is needed at runtime: backend/services/ai_reviewer.py:19 does 'from langchain.callbacks import get_openai_callback', and in langchain 0.3.13 that name is only a lazy re-export of langchain_community.callbacks.manager.get_openai_callback (see the create_importer / TYPE_CHECKING block in libs/langchain/langchain/callbacks/__init__.py at tag langchain==0.3.13), and it is actually called at ai_reviewer.py:1085 and :1260.
+Three exact pins in the same file contradict each other. backend/requirements.txt:21 pins langchain==0.3.13, :23 pins langchain-core==0.3.28, :24 pins langchain-community==0.3.27. The published metadata for langchain-community 0.3.27 declares requires_dist entries 'langchain<1.0.0,>=0.3.26' and 'langchain-core<1.0.0,>=0.3.66'. Under PEP 440, 0.3.13 < 0.3.26 and 0.3.28 < 0.3.66, so both pins violate it. pip's resolver has no candidate set and terminates with ResolutionImpossible. This is not host-specific: it fails on 3.11, 3.12, 3.13 and 3.14 alike, and it fails before any wheel is downloaded. langchain-community cannot simply be deleted from the file either, because it is needed at runtime: backend/services/ai_reviewer.py:19 does 'from langchain.callbacks import get_openai_callback', and in langchain 0.3.13 that name is only a lazy re-export of langchain_community.callbacks.manager.get_openai_callback (see the create_importer / TYPE_CHECKING block in libs/langchain/langchain/callbacks/**init**.py at tag langchain==0.3.13), and it is actually called at ai_reviewer.py:1085 and :1260.
 
 What an attacker achieves.
 
@@ -104,7 +104,7 @@ No attacker needed. Every finding, score and commit status ever produced is hall
 
 Evidence.
 
-backend/services/ai_reviewer.py:15-16 imports (re-exports of langchain_core), :292-349, :337-348, :1078-1082, :1166-1262; upstream langchain-core 0.3.28 libs/core/langchain_core/prompts/chat.py:1012-1022, 1081-1083, 1222-1224, 1464-1465; langchain 0.3.13 chains/llm.py:108, 222-223, chains/base.py:288-290, 686-691, prompts/__init__.py:38-43, schema/__init__.py:9-15. No local runtime repro possible (no Python with langchain installed).
+backend/services/ai_reviewer.py:15-16 imports (re-exports of langchain_core), :292-349, :337-348, :1078-1082, :1166-1262; upstream langchain-core 0.3.28 libs/core/langchain_core/prompts/chat.py:1012-1022, 1081-1083, 1222-1224, 1464-1465; langchain 0.3.13 chains/llm.py:108, 222-223, chains/base.py:288-290, 686-691, prompts/**init**.py:38-43, schema/**init**.py:9-15. No local runtime repro possible (no Python with langchain installed).
 
 Fix.
 
@@ -280,7 +280,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 
 What it is.
 
-The branch is v1.1-Local-AI and the stated goal is fully local, but there is zero implementation and the current shape actively blocks it. settings.py:34 declares `OPENAI_API_KEY: str` with no default, and settings.py:151 instantiates `settings = Settings()` at import time, so a missing key raises pydantic ValidationError before FastAPI ever starts, even if no OpenAI call is ever made. Both ChatOpenAI construction sites (ai_reviewer.py:207-213 in AIReviewer.__init__, and ai_reviewer.py:1417-1422 in get_ai_health) pass model_name/temperature/max_tokens/openai_api_key and no base_url or openai_api_base. requirements.txt has no ollama or langchain-ollama package, backend/.env.example:22-25 has no OPENAI_BASE_URL, and a repo-wide grep for ollama, base_url, 11434, api_base across backend/ returns only DATABASE_URL matches.
+The branch is v1.1-Local-AI and the stated goal is fully local, but there is zero implementation and the current shape actively blocks it. settings.py:34 declares `OPENAI_API_KEY: str` with no default, and settings.py:151 instantiates `settings = Settings()` at import time, so a missing key raises pydantic ValidationError before FastAPI ever starts, even if no OpenAI call is ever made. Both ChatOpenAI construction sites (ai_reviewer.py:207-213 in AIReviewer.**init**, and ai_reviewer.py:1417-1422 in get_ai_health) pass model_name/temperature/max_tokens/openai_api_key and no base_url or openai_api_base. requirements.txt has no ollama or langchain-ollama package, backend/.env.example:22-25 has no OPENAI_BASE_URL, and a repo-wide grep for ollama, base_url, 11434, api_base across backend/ returns only DATABASE_URL matches.
 
 What an attacker achieves.
 
@@ -328,7 +328,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/github_client.py:9
 - Difficulty for an attacker: easy
 - Category: test-design
-- Status: Fixed in the backend rewrite (2026-09-03): the proof is a socket-level guard (test_runner, test_no_egress) plus docker run --network none (scripts/prove-local.sh).
+- Status: Fixed in the backend rewrite (2026-09-03): the proof is a socket-level guard below every HTTP stack (test_runner wraps whole reviews in it with respx answering GitHub in-process; test_no_egress wraps a real-model review in it, opt-in) plus docker run --network none (scripts/prove-local.sh).
 
 What it is.
 
@@ -444,7 +444,7 @@ Murphy achieves a second, independent install failure that survives fixing the l
 
 Evidence.
 
-python3 -VV to 'Python 3.14.6 (main, Jun 10 2026, 10:03:53)'; which -a python3 to /usr/local/bin/python3 first. scripts/quick-setup.sh:109 'python3 -m venv .venv'; :115 'pip install -r requirements.txt'. backend/README.md:56 'python3 -m venv .venv'; :65 'pip install -r requirements.txt'. backend/requirements.txt:4 'pydantic==2.9.2'; :27 'tiktoken==0.8.0'; :37 'greenlet==3.1.1  # Required for SQLAlchemy async support'. curl raw.githubusercontent.com/pydantic/pydantic/v2.9.2/pyproject.toml line 53: 'pydantic-core==2.23.4'.
+python3 -VV to 'Python 3.14.6 (main, Jun 10 2026, 10:03:53)'; which -a python3 to /usr/local/bin/python3 first. scripts/quick-setup.sh:109 'python3 -m venv .venv'; :115 'pip install -r requirements.txt'. backend/README.md:56 'python3 -m venv .venv'; :65 'pip install -r requirements.txt'. backend/requirements.txt:4 'pydantic==2.9.2'; :27 'tiktoken==0.8.0'; :37 'greenlet==3.1.1 # Required for SQLAlchemy async support'. curl raw.githubusercontent.com/pydantic/pydantic/v2.9.2/pyproject.toml line 53: 'pydantic-core==2.23.4'.
 
 Fix.
 
@@ -484,7 +484,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/ai_reviewer.py:1081
 - Difficulty for an attacker: trivial
 - Category: data-exposure
-- Status: Fixed in the backend rewrite (2026-09-03): services/redaction.py runs before the prompt, the comment, the log and the database (test_redaction, test_runner).
+- Status: Fixed in the backend rewrite (2026-09-03): services/redaction.py runs on the patch before the prompt, the comment and the database, and on model output before it is logged or stored (test_redaction, test_runner).
 
 What it is.
 
@@ -496,7 +496,7 @@ A single one-line fix to the prompt construction (converting SystemMessage/Human
 
 Evidence.
 
-backend/services/github_client.py:194 `patch = file_data.get("patch")` to :209 `patch=patch`; backend/models/github.py:128-131 the only transformation is `if v and len(v) > 100000: return v[:100000] + "\n... (truncated)"`; backend/services/ai_reviewer.py:1078-1081 `chain_input = {"filename": ..., "language": ..., "code_diff": file.patch}`. Proof the placeholder is currently inert: langchain-core 0.3.28 prompts/chat.py `_convert_to_message` returns a BaseMessage unchanged (`elif isinstance(message, BaseMessage): _message = message`), and ChatPromptTemplate.__init__ only does `input_vars.update(_message.input_variables)` for BaseChatPromptTemplate/BaseMessagePromptTemplate, so input_variables [...]
+backend/services/github_client.py:194 `patch = file_data.get("patch")` to :209 `patch=patch`; backend/models/github.py:128-131 the only transformation is `if v and len(v) > 100000: return v[:100000] + "\n... (truncated)"`; backend/services/ai_reviewer.py:1078-1081 `chain_input = {"filename": ..., "language": ..., "code_diff": file.patch}`. Proof the placeholder is currently inert: langchain-core 0.3.28 prompts/chat.py `_convert_to_message` returns a BaseMessage unchanged (`elif isinstance(message, BaseMessage): _message = message`), and ChatPromptTemplate.**init** only does `input_vars.update(_message.input_variables)` for BaseChatPromptTemplate/BaseMessagePromptTemplate, so input_variables [...]
 
 Fix.
 
@@ -924,7 +924,7 @@ Verification: 2 adversarial verifiers, 0 refuted.
 - Where: package.json:33
 - Difficulty for an attacker: hard
 - Category: deps-history-scripts
-- Status: Fixed in the frontend rebuild (2026-09-03): every unused package removed; the runtime set is next, react, next-themes, radix-ui, shadcn, lucide-react and three utilities.
+- Status: Fixed in the frontend rebuild (2026-09-03): every unused package removed; the runtime set is next, react, react-dom, next-themes, radix-ui, lucide-react and five small utilities (class-variance-authority, clsx, server-only, tailwind-merge, tw-animate-css); the shadcn CSS layer is vendored rather than depended on.
 
 What it is.
 
@@ -1002,7 +1002,7 @@ The owner writes backend/test_no_egress.py or a root tests/test_egress.py, runs 
 
 Fix.
 
-Put every Python test under backend/tests/ (create backend/tests/__init__.py and backend/tests/conftest.py, both confirmed trackable) and do not create a root tests/ directory. Confirmed trackable by `git check-ignore` returning nothing for: backend/tests/__init__.py, backend/tests/conftest.py, backend/tests/test_no_egress.py, backend/tests/egress/conftest.py, backend/tests/egress/test_no_egress.py, scripts/egress_capture.sh, scripts/egress-allow [...]
+Put every Python test under backend/tests/ (create backend/tests/**init**.py and backend/tests/conftest.py, both confirmed trackable) and do not create a root tests/ directory. Confirmed trackable by `git check-ignore` returning nothing for: backend/tests/**init**.py, backend/tests/conftest.py, backend/tests/test_no_egress.py, backend/tests/egress/conftest.py, backend/tests/egress/test_no_egress.py, scripts/egress_capture.sh, scripts/egress-allow [...]
 
 Verification: 1 adversarial verifier, 0 refuted.
 
@@ -1016,7 +1016,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-There is nothing to hang the test on. A find for test_*.py, *_test.py, *.test.ts*, *.spec.ts*, conftest.py, pytest.ini and tox.ini across the repo excluding node_modules returns zero results, and .github does not exist, so there is no CI to keep the test honest. On the Python side pytest==7.4.3, pytest-asyncio==0.21.1 and pytest-cov==4.1.0 are pinned at backend/requirements.txt:56-58, but no pyproject.toml, setup.cfg or pytest.ini exists at the repo root or under backend/, so pytest-asyncio 0.21.1 runs in its default strict mode and every async test silently needs an explicit @pytest.mark.asyn [...]
+There is nothing to hang the test on. A find for test_*.py, *_test.py, _.test.ts_, _.spec.ts_, conftest.py, pytest.ini and tox.ini across the repo excluding node_modules returns zero results, and .github does not exist, so there is no CI to keep the test honest. On the Python side pytest==7.4.3, pytest-asyncio==0.21.1 and pytest-cov==4.1.0 are pinned at backend/requirements.txt:56-58, but no pyproject.toml, setup.cfg or pytest.ini exists at the repo root or under backend/, so pytest-asyncio 0.21.1 runs in its default strict mode and every async test silently needs an explicit @pytest.mark.asyn [...]
 
 What an attacker achieves.
 
@@ -1024,7 +1024,7 @@ An async egress test written without the marker is collected, skipped, and repor
 
 Fix.
 
-Add backend/pytest.ini (or a [tool.pytest.ini_options] block) setting `asyncio_mode = auto`, `testpaths = tests` and a `no_egress` marker, so async tests cannot silently skip. Add backend/tests/__init__.py and backend/tests/conftest.py. Add .github/workflows/egress.yml running the pytest suite (all paths confirmed trackable).
+Add backend/pytest.ini (or a [tool.pytest.ini_options] block) setting `asyncio_mode = auto`, `testpaths = tests` and a `no_egress` marker, so async tests cannot silently skip. Add backend/tests/**init**.py and backend/tests/conftest.py. Add .github/workflows/egress.yml running the pytest suite (all paths confirmed trackable).
 
 Verification: 1 adversarial verifier, 0 refuted.
 
@@ -1034,7 +1034,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: package.json:35
 - Difficulty for an attacker: moderate
 - Category: test-design
-- Status: Fixed in the backend rewrite (2026-09-03): socket-level guard in the tests and Dockerfile.local with --network none.
+- Status: Fixed in the backend rewrite (2026-09-03): socket-level guard around the whole-review tests and Dockerfile.local with --network none.
 
 What it is.
 
@@ -1126,7 +1126,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-backend/README.md:47-51 presents the primary install route as '2. Run the automated setup script: ```bash ./setup.sh ```', with the manual venv steps offered only as an alternative ('Or manually create virtual environment', :53). backend/setup.sh does not exist anywhere in the working tree, and a repo-wide find for any setup.sh returns nothing. It was deleted by commit 0579209 in the same 'portfolio presentation' cleanup that removed the Dockerfiles and the test suite. A reader following the README in order hits 'no such file or directory' on the very first command they are told to run.
+backend/README.md:47-51 presents the primary install route as '2. Run the automated setup script: `bash ./setup.sh `', with the manual venv steps offered only as an alternative ('Or manually create virtual environment', :53). backend/setup.sh does not exist anywhere in the working tree, and a repo-wide find for any setup.sh returns nothing. It was deleted by commit 0579209 in the same 'portfolio presentation' cleanup that removed the Dockerfiles and the test suite. A reader following the README in order hits 'no such file or directory' on the very first command they are told to run.
 
 What an attacker achieves.
 
@@ -1178,7 +1178,7 @@ A PR that adds or edits .env, .env.local, id_rsa, deploy_key.pem, terraform.tfva
 
 Fix.
 
-Replace both filters with one shared function that carries an explicit credential denylist matched on the full path and basename, not on Path.suffix: .env*, *.pem, *.key, *.p12, *.pfx, id_rsa*, id_ed25519*, .npmrc, .netrc, *.tfvars, *credentials*, *service-account*.json, *.jks. Files on that list should be reported as 'a credential file was changed' without their contents ever entering a prompt.
+Replace both filters with one shared function that carries an explicit credential denylist matched on the full path and basename, not on Path.suffix: .env*, *.pem, *.key, _.p12, *.pfx, id_rsa*, id_ed25519_, .npmrc, .netrc, *.tfvars, _credentials_, _service-account_.json, *.jks. Files on that list should be reported as 'a credential file was changed' without their contents ever entering a prompt.
 
 Verification: 1 adversarial verifier, 0 refuted.
 
@@ -1438,7 +1438,7 @@ Verification: 3 adversarial verifiers, 0 refuted.
 
 What it is.
 
-_parse_json_result (ai_reviewer.py:1217-1243) strips only a leading '```json' and trailing '```' (:1222-1225); any other fence or prose raises JSONDecodeError and returns [] (:1237-1240), indistinguishable from 'no issues'; a scalar is wrapped as [scalar] (:1232-1233). queue_processor.py:382 'if issue.get("line_number")' sits outside the try starting at :383, so a non-dict finding raises AttributeError into the 4x retry loop (:318-327); review_workflow.py:730 has no try, so the synthesize node raises, LangGraph aborts and ai_reviewer.py:955-957 falls back to re-running 6 calls per file plus sc [...]
+_parse_json_result (ai_reviewer.py:1217-1243) strips only a leading '`json' and trailing '`' (:1222-1225); any other fence or prose raises JSONDecodeError and returns [] (:1237-1240), indistinguishable from 'no issues'; a scalar is wrapped as [scalar] (:1232-1233). queue_processor.py:382 'if issue.get("line_number")' sits outside the try starting at :383, so a non-dict finding raises AttributeError into the 4x retry loop (:318-327); review_workflow.py:730 has no try, so the synthesize node raises, LangGraph aborts and ai_reviewer.py:955-957 falls back to re-running 6 calls per file plus sc [...]
 
 What an attacker achieves.
 
@@ -1834,7 +1834,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-Measured against real key shapes, the table at :231-250 covers AKIA, ghp_/gho_/ghu_/ghs_, legacy 48-char sk-, RSA/EC/DSA PEM headers and Stripe. It misses the current OpenAI project-key format sk-proj-*, GitHub fine-grained tokens github_pat_*, -----BEGIN OPENSSH PRIVATE KEY----- and -----BEGIN ENCRYPTED PRIVATE KEY-----, postgres://user:pass@host URLs, and generic high-entropy assignments entirely.
+Measured against real key shapes, the table at :231-250 covers AKIA, ghp_/gho_/ghu_/ghs_, legacy 48-char sk-, RSA/EC/DSA PEM headers and Stripe. It misses the current OpenAI project-key format sk-proj-_, GitHub fine-grained tokens github_pat__, -----BEGIN OPENSSH PRIVATE KEY----- and -----BEGIN ENCRYPTED PRIVATE KEY-----, postgres://user:pass@host URLs, and generic high-entropy assignments entirely.
 
 What an attacker achieves.
 
@@ -1842,7 +1842,7 @@ A redactor built naively on this table would pass a sk-proj- OpenAI key, a githu
 
 Fix.
 
-Rebuild the table from a maintained source (gitleaks rules or GitHub's published token formats) rather than extending this one. Add sk-proj-[A-Za-z0-9_-]{20,}, github_pat_[A-Za-z0-9_]{20,}, -----BEGIN [A-Z ]*PRIVATE KEY-----, [a-z]+://[^:@/\s]+:[^@/\s]+@ for URL credentials, and a generic (?i)(secret|token|passwd|password|api[_-]?key)\s*[=:]\s*\S{8,}. Drop the bare 40-char catch-all.
+Rebuild the table from a maintained source (gitleaks rules or GitHub's published token formats) rather than extending this one. Add sk-proj-[A-Za-z0-9_-]{20,}, github_pat_[A-Za-z0-9_]{20,}, -----BEGIN [A-Z ]_PRIVATE KEY-----, [a-z]+://[^:@/\s]+:[^@/\s]+@ for URL credentials, and a generic (?i)(secret|token|passwd|password|api[\_-]?key)\s_[=:]\s*\S{8,}. Drop the bare 40-char catch-all.
 
 Verification: 1 adversarial verifier, 0 refuted.
 
@@ -1856,7 +1856,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-README.md:21 states 'No live deployment, due to the sensitive nature of project.' Nothing in the repo deploys to Vercel: there is no CI workflow, and next.config.mjs has no headers() function, so none of the vercel.json headers apply under next dev or next start. Every clause is therefore dead: the CORS block granting Access-Control-Allow-Origin * together with Access-Control-Allow-Credentials true on /api/(.*) (:18-25), the rewrite /api/backend/:path* to /api/:path* whose source string appears nowhere else in the repo, the three env aliases (:69-73) referencing Vercel secrets, and the functio [...]
+README.md:21 states 'No live deployment, due to the sensitive nature of project.' Nothing in the repo deploys to Vercel: there is no CI workflow, and next.config.mjs has no headers() function, so none of the vercel.json headers apply under next dev or next start. Every clause is therefore dead: the CORS block granting Access-Control-Allow-Origin * together with Access-Control-Allow-Credentials true on /api/(._) (:18-25), the rewrite /api/backend/:path_ to /api/:path* whose source string appears nowhere else in the repo, the three env aliases (:69-73) referencing Vercel secrets, and the functio [...]
 
 What an attacker achieves.
 
@@ -1940,7 +1940,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/mock_reviewer.py:19
 - Difficulty for an attacker: trivial
 - Category: llm-pipeline
-- Status: Fixed in the backend rewrite (2026-09-03): the whole pipeline is local; test_runner proves a review completes with every non-loopback socket blocked.
+- Status: Fixed in the backend rewrite (2026-09-03): the whole pipeline is local; test_runner proves a review completes with every non-loopback socket blocked (GitHub answered in-process by respx, the model a fake; the real-model variant is the opt-in e2e test).
 
 What it is.
 
@@ -1966,7 +1966,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-Backend CORSMiddleware uses an explicit origin list with allow_credentials=True (backend/main.py:76-82; settings.py:17, :77-81) and sets no cookies. vercel.json:16-35 combines Access-Control-Allow-Origin '*' with Allow-Credentials 'true' on /api/*, which browsers refuse to honour, so cross-site reads only reach already-unauthenticated endpoints. next.config.mjs:6-10 serverActions.allowedOrigins is inert because there is no 'use server'. The real risk is 'fixing' the wildcard by reflecting Origin with credentials true, which would expose /api/auth/me and /api/github/prs.
+Backend CORSMiddleware uses an explicit origin list with allow_credentials=True (backend/main.py:76-82; settings.py:17, :77-81) and sets no cookies. vercel.json:16-35 combines Access-Control-Allow-Origin '_' with Allow-Credentials 'true' on /api/_, which browsers refuse to honour, so cross-site reads only reach already-unauthenticated endpoints. next.config.mjs:6-10 serverActions.allowedOrigins is inert because there is no 'use server'. The real risk is 'fixing' the wildcard by reflecting Origin with credentials true, which would expose /api/auth/me and /api/github/prs.
 
 What an attacker achieves.
 
@@ -1984,7 +1984,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: backend/services/ai_reviewer.py:1239
 - Difficulty for an attacker: hard
 - Category: data-logging
-- Status: Fixed in the backend rewrite (2026-09-03): raw model output and prompts are logged only under LOG_PROMPTS=true, after redaction.
+- Status: Fixed in the backend rewrite (2026-09-03): prompts and model output are logged only under LOG_PROMPTS=true, both after redaction (the output side was only fixed in the third round).
 
 What it is.
 
@@ -2134,18 +2134,174 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 ## Second round: review of the rewrite
 
-The rewritten backend was itself put through the same adversarial process on 2026-09-03 (four Opus reviewers with distinct lenses: security, correctness, GitHub API contract against the official docs, and test gaps; then verifiers per finding). 64 raw findings, 56 after merge, all 56 confirmed, none refuted. Every one was fixed the same day and the suite grew from 111 to 166 tests. The ones worth knowing about:
+The rewritten backend was itself put through the same adversarial process on 2026-09-03 (four Opus reviewers with distinct lenses: security, correctness, GitHub API contract against the official docs, and test gaps; then verifiers per finding). 64 raw findings, 56 after merge, all 56 confirmed, none refuted. Every one was fixed the same day and the suite grew from 111 to 208 tests. The ones worth knowing about:
 
 - The delimiter defence had a hole: a four-bracket `<<<<DIFF_DATA_END>>>` collapsed into the exact delimiter after the single-pass replace, so a PR author could forge the end of the untrusted block. Now the delimiters carry a per-request random nonce, anything in PR content that resembles a marker (any bracket run, any suffix) is rewritten to a bracket-free token, and the rendered prompt is checked for exactly one begin and one end before the model is called; a failed check skips the file and says so. Tests cover four-bracket, five-bracket, spaced and nonce-suffixed forgeries in both filenames and diffs.
 - The private-key redaction could swallow the rest of a patch when no END marker followed, and collapsed lines so comment line numbers drifted. Redaction is now line-preserving throughout and bounded per block.
 - Redaction now also catches unquoted assignments, npm and Slack app tokens, Azure account keys and passwords containing `@`, and no longer skips a real secret just because it contains the word `example`. Model output is redacted as well as PR content.
 - The sanitiser no longer has a 200-character tag limit to pad past; it also neutralises `www.` and e-mail autolinks, reference-style link definitions and every `@` mention, and quoted evidence goes inside a code span so it keeps its angle brackets.
-- The GitHub client only sends the installation token to the configured API host (a hostile Link header is refused), treats redirects as errors, merges `per_page` into every page, reports truncation, backs off using the rate-limit reset header, and only folds inline comments into the body when GitHub's 422 is actually about a comment line.
-- The queue survives any exception a worker raises, abandons a worker that ignores cancellation after a grace period, refuses jobs while shutting down, reports whether its loop is alive, and rows left running by a crash are marked interrupted at the next start so GitHub's redelivery is accepted.
+- The GitHub client only sends the installation token to the configured API host (a hostile Link header is refused), treats redirects as errors (the production client was still following them until the third round), merges `per_page` into every page, reports truncation, backs off using the rate-limit reset header, and only folds inline comments into the body when GitHub's 422 is actually about a comment line.
+- The queue survives any exception a worker raises, sets aside a worker that ignores cancellation after a grace period and waits for it before the next job, refuses jobs while shutting down, reports whether its loop is alive, and rows left running by a crash are marked interrupted at the next start so GitHub's redelivery is accepted.
 - The runner abandons a job when the PR head moved (before and after the model calls), counts files the model failed on separately and says so in the posted review, and picks the riskiest files before applying the file cap.
 - Fork detection fails closed when the source repository has been deleted; repository names are validated against a pattern before they reach an API path; a non-ASCII dashboard token is a 401 rather than a 500; every `/api` route is gated at the router, and a test walks the routes to prove it.
 
 The verified findings and votes of both rounds are kept in the session transcript; the durable record is this file and the tests named above.
+
+## Third round: the whole branch, after the fixes
+
+On 2026-09-03 the branch was reviewed a third time, this time everything that changed since main: the backend in its post-fix state, the new dashboard, the supply chain (lockfiles, CI, the container proof), the documentation against the code, and the tests themselves. Five Opus reviewers with distinct lenses, then Sonnet merged their findings and two or three Opus verifiers per finding tried to refute each one. 91 raw findings, 68 after merge, 67 confirmed, 1 refuted (three queue tests alleged to be timing races; the verifier ran them 50 times each and they held). Every confirmed finding was fixed the same day. The ones that mattered:
+
+- The dashboard bound to every network interface and has no login (high). Next's CLI defaults to 0.0.0.0, and nothing in the app checked who was asking, so anyone on the same network could read every stored review, including quoted lines of private code. Now `next dev` and `next start` bind to 127.0.0.1, a middleware refuses any request whose Host is not loopback (which also defeats DNS rebinding), responses carry a Content-Security-Policy, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`, the framework header is off, and the README says plainly that the dashboard has no login and must stay on loopback.
+- An unterminated HTML comment in a model summary hid the rest of the review (high). A summary ending `<!--` is a CommonMark HTML block, so GitHub swallowed everything after it: remaining findings, the list of skipped secret-bearing files and the footer. The sanitiser now replaces every remaining `<` after the tag pass, text spliced into a single body line is collapsed to one line, and the body is assembled with the parts an author cannot influence (not attached, not reviewed) before the model-written summaries, so the 6000-character cap cuts summaries first and says so.
+- A hard-coded bearer token in a dict literal, `"Authorization": "Bearer ..."`, was not redacted (high) because the pattern required the separator to follow the word directly. It now allows a closing quote or bracket.
+- `backend/.env.example` put a comment after an empty webhook secret, which python-dotenv reads as the value (high): an operator who filled in only the App id and key would have been verifying signatures against a public string. Comments are on their own lines now, and settings refuse a webhook secret or dashboard token shorter than 16 characters or starting with `#`.
+- The production GitHub client followed redirects, including cross-host ones, so a redirect from api.github.com could have sent the installation token elsewhere; the second-round summary claimed it did not. It no longer follows any redirect, and a test builds the client without an injected transport to prove it.
+- A review cancelled by shutdown was recorded as superseded, which blocks GitHub's redelivery. The queue now tells the worker why it was cancelled (superseded, timeout or shutdown) and the runner records interrupted, timed out or superseded accordingly. A stuck worker is set aside and waited for before the next job starts, so two reviews never run at once; a second backend instance against the same database refuses to start; a head that was already reviewed to completion is not reviewed again after a restart.
+- Secret-bearing file names were matched case-sensitively, so `.ENV` or `ID_RSA` would have been reviewed and posted. Fixed.
+- Model output was logged unredacted under `LOG_PROMPTS=true`, while the review claimed otherwise. Fixed, and the claim corrected.
+- Bidi and zero-width characters were stripped from the prompt but survived into the posted review and dashboard. Stripped everywhere now.
+- The frontend `npm audit --audit-level=high` gate in CI would have failed on the committed lockfile (a vulnerable postcss under Next); the workflow had never run. The override is in place (npm 11, which fixed an override bug in npm 10), the audit is clean, CI pins its actions by commit SHA and grants `contents: read` only, Dependabot watches the container base image, the backend installs from a hashed lock with `--require-hashes`, and `.gitignore` and `.dockerignore` exclude private keys and every `.env` variant.
+- Two assertions in the prompt-injection tests could not fail (`or True`, and an operator-precedence slip). Replaced with assertions that can. Added: the post-model head-move check, every rate-limit branch, the WAL pragma, a fuzz test that redaction never changes a line count, the boundary check's fail-closed branch with the defences in front of it disabled, and 15 vitest unit tests for the dashboard's link allowlist and API guards.
+- Documentation drift: the headline egress claim named a test that did not use the socket guard (the guard is now applied to every whole-review test, and the wording says exactly what each proof covers), the ping-verification step could never have succeeded (every signed delivery is recorded now, so it does), `OLLAMA_NO_CLOUD` was described as something it is not, `MAX_PATCH_BYTES` disagreed across four files, and a handful of design statements in LOCAL_MIGRATION.md did not match the code. All corrected.
+
+Not changed, deliberately: the dashboard has no authentication of its own. It is single-user and loopback-only by construction; adding a login would add a credential to protect without changing who can reach it. The threat model says so.
+
+### Second round (2026-09-03): the 56 findings
+
+Each line: id, severity after verification (original in brackets where it changed), where, the finding. Status for every one: fixed on 2026-09-03 unless a note says otherwise.
+
+- R2-01 [high (was critical)] backend/services/ai_reviewer.py:33: Delimiter reconstitution lets PR content forge the untrusted-data block boundary
+- R2-02 [high] backend/services/redaction.py:15: Unterminated private-key marker deletes the rest of the file's patch (review evasion)
+- R2-03 [high] backend/services/redaction.py:15: Multi-line private-key redaction collapses diff lines, so inline comment 'line' values point at the wrong code
+- R2-04 [medium (was high)] backend/services/redaction.py:30: Redaction misses the most common real-world secret form: unquoted key=value assignments
+- R2-05 [medium] backend/services/comment_renderer.py:18: HTML stripper is bypassed by padding the tag past 200 characters
+- R2-06 [medium] backend/services/comment_renderer.py:20: GFM www. and email autolinks pass the link filter unchanged
+- R2-07 [medium] backend/services/comment_renderer.py:87: Failed/unparseable file reviews are counted identically to successful ones in both the posted comment and the persisted review
+- R2-08 [medium] backend/services/comment_renderer.py:21: @mention neutralisation is skipped after any backtick, including an unmatched one
+- R2-09 [medium] backend/services/github_client.py:50: Paginated Link-header URL is followed with the installation token attached and no host/scheme check
+- R2-10 [medium (was low)] backend/services/redaction.py:61: Redaction is skipped whenever the captured secret contains a placeholder hint substring
+- R2-11 [medium (was high)] backend/services/review_queue.py:101: A BaseException or stray CancelledError from the worker kills the review loop permanently and silently
+- R2-12 [medium (was high)] backend/services/diff.py:66: Findings whose evidence quotes the diff line with its leading '+' are silently dropped
+- R2-13 [medium] backend/services/review_queue.py:95: The review deadline is not hard: a worker hanging while unwinding blocks the single-worker queue forever
+- R2-14 [medium] backend/services/review_runner.py:93: Reviews left in status 'running' after a crash are never reconciled at startup
+- R2-15 [medium] backend/services/review_queue.py:128: Jobs pending in the queue at shutdown are dropped and can never be redelivered
+- R2-16 [medium] backend/services/review_runner.py:67: The file cap is applied in GitHub's raw order before risk prioritisation, so the riskiest files can be cut, and neither the composition nor the output-schema strength is tested
+- R2-17 [medium] backend/services/github_client.py:62: 3xx responses are treated as success and never followed; a redirected repo turns a review into an AttributeError
+- R2-18 [medium] backend/services/github_client.py:98: The 422 fallback re-POSTs the review immediately, including when the 422 means the endpoint has been spammed
+- R2-19 [medium] backend/services/github_client.py:57: Rate-limit handling ignores x-ratelimit-reset and does not back off at all when retry-after is absent
+- R2-20 [medium] backend/handlers/webhook.py:31: The webhook body cap's streaming branch is untested; only the content-length branch is covered
+- R2-21 [medium] backend/handlers/review.py:79: GET /api/deliveries has no test at all, and the feedback route's auth is never tested negatively
+- R2-22 [medium] backend/handlers/review.py:55: No test enforces the invariant 'every route except /health and /webhook/github requires LOCAL_API_TOKEN'
+- R2-23 [medium] backend/tests/conftest.py:40: Security-relevant settings defaults are masked by conftest's process environment, so the defaults are not actually pinned
+- R2-24 [medium] backend/config/settings.py:62: LOG_PROMPTS has no test whatsoever: neither the default nor the fact that nothing logs diffs when it is off
+- R2-25 [medium] backend/tests/test_review_generation.py:71: test_pr_title_and_body_never_reach_the_model cannot fail: the title is never passed in
+- R2-26 [medium] backend/tests/test_runner.py:43: The egress guard cannot fire in the test named after it, and langsmith is missing from the cloud-SDK denylist
+- R2-27 [medium] backend/tests/conftest.py:35: Tests share one SQLite file and module-level engine globals; test_runner identifies 'the' failed review by global ordering
+- R2-28 [low (was high)] backend/services/comment_renderer.py:95: Model-authored text is never redacted before posting or persisting, and the test claiming to prove otherwise can't fail
+- R2-29 [low] backend/services/github_client.py:102: The 422 fallback posts the raw, unsanitised filename into the comment body
+- R2-30 [low] backend/services/ai_reviewer.py:39: _meta leaves Unicode line separators and bidi controls in the filename
+- R2-31 [low] backend/handlers/review.py:26: Non-ASCII dashboard token header crashes require_local_token into a 500 instead of a 401, and this is untested unlike the identical webhook-path hazard
+- R2-32 [low] backend/services/redaction.py:16: openai-key pattern false-positives on ordinary sk- prefixed identifiers
+- R2-33 [low] backend/models/github.py:84: A PR from a deleted fork (head.repo null) is classified as not-a-fork
+- R2-34 [low (was medium)] backend/services/review_queue.py:63: submit() after stop() accepts jobs that will never run
+- R2-35 [low] backend/services/review_runner.py:145: Superseded and timed-out reviews are recorded as 'failed' with error_message 'CancelledError'
+- R2-36 [low] backend/services/review_runner.py:105: The review is posted against the API's head sha, not the job's, so the same content can be reviewed twice
+- R2-37 [low] backend/main.py:71: The 500 response carries no CORS headers, so the dashboard sees an opaque failure
+- R2-38 [low] backend/main.py:59: TrustedHostMiddleware is the innermost middleware, and its default allowed hosts cannot receive a real webhook
+- R2-39 [low] backend/services/diff.py:68: Short evidence strings relocate a finding onto an unrelated line
+- R2-40 [low] backend/config/settings.py:53: MAX_PATCH_BYTES is not budgeted against OLLAMA_NUM_CTX, and Ollama truncates silently
+- R2-41 [low] backend/database/connection.py:28: SQLite runs in rollback-journal mode with a 15-connection pool and two concurrent writers
+- R2-42 [low] backend/config/settings.py:64: The default SQLite path is relative, so the database follows the working directory
+- R2-43 [low] backend/services/github_client.py:14: File pagination silently truncates and its 3000-file cap depends on GitHub echoing per_page into the Link header
+- R2-44 [low] backend/services/review_runner.py:104: commit_id is read before the file list, so a push between the two calls can invalidate every inline comment
+- R2-45 [low] backend/services/review_runner.py:57: Rename-only, copied and unchanged files are reported to the PR author as binary or too large
+- R2-46 [low (was high)] backend/main.py:36: main.py lifespan wiring (real queue + run_review worker) is never exercised by any test
+- R2-47 [low (was high)] backend/services/llm.py:17: Nothing pins that the production model client is local; build_chat_model is only reached by the skipped e2e test
+- R2-48 [low] backend/main.py:71: The generic 500 handler is never tested, so a change that leaks exception detail would go unnoticed
+- R2-49 [low] backend/main.py:67: Request and rejection logging content is unpinned: nothing stops query strings, bodies or signatures being logged
+- R2-50 [low] backend/services/review_runner.py:65: .env.example is deliberately allowed past the secret-file exclusion but then silently dropped as 'not code'
+- R2-51 [low] backend/handlers/webhook.py:80: Webhook delivery bookkeeping has no test for the failure and supersede paths
+- R2-52 [info] backend/services/github_client.py:71: Repository full_name is interpolated into API paths without validation
+- R2-53 [info] backend/services/review_queue.py:124: drain() polls forever with no liveness check or timeout
+- R2-54 [info] backend/services/review_workflow.py:77: recursion_limit is correct but roughly three times larger than the graph needs
+- R2-55 [info] backend/services/review_workflow.py:62: results is copied on every analyse_file step (quadratic in file count)
+- R2-56 [info] backend/tests/test_webhook.py:76: Two assertions in the suite are structurally incapable of failing
+
+### Third round (2026-09-03): the 67 findings
+
+Each line: id, severity after verification (original in brackets where it changed), where, the finding. Status for every one: fixed on 2026-09-03 unless a note says otherwise.
+
+- R3-01 [high] package.json:6: Dashboard has no authentication and binds to every network interface by default
+- R3-02 [high (was medium)] backend/services/comment_renderer.py:50: Unterminated HTML comment in model output hides the footer, overflow findings and Not-reviewed list
+- R3-03 [high (was medium)] backend/services/redaction.py:34: Hard-coded bearer token in a headers dict , the commonest form , is not redacted
+- R3-04 [high] backend/.env.example:7: .env.example's webhook secret line is parsed with the trailing comment as its value, defaulting the signature check to a public constant
+- R3-05 [medium] backend/services/redaction.py:140: Secret-bearing filename exclusion is case-sensitive
+- R3-06 [medium (was high)] backend/services/review_runner.py:199: A review killed by backend shutdown is recorded as "superseded", permanently blocking GitHub's redelivery
+- R3-07 [medium (was high)] backend/services/github_client.py:40: Production GitHub client follows redirects, including cross-host, contradicting the documented "treats redirects as errors" claim , and the only test covering it uses a differently-configured client
+- R3-08 [medium (was high)] .github/workflows/ci.yml:45: CI's frontend npm audit --audit-level=high gate fails on the committed lockfile, and the workflow has apparently never actually run
+- R3-09 [medium] backend/services/comment_renderer.py:136: 6000-character body cap truncates from the tail, dropping the findings overflow and Not-reviewed sections first
+- R3-10 [medium (was high)] README.md:37: README's headline egress claim names a test that never uses the socket-level guard; the one test that does is skipped by default and never runs in CI
+- R3-11 [medium] scripts/prove_local/run_proof.py:4: Container proof docstring claims it fails on a disobeyed prompt injection; the exit code never checks that, and the secret check it does run is a weak 14-character prefix match on posted output only
+- R3-12 [medium] backend/services/review_queue.py:133: After the grace period the queue abandons a stuck worker and starts the next job, so two reviews can run concurrently
+- R3-13 [medium] lib/api.ts:85: A dead review queue is invisible on the dashboard
+- R3-14 [medium] package.json:27: shadcn , a 318-package codegen CLI , sits in production dependencies for the sake of one 16KB CSS import
+- R3-15 [medium (was high)] app/actions.ts:20: Server actions run for any unauthenticated caller; Next's Origin check stops browsers but not scripts, and there is no Host allowlist against DNS rebinding
+- R3-16 [medium (was high)] .gitignore:87: .gitignore has no _.pem/_.key rule, while the documented setup path puts the GitHub App private key inside the repository working tree
+- R3-17 [medium (was high)] .dockerignore:1: .dockerignore does not exclude private keys or logs, so the local proof image can bake in the GitHub App private key
+- R3-18 [medium] backend/requirements.txt:2: No lockfile or hashes for the Python runtime: 14 pins carry ~46 floating transitives, including the langsmith client the local-only claim depends on excluding
+- R3-19 [medium (was high)] backend/README.md:43: The documented "send a ping and see it in Recent deliveries" verification step cannot ever succeed
+- R3-20 [medium] docs/SECURITY_REVIEW.md:1987: "Prompts and model output are logged only after redaction" is false: model output is logged unredacted
+- R3-21 [medium] README.md:31: OLLAMA_NO_CLOUD is described as doing something it does not do, and a cloud-tagged model would relay prompts off the machine with no guard detecting it
+- R3-22 [medium] docs/LOCAL_MIGRATION.md:165: LOCAL_MIGRATION's egress-proof list describes a test and a supporting document that do not exist in the form claimed
+- R3-23 [medium] backend/services/review_runner.py:166: The post-model head-SHA supersede check is never exercised: the fake GitHub server returns the same head to both get_pull calls in every test
+- R3-24 [medium] backend/tests/test_review_generation.py:76: Two assertions in the hostile-filename prompt-injection test are unconditionally true
+- R3-25 [low (was medium)] backend/tests/test_review_generation.py:189: Sanitiser reference-link-definition test is short-circuited by operator precedence and passes vacuously
+- R3-26 [low] backend/services/comment_renderer.py:48: Bidi and zero-width Unicode control characters are stripped for the model prompt but survive into the posted GitHub review and dashboard
+- R3-27 [low (was medium)] backend/README.md:73: MAX_PATCH_BYTES disagrees across code default, .env.example, and documentation, and the documented 40000 value is unreachable at the shipped context size
+- R3-28 [low] backend/requirements.txt:12: langchain meta-package is pinned as a runtime dependency but never imported
+- R3-29 [low (was medium)] .github/workflows/ci.yml:1: CI workflow declares no permissions block, pins actions by mutable tag, and Dependabot has no docker ecosystem so the mutable Ollama base image is never updated
+- R3-30 [low (was high)] components/severity-badge.tsx:41: Dashboard cannot render three of the five backend review statuses and hides the error message for all non-happy-path outcomes
+- R3-31 [low] backend/services/review_runner.py:212: A head-move supersede is reported to the queue as a successful review
+- R3-32 [low] backend/services/review_queue.py:120: Any worker that ends self-cancelled is reported as SupersededError regardless of the actual cause
+- R3-33 [low] backend/services/review_runner.py:172: A cancel between the GitHub POST and the database write loses the posted review's URL or leaves an inconsistent row
+- R3-34 [low] backend/services/review_queue.py:98: submit() cancels the in-flight review for a new head and then reports the delivery as "duplicate"
+- R3-35 [low] components/ui/dropdown-menu.tsx:144: Dropdown menu's keyboard-focus indicator is a 1.09:1 background tint, well under WCAG contrast
+- R3-36 [low] components/ui/toggle.tsx:10: Feedback toggle's selected state is a 1.09:1 background tint, so which answer is recorded is not visibly distinguishable
+- R3-37 [low] package.json:37: eslint 9 is end-of-life, so the lint gate runs on an unmaintained major version
+- R3-38 [low] next.config.mjs:5: No CSP, frame-ancestors, or other security response headers; X-Powered-By is advertised
+- R3-39 [low] components/posted-body.tsx:11: Hand-written markdown renderer is quadratic on runs of '[', bounded only by a backend constant the frontend doesn't know about
+- R3-40 [low] app/reviews/[id]/page.tsx:114: Two hrefs render backend-supplied strings with no local scheme/shape validation
+- R3-41 [low] lib/api.ts:125: BACKEND_URL is unvalidated, so a misconfigured value ships LOCAL_API_TOKEN off the machine
+- R3-42 [low] docs/FRONTEND_PLAN.md:50: docs/FRONTEND_PLAN.md makes four claims about the built dashboard that the shipped code contradicts
+- R3-43 [low (was medium)] lib/api.ts:222: recordFeedback validates nothing, and encodeURIComponent leaves dot-segments unescaped, letting an unauthenticated caller steer a token-authenticated backend request
+- R3-44 [low] Dockerfile.local:13: Container proof is not reproducible: model, OS packages and Python transitives are all resolved fresh from the network at build time with no digests
+- R3-45 [low] scripts/prove_local/entrypoint.sh:11: Entrypoint's "no route out" check cannot distinguish a missing route from a DNS or upstream failure
+- R3-46 [low] scripts/prove_local/entrypoint.sh:7: Proof entrypoint starts the fake GitHub server in the background and never waits for it to accept connections
+- R3-47 [low] docs/SECURITY_REVIEW.md:2360: Second adversarial round's '56 findings, all fixed' claim has no corresponding per-finding record anywhere in the document it points to
+- R3-48 [low] backend/README.md:8: "The same head SHA is never reviewed twice" holds only while a job is queued or in flight, not after it completes
+- R3-49 [low] docs/LOCAL_MIGRATION.md:190: Implementation notes still describe the delimiter-softening defence that the second review round replaced
+- R3-50 [low] docs/LOCAL_MIGRATION.md:47: Four design-section statements in LOCAL_MIGRATION are contradicted by the code and are not listed as differences
+- R3-51 [low] backend/README.md:53: Model speed figures mix a labelled estimate with an unlabelled one, and none is reproducible from the repository
+- R3-52 [low] README.md:39: "Last run: 2026-09-03, passed" for the container proof is unverifiable and has no mechanism to stay true
+- R3-53 [low] docs/SECURITY_REVIEW.md:927: SR-37's status line miscounts the runtime dependency set
+- R3-54 [low (was medium)] backend/services/redaction.py:15: Redaction's line-count invariant is a hard-coded docstring promise with no property test covering the pattern table
+- R3-55 [low (was medium)] backend/database/repositories/review_repository.py:64: Startup reconciliation marks every 'running'/'queued' row interrupted with no owner check, so a second concurrent instance can hijack an in-flight review
+- R3-56 [low (was medium)] backend/database/models.py:62: created_at/received_at timestamps are stored timezone-naive and rendered an hour wrong under British Summer Time
+- R3-57 [low (was medium)] lib/api.ts:129: Frontend has zero tests and no test runner, despite several pure functions worth covering
+- R3-58 [low] backend/services/ai_reviewer.py:155: Prompt boundary check cannot fail under current input, so its fail-closed branch has never executed and no test reaches it
+- R3-59 [low] backend/services/github_client.py:87: Only one of three rate-limit back-off branches is tested, leaving the wait cap and retry budget unverified
+- R3-60 [low] backend/database/connection.py:45: WAL journal mode and busy_timeout pragmas , the setting that keeps the dashboard from colliding with a running review , have no test at all
+- R3-61 [low] backend/tests/test_review_generation.py:196: A single test assertion accounts for 62% of the suite's runtime because sanitise()'s email regex is quadratic on input with no '@'
+- R3-62 [info] app/loading.tsx:5: Loading screens put aria-label and aria-busy on a plain div, where neither is announced
+- R3-63 [info] app/page.tsx:24: searchParams.repository is typed as a string but Next supplies an array when the query parameter repeats
+- R3-64 [info (was low)] package.json:47: Pre-commit hook silently rewrites staged source with eslint --fix and re-stages it before the author reviews the result
+- R3-65 [info] docs/SECURITY_REVIEW.md:2313: Absolute home path committed in the security review discloses the maintainer's local username
+- R3-66 [info] docs/SECURITY_REVIEW.md:2340: SECURITY_REVIEW's App-permissions section still lists Commit statuses, write, contradicting every other permission list in the repository
+- R3-67 [info] README.md:29: Two omissions in the privacy documentation: findings store quoted diff lines, and tunnelling the whole port exposes the dashboard API behind only one shared token
+
+Refuted in this round:
+
+- Three queue tests are timing races by construction, and one grace-period assertion is weakened by an or-clause
 
 ## Refuted findings
 
@@ -2157,14 +2313,15 @@ These were raised and then knocked down by the verifiers. They stay here because
 - Verifier: The finding's design-flaw observation is real (backend/handlers/github.py:19,21-34: GitHubAuthDependency takes installation_id from the query string, no session/JWT check, TODO left in place; backend/config/settings.py has no GITHUB_INSTALLATION_ID field; backend/main.py:302-304 mounts github_router at /github with no auth dependency anywhere), but every 'reachable now' impact claim it makes collapses on tracing the actual call chain against the pinned dependency.
 
 backend/services/github_client.py:91 calls `self._github_integration.get_installation(self.installation_id)` with a single positional argument. backend/requirements.txt:14 pins `PyGithub==1.59.1`. I fetched the exact upstream sour
-- Verifier: Every citation checks out exactly as stated. backend/handlers/github.py:19 GitHubAuthDependency.__call__ takes installation_id as an optional query param; lines 21-22 carry the literal TODO 'Implement proper user authentication'/'For now, use a default installation ID from settings'. settings.py has no GITHUB_INSTALLATION_ID attribute (grep over the whole file confirms only GITHUB_APP_ID and GITHUB_PRIVATE_KEY exist), so the hasattr() branch at github.py:25 is always False. Tracing the actual control flow: when a caller supplies installation_id, neither the `if` nor the `elif` at :25/:27 fires, so the function falls straight through to `return GitHubClient(installation_id=installation_id)` u
+
+- Verifier: Every citation checks out exactly as stated. backend/handlers/github.py:19 GitHubAuthDependency.**call** takes installation_id as an optional query param; lines 21-22 carry the literal TODO 'Implement proper user authentication'/'For now, use a default installation ID from settings'. settings.py has no GITHUB_INSTALLATION_ID attribute (grep over the whole file confirms only GITHUB_APP_ID and GITHUB_PRIVATE_KEY exist), so the hasattr() branch at github.py:25 is always False. Tracing the actual control flow: when a caller supplies installation_id, neither the `if` nor the `elif` at :25/:27 fires, so the function falls straight through to `return GitHubClient(installation_id=installation_id)` u
 
 ### Local inference (Ollama qwen3.5:9b on one M1 Max) makes a single worker, head-SHA dedupe and a hard per-review deadline mandatory: one 20-file PR is 1 to 3 hours of GPU time before the retry and fallback multipliers
 
 - Reported severity: info. Where: backend/services/ai_reviewer.py.
 - Verifier: The finding's entire premise, that Ollama/qwen3.5:9b running locally on the reviewer's M1 Max is the (or a) LLM backend for this system, is not reachable in the shipped code. The repository has zero Ollama wiring.
 
-1. grep -rn "ollama|Ollama|OLLAMA" across the whole repo (backend Python, frontend TS/TSX, env files, docs) returns no hits in any source file. The only string match anywhere in the repo is package-lock.json:8177/8216, which is the JS `langchain` meta-package's own upstream package.json listing `"@langchain/ollama": "*"` as one of a dozen *optional peer dependencies* (marked `optional: true` under peerDependenciesMeta, alongside anthropic/aws/cohere/mistralai/groq/xai/etc.),  it i
+1. grep -rn "ollama|Ollama|OLLAMA" across the whole repo (backend Python, frontend TS/TSX, env files, docs) returns no hits in any source file. The only string match anywhere in the repo is package-lock.json:8177/8216, which is the JS `langchain` meta-package's own upstream package.json listing `"@langchain/ollama": "*"` as one of a dozen _optional peer dependencies_ (marked `optional: true` under peerDependenciesMeta, alongside anthropic/aws/cohere/mistralai/groq/xai/etc.), it i
 
 ### Fork PRs are reviewed and acted on with App credentials without any trust or author-association check
 
@@ -2172,9 +2329,10 @@ backend/services/github_client.py:91 calls `self._github_integration.get_install
 - Verifier: The structural gap is real and accurately cited: handle_pull_request_event (backend/handlers/webhook.py:223-266) branches on action alone with no check of pr.head.repo.fork, head/base repo identity, or author_association; PullRequest and PRWebhookPayload (backend/models/github.py:73-110) omit author_association entirely (Pydantic drops it silently since these models do not set extra='forbid'), and GitRef.repo (backend/models/github.py:64-70, Optional[GitHubRepository] with a `fork: bool` field) is defined but never read in webhook.py. Draft skip is indeed gated on `not settings.DEBUG` at webhook.py:227. These citations all check out line-for-line.
 
 However the claimed present-tense impact ("
+
 - Verifier: Every load-bearing claim checks out against the code.
 
-1) Trigger with no trust check: backend/handlers/webhook.py:223 `if action in [PRAction.OPENED, PRAction.SYNCHRONIZE, PRAction.REOPENED]:` and :274 `elif action == PRAction.READY_FOR_REVIEW:` both flow straight into `add_review_to_queue` (webhook.py:244-249, :281-286) with no check of fork status, author_association, or write access anywhere in the function (lines 196-300 read in full; grep for 'author_association|fork|head.repo|base.repo' across backend/ turns up nothing relevant in webhook.py). The only draft gate is webhook.py:227 `if pr.draft and not settings.DEBUG:`,  exactly as described: drafts are only skipped when DEBUG is false
+1. Trigger with no trust check: backend/handlers/webhook.py:223 `if action in [PRAction.OPENED, PRAction.SYNCHRONIZE, PRAction.REOPENED]:` and :274 `elif action == PRAction.READY_FOR_REVIEW:` both flow straight into `add_review_to_queue` (webhook.py:244-249, :281-286) with no check of fork status, author_association, or write access anywhere in the function (lines 196-300 read in full; grep for 'author_association|fork|head.repo|base.repo' across backend/ turns up nothing relevant in webhook.py). The only draft gate is webhook.py:227 `if pr.draft and not settings.DEBUG:`, exactly as described: drafts are only skipped when DEBUG is false
 
 ## Checked and found fine
 
@@ -2257,7 +2415,7 @@ Grouped by the investigator lens that checked them. Each entry cites the evidenc
 - LangGraph checkpoint deserialisation and sentry subprocess env leak unreachable. grep -rniE 'checkpoint|MemorySaver|msgpack' backend to none; grep -rn 'subprocess' backend to only regex/prompt strings in services/ai_reviewer.py:272-273,310-311; sentry initialises only when SENTRY_DSN is set (backend/main.py:28-29).
 - Transitive h11 request-smuggling CVE-2025-43859. Nothing pins h11: uvicorn[standard]==0.24.0 requires h11>=0.8 and httpx==0.25.2 pulls httpcore 1.* whose current releases require h11>=0.16, so a fresh install resolves a fixed h11 (>=0.16.0).
 - Backend packages with zero OSV advisories at the pinned version. OSV querybatch to 0 vulns for uvicorn 0.24.0, pydantic 2.9.2, pydantic-settings 2.6.1, httpx 0.25.2, aiofiles 23.2.1, PyGithub 1.59.1, langchain-community 0.3.27, openai 1.58.1, tiktoken 0.8.0, SQLAlchemy 2.0.36, alembic 1.14.0, aiopg 1.4.0, aiosqlite 0.20.0, [...]
-- Frontend runtime bundle reach of npm advisories. Import grep across app/, components/, lib/, hooks/, contexts/ shows only react, next/*, lucide-react, @radix-ui/*, recharts, zod, date-fns, react-hot-toast, @monaco-editor/react, clsx, tailwind-merge, class-variance-authority; of the 45 audit entries only `nex [...]
+- Frontend runtime bundle reach of npm advisories. Import grep across app/, components/, lib/, hooks/, contexts/ shows only react, next/_, lucide-react, @radix-ui/_, recharts, zod, date-fns, react-hot-toast, @monaco-editor/react, clsx, tailwind-merge, class-variance-authority; of the 45 audit entries only `nex [...]
 - Lint, format and TypeScript configuration. .eslintrc.json:2 extends next/core-web-vitals and prettier with two rules disabled (:4-5); .prettierrc is style-only; tsconfig.json:6 strict true, :25 includes only project sources; lint-staged (package.json:87-95) runs eslint --fix and prettier --write on sta [...]
 - Azure deployment artefacts in history. `git show 053bed61f5^:azure-parameters.json` contains only YOUR_* placeholders; deploy-azure.yml (80903be^) reads `secrets.AZURE_CREDENTIALS` and masks the ACR password with ::add-mask::; deploy-azure-free.sh reads secrets from the environment and never echoes [...]
 
@@ -2270,7 +2428,7 @@ Grouped by the investigator lens that checked them. Each entry cites the evidenc
 - Pydantic webhook payload model (models/github.py). PRWebhookPayload requires action (enum), number, pull_request, repository, installation, sender (103-110); PullRequest requires id, number, title, state, html_url, diff_url, patch_url, head, base, user, created_at, updated_at (73-100); PRFile.patch is truncate [...]
 - PyGithub expires_at naive vs aware under the pinned version. PyGithub==1.59.1 _makeDatetimeAttribute (upstream GithubObject.py:232-244) builds naive datetimes with strptime, so github_client.py:83/112 would not raise TypeError if the token call worked; it will on PyGithub >= 2.0 (finding 10 records this as a latent brea [...]
 - Licence and attribution. LICENSE is MIT, Copyright (c) 2025 Thomas Butler; README.md:75-77 says MIT Licence; backend/README.md:408-410 defers to the root LICENSE; app/layout.tsx:24 credits Tom Butler; package.json has no license field but is private.
-- .gitignore and secrets on disk. .gitignore ignores .env, backend/.env, backend/.venv/, *.db, *.sqlite, logs; the '!backend/tests/test_*.py' exception points at a directory that does not exist (no tests anywhere).
+- .gitignore and secrets on disk. .gitignore ignores .env, backend/.env, backend/.venv/, *.db, _.sqlite, logs; the '!backend/tests/test__.py' exception points at a directory that does not exist (no tests anywhere).
 - Sentry and LangSmith configuration surface. sentry_sdk.init (main.py:28-37) leaves send_default_pii at its False default. settings.LANGCHAIN_TRACING_V2 (settings.py:45) and LANGCHAIN_API_KEY are pydantic fields that LangChain never reads (it reads os.environ, which pydantic-settings does not populate), [...]
 - Miscellaneous dead-code defects noted but not scored. lib/utils.ts:79-109 calculateComplexity builds new RegExp('\\b?\\b') which throws 'Nothing to repeat' (verified in Node 22) and '\\b||\\b' which matches empty strings; the function has no callers.
 
@@ -2288,7 +2446,7 @@ Grouped by the investigator lens that checked them. Each entry cites the evidenc
 ### gap:Design of the 'prove it is fully local' egress test, and the .gitignore trap that will swallow it
 
 - gitignore negation for backend/tests (contradicts the briefing). `git check-ignore backend/tests/test_no_egress.py backend/tests/network/test_egress.py` prints nothing and exits 1, so both are trackable.
-- candidate file paths for the new test harness. `git check-ignore` returned nothing (exit 1, all trackable) for: backend/tests/__init__.py, backend/tests/conftest.py, backend/tests/test_no_egress.py, backend/tests/egress/conftest.py, backend/tests/egress/test_no_egress.py, scripts/egress_capture.sh, scripts [...]
+- candidate file paths for the new test harness. `git check-ignore` returned nothing (exit 1, all trackable) for: backend/tests/**init**.py, backend/tests/conftest.py, backend/tests/test_no_egress.py, backend/tests/egress/conftest.py, backend/tests/egress/test_no_egress.py, scripts/egress_capture.sh, scripts [...]
 - Redis and database are not egress legs by default. backend/.env.example:33 DATABASE_URL="sqlite:///./reviews.db" and :38 REDIS_URL="redis://localhost:6379"; backend/config/settings.py:48 DATABASE_URL default sqlite; backend/database/connection.py:29-34 rewrites sqlite:/// to sqlite+aiosqlite:/// and creates a [...]
 - LANGCHAIN_TRACING_V2=True in settings is inert on its own. backend/config/settings.py:45 sets LANGCHAIN_TRACING_V2: bool = True, but settings.py:143-145 model_config only reads .env into the pydantic object.
 - Ollama runtime is genuinely available on the host. `command -v ollama` to /usr/local/bin/ollama; `ollama list` to qwen3.5:9b (6.6 GB), nomic-embed-text:latest (274 MB), qwen3.5:0.8b (1.0 GB). The local target exists and is adequate; only the application-side wiring is missing.
@@ -2310,7 +2468,7 @@ Grouped by the investigator lens that checked them. Each entry cites the evidenc
 - cryptography==44.0.1 wheel availability on CPython 3.14 arm64. Not a blocker, contrary to the brief's suspicion. https://pypi.org/pypi/cryptography/44.0.1/json urls contain cryptography-44.0.1-cp37-abi3-macosx_10_9_universal2.whl and cryptography-44.0.1-cp39-abi3-macosx_10_9_universal2.whl.
 - SQLAlchemy==2.0.36 wheel availability on CPython 3.14. Not a blocker. https://pypi.org/pypi/SQLAlchemy/2.0.36/json has 101 files; the highest CPython tag is cp313 (SQLAlchemy-2.0.36-cp313-cp313-macosx_11_0_arm64.whl) and there is no cp314, but the release also ships SQLAlchemy-2.0.36-py3-none-any.whl.
 - aiopg==1.4.0 versus SQLAlchemy==2.0.36 resolver conflict. No conflict. https://pypi.org/pypi/aiopg/1.4.0/json ships only aiopg-1.4.0-py3-none-any.whl and the sdist, and its SQLAlchemy bound 'sqlalchemy[postgresql_psycopg2binary] (<1.5,>=1.3)' is gated behind 'extra == "sa"', which backend/requirements.txt:35 does not [...]
-- Rust toolchain presence for the pydantic-core and tiktoken source builds. which -a rustc cargo returned /Users/tombutler/.cargo/bin/rustc and /Users/tombutler/.cargo/bin/cargo, and ~/.cargo/bin contains rustup, cargo, rustc and friends.
+- Rust toolchain presence for the pydantic-core and tiktoken source builds. which -a rustc cargo returned ~/.cargo/bin/rustc and ~/.cargo/bin/cargo, and ~/.cargo/bin contains rustup, cargo, rustc and friends.
 - Whether raising the pydantic floor would break langchain, as the brief assumed. It would not. https://pypi.org/pypi/langchain-core/0.3.28/json requires_dist contains 'pydantic<3.0.0,>=2.5.2; python_full_version < "3.12.4"' and 'pydantic<3.0.0,>=2.7.4; python_full_version >= "3.12.4"', and https://pypi.org/pypi/langchain/0.3.13/json requir [...]
 - Whether raising the floor is technically viable for the three cp314-missing pins. It is, which is why the recommendation in finding 2 is a judgement call rather than a forced one. greenlet 3.5.5 ships greenlet-3.5.5-cp314-cp314-macosx_11_0_universal2.whl; tiktoken 0.12.0 ships tiktoken-0.12.0-cp314-cp314-macosx_11_0_arm64.whl (the full 57-f [...]
 - Usable interpreters already installed on the host. /opt/homebrew/bin/python3.11 -VV to Python 3.11.15; /usr/local/bin/python3.13 -VV to Python 3.13.7. Every pin in backend/requirements.txt that lacks a cp314 wheel does have cp311 and cp313 wheels for macosx arm64 (pydantic_core-2.23.4-cp313-cp313-macosx_11_0_a [...]
@@ -2339,15 +2497,15 @@ Grouped by the investigator lens that checked them. Each entry cites the evidenc
 
 ## GitHub App permissions the code needs
 
-Repository permissions: Pull requests, read and write (fetch files, post review comments). Commit statuses, write (only if the status feature is kept). Metadata, read (implied). Not needed: Issues write (nothing calls the issues API), Contents read (only an unused helper reads file contents). Events: pull_request only. Install the App on selected repositories, never on all repositories.
+As the code stands after the rewrite (decision 1 in docs/LOCAL_MIGRATION.md dropped commit statuses): Pull requests, read and write (fetch files, post review comments). Metadata, read (implied). Nothing else. Not needed: Issues write (nothing calls the issues API), Contents read (only an unused helper reads file contents). Events: pull_request only. Install the App on selected repositories, never on all repositories.
 
 ## The local claim and how it will be proved
 
 After the migration the only network peer during a review is api.github.com. Three proofs exist:
 
-1. `cd backend && .venv/bin/python -m pytest tests/test_runner.py tests/test_no_egress.py` runs a whole review through the real code (fake GitHub served by respx, fake model) with a socket-level guard that raises on any connection or DNS lookup outside loopback. Passes.
+1. `cd backend && .venv/bin/python -m pytest tests/test_runner.py` runs whole reviews through the real code (fake GitHub served in-process by respx, fake model) inside a socket-level guard that raises on any connection or DNS lookup outside loopback. Passes, and runs in CI.
 2. `REVIEWBOT_E2E=1 .venv/bin/python -m pytest -m e2e` runs the real reviewer against the real Ollama under the same guard. Passed 2026-09-03 with qwen3.5:9b in 14 seconds.
-3. `scripts/prove-local.sh` builds Dockerfile.local (the backend, Ollama, qwen3.5:0.8b and a loopback fake GitHub) and runs one review with `docker run --network none`; the entrypoint first proves it cannot reach the internet. Passed 2026-09-03 (exit 0, review posted, secret redacted, `.env` skipped).
+3. `scripts/prove-local.sh` builds Dockerfile.local (the backend from the hashed lock, Ollama, qwen3.5:0.8b and a loopback fake GitHub) and runs one review with `docker run --network none`; the entrypoint first checks that the only interface is loopback and that a raw connect to 1.1.1.1 fails. Nothing records the result; run by hand on 2026-09-03 it passed (exit 0, review posted, secret redacted, `.env` skipped).
 
 Patching an HTTP client would not be a proof; the guard sits below every HTTP stack in the process.
 
@@ -2357,4 +2515,5 @@ Patching an HTTP client would not be a proof; the guard sits below every HTTP st
 - 2026-09-03: SR-01 fixed (requirements resolvable). SR-03 reproduced with a recording fake model. Test suite added under backend/tests with strict expected failures for the open findings it covers.
 - 2026-09-03: backend rewritten on LangChain 1.x with a local Ollama model; statuses updated for every finding; the local claim now has three proofs.
 - 2026-09-03: frontend rebuilt on shadcn/ui (four screens, server-side token, no external requests); README and backend README rewritten; remaining statuses updated.
-- 2026-09-03: second adversarial round on the rewritten backend: 56 findings, all fixed; see "Second round".
+- 2026-09-03: second adversarial round on the rewritten backend: 56 findings, all fixed; see "Second round" and the R2 list.
+- 2026-09-03: third adversarial round on the whole branch (backend, dashboard, supply chain, docs, tests): 67 findings confirmed, 1 refuted, all fixed; see "Third round" and the R3 list. Backend suite at 208 tests, 15 dashboard tests.

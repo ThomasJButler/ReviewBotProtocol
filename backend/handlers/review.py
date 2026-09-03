@@ -2,6 +2,7 @@
 requires LOCAL_API_TOKEN; with no token configured the API is off."""
 
 import hmac
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -32,6 +33,15 @@ async def require_local_token(request: Request) -> None:
 api_router = APIRouter(dependencies=[Depends(require_local_token)])
 
 
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    """SQLite hands back naive datetimes; they were written in UTC, so say so."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 def _review_dict(r: Review, with_findings: bool = False) -> dict:
     d = {
         "id": r.id, "repository": r.repository, "pr_number": r.pr_number, "pr_title": r.pr_title,
@@ -42,8 +52,8 @@ def _review_dict(r: Review, with_findings: bool = False) -> dict:
         "redactions": r.redactions, "prompt_tokens": r.prompt_tokens, "output_tokens": r.output_tokens,
         "duration_seconds": r.duration_seconds, "error_message": r.error_message, "comment_url": r.comment_url,
         "useful": r.useful,
-        "created_at": r.created_at.isoformat() if r.created_at else None,
-        "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        "created_at": _iso(r.created_at),
+        "completed_at": _iso(r.completed_at),
     }
     if with_findings:
         d["summary"] = r.summary
@@ -88,7 +98,7 @@ async def list_deliveries(limit: int = Query(20, ge=1, le=100), session: AsyncSe
     return {"items": [{
         "delivery_id": d.delivery_id, "event": d.event, "action": d.action, "repository": d.repository,
         "pr_number": d.pr_number, "head_sha": d.head_sha, "status": d.status, "review_id": d.review_id,
-        "received_at": d.received_at.isoformat() if d.received_at else None,
+        "received_at": _iso(d.received_at),
     } for d in rows]}
 
 
@@ -102,6 +112,7 @@ async def status(request: Request):
         "ollama": await ollama_health(settings),
         "database": await db_healthy(),
         "queue": {"depth": queue.depth if queue else 0, "alive": bool(queue and queue.alive),
+                  "abandoned": queue.abandoned if queue else 0,
                   "current": {"repository": current.repo, "pr_number": current.pr_number, "head_sha": current.head_sha} if current else None},
         "limits": {"max_files_per_review": settings.MAX_FILES_PER_REVIEW, "max_patch_bytes": settings.MAX_PATCH_BYTES,
                    "review_timeout_seconds": settings.REVIEW_TIMEOUT_SECONDS, "num_ctx": settings.OLLAMA_NUM_CTX},

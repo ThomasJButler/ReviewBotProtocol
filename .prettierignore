@@ -1,10 +1,6 @@
-# Prettier owns the frontend only. The backend, the docs and the scripts are
-# formatted by their own tools.
-.next
-node_modules
+.next/
+node_modules/
+tmp/
+app/shadcn-tailwind.css
+backend/
 package-lock.json
-backend
-docs
-scripts
-public
-README.md

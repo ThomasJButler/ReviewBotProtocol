@@ -166,7 +166,7 @@ class FileReviewer:
                                     parse_ok=False, duration_seconds=time.perf_counter() - started, error=type(e).__name__)
         text = _content_text(message.content)
         if self.settings.LOG_PROMPTS:
-            logger.info("model output", filename=filename, output=text[:4000])
+            logger.info("model output", filename=filename, output=redact_text(text)[:4000])
         review, ok = parse_file_review(text)
         review, dropped = postprocess(review, patch, self.settings.MIN_FINDING_CONFIDENCE)
         usage = getattr(message, "usage_metadata", None) or {}

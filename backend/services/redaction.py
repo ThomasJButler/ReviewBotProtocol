@@ -31,7 +31,7 @@ _PATTERNS: List[Tuple[str, re.Pattern, int]] = [
     ("langsmith-key", re.compile(r"\b(?:lsv2_[a-z]{2}_[a-f0-9]{32}|ls__[A-Za-z0-9]{20,})"), 0),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), 0),
     ("url-password", re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s:/@]+:([^\s/]{3,})@"), 1),
-    ("auth-header", re.compile(r"(?i)\bauthorization\s*[:=]\s*['\"]?(?:bearer|basic|token)\s+([A-Za-z0-9._~+/=-]{8,})"), 1),
+    ("auth-header", re.compile(r"(?i)\bauthorization\b['\"\]]*\s*[:=]\s*['\"]?(?:bearer|basic|token)\s+([A-Za-z0-9._~+/=-]{8,})"), 1),
     ("assigned-secret", re.compile(
         r"(?i)(?:\b|_)(?:password|passwd|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key)\b"
         r"\s*[:=]\s*['\"]([^'\"\n]{8,})['\"]"), 1),
@@ -134,7 +134,7 @@ def redact_text(text: str) -> str:
 def is_excluded_path(path: str) -> bool:
     """True for files that are secret-bearing by nature and must not be reviewed.
     Templates such as .env.example are reviewed: people do commit real values into them."""
-    base = posixpath.basename(path or "")
+    base = posixpath.basename(path or "").lower()
     if base.startswith(".env") and any(m in base for m in _TEMPLATE_MARKERS):
         return False
     if base in EXCLUDED_BASENAMES:

@@ -13,8 +13,12 @@ from config.settings import settings
 from database.repositories.review_repository import ReviewRepository
 from database.repositories.webhook_repository import WebhookRepository
 from services.review_queue import ReviewJob
-from services.review_runner import RunnerDeps, run_review, select_files
+from services.review_runner import RunnerDeps, Superseded, run_review, select_files
 from tests.fakes import RecordingChatModel
+
+# Every whole-review test runs under the socket guard: respx answers GitHub in-process,
+# and anything else in the process that tries to leave loopback fails the test.
+pytestmark = pytest.mark.usefixtures("no_egress")
 
 BASE = "https://api.github.com"
 SECRET_DIFF = ("@@ -1,2 +1,4 @@\n"
@@ -98,8 +102,9 @@ async def test_moved_head_supersedes_the_job_without_posting(db):
     reviews_route = _routes(head="d" * 40)
     async with httpx.AsyncClient() as http:
         deps = RunnerDeps(settings=settings, llm=RecordingChatModel(response=MODEL_REPLY), session_factory=db, http=http)
-        outcome = await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
-    assert outcome.findings == 0 and not reviews_route.called
+        with pytest.raises(Superseded):
+            await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
+    assert not reviews_route.called
     async with db() as session:
         (latest,) = await ReviewRepository(session).list(limit=5)
         assert latest.status == "superseded"

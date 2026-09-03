@@ -82,7 +82,7 @@ async def test_a_worker_that_ignores_cancellation_is_abandoned_after_the_grace_p
         try:
             await asyncio.sleep(5)
         except asyncio.CancelledError:
-            await asyncio.sleep(5)  # refuses to unwind
+            await asyncio.sleep(0.4)  # refuses to unwind promptly
             raise
 
     q = ReviewQueue(worker=stubborn, timeout_seconds=0.1, grace_seconds=0.1,
@@ -92,7 +92,8 @@ async def test_a_worker_that_ignores_cancellation_is_abandoned_after_the_grace_p
     await _submit(q, "next", pr=2)
     await q.drain(timeout=5)
     await q.stop()
-    assert outcomes == [("stuck", False), ("next", False)] or outcomes[0] == ("stuck", False)
+    assert outcomes == [("stuck", False), ("next", False)], "both got stuck; the second only started after the first was collected"
+    assert q.abandoned == 0
 
 
 class _Weird(BaseException):

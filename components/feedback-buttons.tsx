@@ -60,11 +60,17 @@ export function FeedbackButtons({
         disabled={pending}
         aria-label="Was this review useful?"
       >
-        <ToggleGroupItem value="useful">
+        <ToggleGroupItem
+          value="useful"
+          className="data-[state=on]:border-ring data-[state=on]:font-semibold data-[state=on]:underline data-[state=on]:underline-offset-4"
+        >
           <ThumbsUp aria-hidden="true" />
           Useful
         </ToggleGroupItem>
-        <ToggleGroupItem value="not-useful">
+        <ToggleGroupItem
+          value="not-useful"
+          className="data-[state=on]:border-ring data-[state=on]:font-semibold data-[state=on]:underline data-[state=on]:underline-offset-4"
+        >
           <ThumbsDown aria-hidden="true" />
           Not useful
         </ToggleGroupItem>

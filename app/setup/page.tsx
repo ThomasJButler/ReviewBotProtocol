@@ -179,7 +179,10 @@ LOCAL_API_TOKEN=`}
               />
               <p className="text-muted-foreground">
                 Only the webhook route needs to be reachable. Keep the dashboard
-                API on loopback.
+                API on loopback: a tunnel that forwards the whole port also
+                exposes it, behind the token alone. This dashboard has no login
+                of its own either. It binds to 127.0.0.1 and refuses any other
+                host name, and it must stay that way.
               </p>
             </CardContent>
           </Card>

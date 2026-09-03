@@ -5,7 +5,7 @@ A FastAPI service that receives GitHub pull request webhooks, reviews the diff w
 ## What it does, precisely
 
 1. GitHub sends a `pull_request` webhook (opened, synchronize, reopened, ready_for_review). The body is capped, the HMAC-SHA256 signature is verified over the raw bytes, the delivery id is recorded (a repeat is ignored), and the request returns 202. Nothing slow happens in the request.
-2. A single worker takes the job. The same head SHA is never reviewed twice; a newer push replaces a waiting job or cancels the one in flight; every job has a deadline.
+2. A single worker takes the job. A head SHA that is queued, in flight or already reviewed to completion is not reviewed again; a newer push replaces a waiting job or cancels the one in flight; every job has a deadline. One backend per database: a second instance refuses to start.
 3. It fetches the PR and its changed files with a GitHub App installation token. Deleted, binary, generated, vendored, non-code and oversized files are skipped, and so is anything secret-bearing by name (`.env`, `*.pem`, `id_rsa`, `*.tfvars` and so on).
 4. Every patch is redacted (API keys, tokens, private keys, passwords in URLs and assignments) before it reaches the model, the posted comment, the log or the database.
 5. One structured model call per file: the diff goes inside a delimited data block that the system prompt declares untrusted, and the model must answer with JSON matching a fixed schema. Findings are then dropped unless the quoted evidence really is in the diff and confidence clears a floor.
@@ -23,7 +23,8 @@ A FastAPI service that receives GitHub pull request webhooks, reviews the diff w
 ```
 cd backend
 python3.13 -m venv .venv
-.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+.venv/bin/pip install --require-hashes -r requirements.lock
+.venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env    # fill in GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, LOCAL_API_TOKEN
 .venv/bin/python main.py
 ```
@@ -37,10 +38,10 @@ Create a GitHub App (Settings, Developer settings, GitHub Apps, New GitHub App):
 - Webhook URL: your public URL for `/webhook/github`. Webhook secret: a long random value (`openssl rand -hex 32`), the same one you put in `.env`.
 - Repository permissions: Pull requests, Read and write. Metadata, Read. Nothing else.
 - Subscribe to events: Pull request. Nothing else.
-- Generate a private key and point `GITHUB_PRIVATE_KEY` at the downloaded `.pem`.
+- Generate a private key and point `GITHUB_PRIVATE_KEY` at the downloaded `.pem`. Keep the file outside the repository; `.gitignore` and `.dockerignore` exclude `*.pem` as a backstop.
 - Install the App on selected repositories, never on all repositories.
 
-A `ping` event arrives when the webhook is saved; it is answered with `{"status": "pong"}` and shows up under `/api/deliveries`.
+A `ping` event arrives when the webhook is saved; it is answered with `{"status": "pong"}` and recorded under `/api/deliveries` with status `pong`. Every signed delivery is recorded, including ignored events and skipped drafts, so the Status page shows what GitHub sent.
 
 ## Models
 
@@ -50,11 +51,11 @@ Set `OLLAMA_MODEL`. Any Ollama chat model works; these were assessed for this jo
 |---|---|---|
 | `qwen3.5:9b` | 6.6 GB | fast (about 33 tokens per second measured), finds obvious issues, a triage layer rather than an unattended reviewer |
 | `qwen3-coder:30b` | 19 GB | mixture-of-experts coder, the recommended primary when disk allows; run with `OLLAMA_NUM_CTX=16384` |
-| `qwen3.6:27b` | 17 GB | dense, thinking-capable, slower (about 12 to 16 tokens per second) |
+| `qwen3.6:27b` | 17 GB | dense, thinking-capable, slower (12 to 16 tokens per second estimated, not measured) |
 
 Thinking is switched off for the review call; the output is constrained to the JSON schema by Ollama's `format` parameter. Keep `OLLAMA_NUM_CTX` constant for a model, because changing it reloads the model.
 
-Recommended Ollama server settings on the host: `OLLAMA_NO_CLOUD=1`, `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, `OLLAMA_MAX_LOADED_MODELS=1`, and leave `OLLAMA_HOST` unset so it stays on loopback. Run `ollama serve` from a terminal or a service rather than the desktop app if you want no update checks at all (the app polls ollama.com hourly for its own updates; no prompt content is sent).
+Recommended Ollama server settings on the host: `OLLAMA_NO_CLOUD=1` (disables Ollama's cloud inference and web search), `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`, `OLLAMA_MAX_LOADED_MODELS=1`, and leave `OLLAMA_HOST` unset so it stays on loopback. Run `ollama serve` from a terminal or a service rather than the desktop app if you want no update checks at all (the app polls ollama.com hourly for its own updates; no prompt content is sent). Never set `OLLAMA_MODEL` to a cloud-hosted tag (`-cloud` suffix): a local Ollama would relay every prompt to ollama.com and nothing in this backend could tell. `STRICT_LOCAL` rejects such a tag at startup.
 
 ## What leaves the machine, and what is stored
 
@@ -64,13 +65,14 @@ Stored locally in `reviews.db`: repository, PR number and title, head SHA, model
 
 ## Proving it
 
-- `.venv/bin/python -m pytest` runs the suite, including a whole review through the real code against a fake GitHub API and a fake model with a socket-level guard that blocks every host except loopback.
-- `REVIEWBOT_E2E=1 .venv/bin/python -m pytest -m e2e` does the same with the real Ollama and model.
+- `.venv/bin/python -m pytest` runs the suite, including whole reviews through the real code with a fake GitHub API answered in-process and a fake model, under a socket-level guard that fails the test if anything in the process connects or resolves a name outside loopback.
+- `REVIEWBOT_E2E=1 .venv/bin/python -m pytest -m e2e` reviews one diff with the real Ollama and model under the same guard. Skipped by default.
+- Manual capture: run `lsof -i -P -a -p $(pgrep -f 'uvicorn main:app')` in a second terminal every second while a real PR is reviewed. The only peers you should ever see are `127.0.0.1:11434` (Ollama) and `api.github.com:443`.
 - `../scripts/prove-local.sh` builds a container holding the backend, Ollama and a small model, then runs one review with `docker run --network none`.
 
 ## Limits
 
-`MAX_FILES_PER_REVIEW` (25), `MAX_PATCH_BYTES` (40 000), `MAX_WEBHOOK_BODY_BYTES` (2 MiB), `MAX_INLINE_COMMENTS` (25), `REVIEW_TIMEOUT_SECONDS` (900), `MIN_FINDING_CONFIDENCE` (0.5). Draft PRs are skipped unless `REVIEW_DRAFTS=true`.
+`MAX_FILES_PER_REVIEW` (25), `MAX_PATCH_BYTES` (32 000, which must fit `OLLAMA_NUM_CTX`), `MAX_WEBHOOK_BODY_BYTES` (2 MiB), `MAX_INLINE_COMMENTS` (25), `REVIEW_TIMEOUT_SECONDS` (900), `MIN_FINDING_CONFIDENCE` (0.5). Draft PRs are skipped unless `REVIEW_DRAFTS=true`.
 
 ## API for the dashboard
 

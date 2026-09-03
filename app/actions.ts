@@ -2,7 +2,13 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { getStatus, setFeedback, type ApiResult, type Status } from '@/lib/api'
+import {
+  getStatus,
+  isReviewId,
+  setFeedback,
+  type ApiResult,
+  type Status,
+} from '@/lib/api'
 
 /** Re-fetch the reviews table. Used by the refresh button, which is a plain
  * form submit and so works without client JavaScript. */
@@ -26,6 +32,11 @@ export async function recordFeedback(
   reviewId: string,
   useful: boolean | null
 ): Promise<{ ok: boolean; message?: string }> {
+  // Types are erased at runtime and anyone who can reach the port can call this.
+  if (!isReviewId(reviewId)) return { ok: false, message: 'Not a review id.' }
+  if (useful !== true && useful !== false && useful !== null) {
+    return { ok: false, message: 'Not a valid answer.' }
+  }
   const result = await setFeedback(reviewId, useful)
   if (!result.ok) return { ok: false, message: result.message }
   revalidatePath(`/reviews/${reviewId}`)

@@ -3,22 +3,23 @@
 One review runs at a time, because one local model runs at a time. A job is
 keyed by (repo, pr_number). A second webhook for the same PR and the same
 head SHA is a duplicate and does nothing. A newer head SHA replaces a pending
-job or cancels the one in flight. Every job runs under a deadline, and a
-worker that will not stop after the deadline plus a grace period is abandoned
-so the queue keeps moving. The loop survives anything a worker throws."""
+job or cancels the one in flight. Every job runs under a deadline; a worker
+that will not stop after the deadline plus a grace period is set aside and
+awaited before the next job starts, so two reviews never run at once. The
+worker is told why it was cancelled through job.state["cancel_reason"]."""
 
 import asyncio
 import inspect
 from collections import OrderedDict
-from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from config.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ReviewJob:
     repo: str
     pr_number: int
@@ -27,10 +28,15 @@ class ReviewJob:
     delivery_id: str = ""
     is_fork: bool = False
     fork_repo: Optional[str] = None
+    state: Dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def key(self) -> Tuple[str, int]:
         return (self.repo, self.pr_number)
+
+    @property
+    def cancel_reason(self) -> Optional[str]:
+        return self.state.get("cancel_reason")
 
 
 class SupersededError(asyncio.CancelledError):
@@ -47,6 +53,7 @@ class ReviewQueue:
         self._on_result = on_result
         self._pending: "OrderedDict[Tuple[str, int], ReviewJob]" = OrderedDict()
         self._current: Optional[Dict[str, Any]] = None
+        self._abandoned: Set[asyncio.Task] = set()
         self._wakeup = asyncio.Event()
         self._loop_task: Optional[asyncio.Task] = None
         self._stopping = False
@@ -64,6 +71,11 @@ class ReviewQueue:
         return list(self._pending.values())
 
     @property
+    def abandoned(self) -> int:
+        self._abandoned = {t for t in self._abandoned if not t.done()}
+        return len(self._abandoned)
+
+    @property
     def alive(self) -> bool:
         return self._loop_task is not None and not self._loop_task.done()
 
@@ -78,6 +90,12 @@ class ReviewQueue:
             return
         logger.error("review queue loop died", error=type(task.exception()).__name__ if task.exception() else "unknown")
 
+    def _cancel_current(self, reason: str) -> None:
+        if self._current:
+            self._current["job"].state["cancel_reason"] = reason
+            self._current["reason"] = reason
+            self._current["task"].cancel()
+
     async def submit(self, *, repo: str, pr_number: int, head_sha: str, installation_id: int,
                      delivery_id: str = "", is_fork: bool = False, fork_repo: Optional[str] = None) -> str:
         if self._stopping:
@@ -89,14 +107,14 @@ class ReviewQueue:
         if self._current and self._current["job"].key == job.key:
             if self._current["job"].head_sha == job.head_sha:
                 return "duplicate"
-            self._current["superseded"] = True
-            self._current["task"].cancel()
+            self._cancel_current("superseded")
             outcome = "superseded_inflight"
         pending = self._pending.get(job.key)
         if pending is not None:
-            if pending.head_sha == job.head_sha:
+            if pending.head_sha == job.head_sha and outcome == "queued":
                 return "duplicate"
-            outcome = "replaced"
+            if outcome == "queued":
+                outcome = "replaced"
         self._pending[job.key] = job
         self._wakeup.set()
         logger.info("review job submitted", repo=repo, pr=pr_number, head=head_sha[:12], outcome=outcome, depth=self.depth)
@@ -112,11 +130,23 @@ class ReviewQueue:
         except Exception as e:  # a reporting failure must not kill the worker
             logger.error("on_result failed", error=type(e).__name__)
 
+    async def _unwind(self, inner: asyncio.Task) -> bool:
+        """Cancel the worker and give it a bounded time to finish. True if it did."""
+        inner.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(inner), timeout=self._grace)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            pass
+        return inner.done()
+
     async def _run(self, job: ReviewJob) -> None:
         inner = asyncio.create_task(self._worker(job), name=f"review-worker-{job.repo}-{job.pr_number}")
         try:
             done, _ = await asyncio.wait({inner}, timeout=self._timeout)
             if inner in done:
+                if inner.cancelled():
+                    await self._report(job, False, asyncio.CancelledError("the worker cancelled itself"))
+                    return
                 exc = inner.exception()
                 if exc is None:
                     await self._report(job, True, None)
@@ -124,29 +154,32 @@ class ReviewQueue:
                     logger.error("review job failed", repo=job.repo, pr=job.pr_number, error=type(exc).__name__)
                     await self._report(job, False, exc)
                 return
-            # Deadline: cancel and give the worker a bounded time to unwind.
-            inner.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(inner), timeout=self._grace)
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                pass
-            if not inner.done():
-                logger.error("worker did not stop after the grace period; abandoning it", repo=job.repo, pr=job.pr_number)
+            job.state["cancel_reason"] = "timeout"
+            if not await self._unwind(inner):
+                logger.error("worker did not stop after the grace period; waiting for it before the next job",
+                             repo=job.repo, pr=job.pr_number)
+                self._abandoned.add(inner)
             await self._report(job, False, asyncio.TimeoutError(f"review exceeded {self._timeout:.0f}s"))
         except asyncio.CancelledError:
-            # Superseded or stopping: cancel the worker and let it unwind briefly.
-            inner.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(inner), timeout=self._grace)
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                pass
-            await self._report(job, False, SupersededError("superseded by a newer push") if not self._stopping else asyncio.CancelledError("shutdown"))
+            reason = job.state.get("cancel_reason") or ("shutdown" if self._stopping else "superseded")
+            job.state["cancel_reason"] = reason
+            if not await self._unwind(inner):
+                self._abandoned.add(inner)
+            err = SupersededError("superseded by a newer push") if reason == "superseded" else asyncio.CancelledError(reason)
+            await self._report(job, False, err)
             raise
         except BaseException as e:  # never let anything kill the loop silently
             logger.error("review runner raised", repo=job.repo, pr=job.pr_number, error=type(e).__name__)
             await self._report(job, False, e)
             if isinstance(e, (KeyboardInterrupt, SystemExit)):
                 raise
+
+    async def _wait_for_abandoned(self) -> None:
+        live = [t for t in self._abandoned if not t.done()]
+        if live:
+            logger.warning("waiting for abandoned workers before starting the next review", count=len(live))
+            await asyncio.gather(*live, return_exceptions=True)
+        self._abandoned = set()
 
     async def _loop(self) -> None:
         while not self._stopping:
@@ -155,13 +188,16 @@ class ReviewQueue:
                     self._wakeup.clear()
                     await self._wakeup.wait()
                     continue
+                await self._wait_for_abandoned()
+                if self._stopping:
+                    break
                 _, job = self._pending.popitem(last=False)
                 task = asyncio.create_task(self._run(job), name=f"review-{job.repo}-{job.pr_number}")
-                self._current = {"job": job, "task": task, "superseded": False}
+                self._current = {"job": job, "task": task, "reason": None}
                 try:
                     await task
                 except asyncio.CancelledError:
-                    if self._stopping or not self._current.get("superseded"):
+                    if self._stopping or not self._current or self._current.get("reason") is None:
                         raise
                 finally:
                     self._current = None
@@ -176,7 +212,7 @@ class ReviewQueue:
 
     async def drain(self, timeout: Optional[float] = None) -> None:
         waited = 0.0
-        while self._pending or self._current is not None:
+        while self._pending or self._current is not None or self.abandoned:
             if not self.alive:
                 raise RuntimeError("review queue loop is not running")
             if timeout is not None and waited >= timeout:
@@ -187,9 +223,14 @@ class ReviewQueue:
     async def stop(self) -> None:
         self._stopping = True
         self._wakeup.set()
-        if self._current:
-            self._current["task"].cancel()
+        self._cancel_current("shutdown")
         if self._loop_task:
             self._loop_task.cancel()
             await asyncio.gather(self._loop_task, return_exceptions=True)
             self._loop_task = None
+        live = [t for t in self._abandoned if not t.done()]
+        for t in live:
+            t.cancel()
+        if live:
+            await asyncio.gather(*live, return_exceptions=True)
+        self._abandoned = set()

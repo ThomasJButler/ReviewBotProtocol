@@ -1,7 +1,10 @@
 """ReviewBot Protocol backend. One public route (the webhook), a token-gated
 dashboard API, a single-worker review queue, and a local model."""
 
+import fcntl
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,14 +28,36 @@ logger = get_logger(__name__)
 def _on_result(job: ReviewJob, ok: bool, err) -> None:
     if ok:
         logger.info("review finished", repo=job.repo, pr=job.pr_number)
+    elif type(err).__name__ in ("Superseded", "SupersededError"):
+        logger.info("review superseded", repo=job.repo, pr=job.pr_number, reason=str(err))
     else:
-        logger.warning("review did not complete", repo=job.repo, pr=job.pr_number, reason=type(err).__name__ if err else "unknown")
+        logger.warning("review did not complete", repo=job.repo, pr=job.pr_number,
+                       reason=type(err).__name__ if err else "unknown", cancel_reason=job.cancel_reason)
+
+
+def _acquire_instance_lock() -> object:
+    """Refuse to run two backends against one database: the second would mark
+    the first's in-flight review as interrupted and run reviews concurrently."""
+    from database.connection import database_path
+    lock_path = Path(str(database_path() or (Path(__file__).parent / "reviews.db")) + ".lock")
+    handle = open(lock_path, "a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        raise RuntimeError(f"another ReviewBot backend already holds {lock_path}; run one instance per database")
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()))
+    handle.flush()
+    return handle
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("starting", app=settings.APP_NAME, version=settings.APP_VERSION, model=settings.OLLAMA_MODEL,
                 ollama=settings.OLLAMA_BASE_URL, host=settings.HOST, port=settings.PORT)
+    lock = _acquire_instance_lock()
     session_factory = await init_db()
     async with session_factory() as session:
         fixed = await ReviewRepository(session).mark_interrupted()
@@ -58,6 +83,11 @@ async def lifespan(app: FastAPI):
                     await WebhookRepository(session).mark(job.delivery_id, "interrupted")
             logger.warning("jobs left in the queue at shutdown; GitHub redelivery will be accepted", jobs=len(pending))
         await close_db()
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+        except OSError:
+            pass
         logger.info("stopped")
 
 
