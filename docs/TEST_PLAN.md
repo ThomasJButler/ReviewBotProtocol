@@ -51,6 +51,9 @@ Create the scratch repository first if you have not: a private repository named 
 
 ```
 cd backend
+python3.13 -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements.lock
+.venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 

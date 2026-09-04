@@ -37,7 +37,8 @@ adduser reviewbot && usermod -aG sudo reviewbot
 rsync -a ~/.ssh /home/reviewbot/ && chown -R reviewbot:reviewbot /home/reviewbot/.ssh
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/; s/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 systemctl restart ssh
-apt update && apt upgrade -y && apt install -y ufw caddy git python3-venv build-essential
+apt update && apt upgrade -y && apt install -y ufw caddy git python3-venv build-essential autossh sqlite3
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt install -y nodejs   # Node 22 with npm at /usr/bin/npm, which the dashboard unit assumes
 ufw default deny incoming && ufw default allow outgoing
 ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw enable
 ```
@@ -139,7 +140,7 @@ reviewbot.yourdomain.example {
 }
 ```
 
-`sudo systemctl reload caddy`. Caddy fetches and renews the certificate itself. Everything except the webhook path answers 404 at the edge, so `/health` and the dashboard API are not reachable from outside at all.
+`sudo systemctl reload caddy`. Caddy fetches and renews the certificate itself. Everything except the webhook path (with or without a trailing slash) answers 404 at the edge, so `/health` and the dashboard API are not reachable from outside at all. If a delivery shows red with a 404 and nothing in the backend log, the App's webhook URL does not match the path Caddy forwards; it must be exactly `https://reviewbot.yourdomain.example/webhook/github`.
 
 Change the GitHub App's webhook URL to `https://reviewbot.yourdomain.example/webhook/github`, save, and Redeliver the ping. It should be green.
 
@@ -155,7 +156,7 @@ and open http://127.0.0.1:3000. The dashboard's own Host check accepts it becaus
 
 ### A6. What to expect, honestly
 
-A six-file PR at the estimated CPU speed is fifteen to forty minutes of wall time, most of it prefill. The webhook still answers GitHub in milliseconds, the queue holds the work, and a second push supersedes the first job, so nothing is lost; it is simply slow. Measure with A2 before deciding whether that is acceptable. The SQLite file at `backend/reviews.db` is the only state worth backing up.
+A six-file PR at the estimated CPU speed is fifteen to forty minutes of wall time, most of it prefill. The webhook still answers GitHub in milliseconds, the queue holds the work, and a second push supersedes the first job, so nothing is lost; it is simply slow. Measure with A2 before deciding whether that is acceptable. The SQLite database is the only state worth backing up, and it runs in WAL mode, so copying `reviews.db` alone misses committed rows still in `reviews.db-wal`. Back it up with `sqlite3 backend/reviews.db ".backup /path/to/backup.db"` while the service runs, or stop `reviewbot-backend` and copy `reviews.db`, `reviews.db-wal` and `reviews.db-shm` together.
 
 Keep Ollama pinned. Upgrade on purpose, after reading the release notes, never automatically.
 
@@ -168,10 +169,10 @@ Keep the backend where it is (the Netcup box, or any small VPS). Put Ollama and 
 1. RunPod account, then a Network Volume of 30 GB in one region ($0.07 per GB per month, about $2.10; [pricing](https://www.runpod.io/pricing)). Weights live on the volume, so a stopped pod costs only the volume. A stopped pod's own container disk is billed at the higher idle rate, so keep it small.
 2. Create a pod from the `ollama/ollama:0.33.1` image on an RTX A5000 24 GB (community cloud from $0.16 per hour, secure cloud $0.27), with the network volume mounted at `/root/.ollama`, `OLLAMA_HOST=127.0.0.1:11434`, SSH enabled, and no HTTP port exposed. First start: `ollama pull qwen3-coder:30b` once; it lands on the volume.
 3. Stop the pod. Note its id, its SSH host and port from the pod's Connect panel, and install `runpodctl` on the backend box with your API key.
-4. On the backend box, `scripts/hosted/gpu-up.sh <pod-id> <ssh-host> <ssh-port>`: starts the pod, waits for SSH, opens `autossh -M 0 -N -L 11435:127.0.0.1:11434 -p <port> root@<host>`, waits until `http://127.0.0.1:11435/api/tags` lists the model, then restarts the backend with `OLLAMA_BASE_URL=http://127.0.0.1:11435` and `OLLAMA_MODEL=qwen3-coder:30b`. `gpu-down.sh` reverses it. Both scripts are written but were not exercised against RunPod's API when this document was written; they say so at the top.
+4. The scripts restart the backend with `sudo systemctl restart`, so the operator needs a passwordless sudo rule for exactly that: `echo "reviewbot ALL=(root) NOPASSWD: /usr/bin/systemctl restart reviewbot-backend" | sudo tee /etc/sudoers.d/reviewbot-restart` and `chmod 440` it. Then, on the backend box, `scripts/hosted/gpu-up.sh <pod-id> <ssh-host> <ssh-port>`: starts the pod, waits for SSH, opens `autossh -M 0 -N -L 11435:127.0.0.1:11434 -p <port> root@<host>`, waits until `http://127.0.0.1:11435/api/tags` lists the model, then restarts the backend with `OLLAMA_BASE_URL=http://127.0.0.1:11435` and `OLLAMA_MODEL=qwen3-coder:30b`. `gpu-down.sh` reverses it. Both scripts are written but were not exercised against RunPod's API when this document was written; they say so at the top.
 5. The backend's loopback check is satisfied because the URL is loopback; the bytes go through SSH to the pod. Local Ollama on the box keeps port 11434, so both modes can coexist and a `.env` line chooses.
 
-Cost per review: a review that keeps the pod up for ten minutes including a ninety-second cold start costs about $0.03 to $0.05 on an A5000. Ten reviews a day is about $1 a day plus the volume.
+Cost per review: a review that keeps the pod up for ten minutes including a ninety-second cold start costs about $0.03 to $0.05 on an A5000. Ten reviews a day is about $0.40 a day plus the volume; with a fifteen-minute idle timer per burst (phase B2) count on about $1 a day.
 
 ### B2. Automatic, later
 
@@ -180,7 +181,7 @@ A `MODEL_HOST=runpod` setting; the queue worker calls `ensure_running()` before 
 ## What changes in the README for hosted mode
 
 - "Nothing leaves the machine" becomes "in local mode, nothing leaves the machine". In hosted mode the diff is processed on a server you rent; in step B it also travels over SSH to a GPU rented by the hour, where the provider could in principle read the container's memory. Nothing is retained by design on either.
-- The status page keeps saying where the model is (`OLLAMA_BASE_URL`), so a box configured for step B shows the tunnel port.
+- The Status page shows the model address (`OLLAMA_BASE_URL`, reported by `/api/status`), so a box configured for step B shows the tunnel port rather than 11434.
 - The permissions, the App, the redaction, the sanitiser, the queue and the dashboard are identical in both modes. Only the model's address and its name change.
 
 ## Cost worksheet

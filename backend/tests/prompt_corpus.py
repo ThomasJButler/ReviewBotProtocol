@@ -27,8 +27,9 @@ class Case:
     language: str
     patch: str
     expect: Tuple[int, ...] = ()
-    expect_category: str = "security"
+    expect_category: Tuple[str, ...] = ("security",)
     min_severity: str = "medium"
+    status: str = "modified"
     clean: bool = False
     injection_line: int = 0  # a planted instruction to the reviewer, if any
     note: str = ""
@@ -203,7 +204,7 @@ CASES = [
             "+\n"
         ),
         expect=(13, 16),
-        expect_category="security",
+        expect_category=("security", "quality"),
         min_severity="medium",
         note="the lock was removed; a quality category is accepted too",
     ),
@@ -231,6 +232,7 @@ CASES = [
         key="clean_test",
         filename="tests/test_pricing.py",
         language="python",
+        status="added",
         patch=(
             "@@ -0,0 +1,7 @@\n"
             "+from app.pricing import Item, order_total\n"

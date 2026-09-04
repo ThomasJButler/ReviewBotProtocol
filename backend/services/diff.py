@@ -7,7 +7,7 @@ text of each so a finding's quoted evidence can be checked."""
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Tuple, Dict, Optional
 
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _TOKENS = re.compile(r"[A-Za-z0-9_]+")
@@ -73,17 +73,23 @@ def _substantial(ev: str) -> bool:
     return len(ev) >= MIN_EVIDENCE_CHARS or len(_TOKENS.findall(ev)) >= MIN_EVIDENCE_TOKENS
 
 
-def locate_evidence(parsed: ParsedPatch, line: int, evidence: str) -> Optional[int]:
-    """Where in the new file the quoted evidence really is. A model that
-    quotes several lines is located by the first of them that is in the diff,
-    so a correct multi-line quote is not thrown away."""
+def locate_evidence_part(parsed: ParsedPatch, line: int, evidence: str) -> Tuple[Optional[int], str]:
+    """Where in the new file the quoted evidence really is, and which part of
+    the quote sits there. A model that quotes several lines is located by the
+    first of them that is in the diff, and only that line is kept as the
+    finding's evidence, so a fabricated line cannot ride along with a real
+    one into the posted comment."""
     if evidence and "\n" in evidence.strip():
         for offset, part in enumerate(p for p in evidence.splitlines() if p.strip()):
-            located = locate_evidence(parsed, line + offset, part)
+            located = _locate_single(parsed, line + offset, part)
             if located is not None:
-                return located
-        return None
-    return _locate_single(parsed, line, evidence)
+                return located, part
+        return None, evidence
+    return _locate_single(parsed, line, evidence), evidence
+
+
+def locate_evidence(parsed: ParsedPatch, line: int, evidence: str) -> Optional[int]:
+    return locate_evidence_part(parsed, line, evidence)[0]
 
 
 def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[int]:

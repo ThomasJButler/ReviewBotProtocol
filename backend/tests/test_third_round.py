@@ -108,6 +108,7 @@ class TestRedaction:
             "AIza" + "g" * 35, "sk_live_" + "s" * 24, "lsv2_pt_" + "l" * 32, "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnopqrstuvwxyz",
             "https://user:hunter2hunter2@example.com/db", "Authorization: Bearer abcdefghijklmnopqrstuvwxyz",
             'password = "hunter2hunter2"', "DB_PASSWORD=hunter2hunter2", 'api_key: "abcdefghijklmnopqrstuvwxyz"',
+            '{"api_key": "abcd1234efgh5678"}', "{'password': 'hunter2hunter2'}", '{"client_secret": "s3cr3tvaluehere"}',
             "AccountKey=" + "k" * 44 + "==", "-----BEGIN RSA PRIVATE KEY-----", "MIIEpAIBAAKCAQEA" + "m" * 48,
             "-----END RSA PRIVATE KEY-----", "-----BEGIN OPENSSH PRIVATE KEY-----", "b3BlbnNzaC1rZXktdjEAAAAA",
         ]

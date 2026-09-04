@@ -4,7 +4,7 @@ import pytest
 
 from config.settings import CLOUD_KEY_VARS, LocalOnlyViolation, Settings, TRACING_KEY_VARS, TRACING_VARS
 
-_OVERRIDDEN = ("DEBUG", "STRICT_LOCAL", "ALLOWED_HOSTS", "MAX_WEBHOOK_BODY_BYTES", "LOG_LEVEL", "LOCAL_API_TOKEN",
+_OVERRIDDEN = ("VERIFY_FINDINGS", "DEBUG", "STRICT_LOCAL", "ALLOWED_HOSTS", "MAX_WEBHOOK_BODY_BYTES", "LOG_LEVEL", "LOCAL_API_TOKEN",
                "OLLAMA_MODEL", "DATABASE_URL", "LOG_PROMPTS", "REVIEW_DRAFTS")
 
 
@@ -71,3 +71,10 @@ def test_remote_ollama_refused_under_strict_local(monkeypatch):
 def test_private_key_escaped_newlines_are_unescaped(monkeypatch):
     s = _mk(monkeypatch, GITHUB_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----")
     assert "\n" in s.GITHUB_PRIVATE_KEY and "\\n" not in s.GITHUB_PRIVATE_KEY
+
+
+def test_verify_findings_is_off_by_default_and_parses_like_the_other_booleans():
+    s = Settings(_env_file=None)
+    assert s.VERIFY_FINDINGS is False and s.MAX_VERIFY_CALLS_PER_REVIEW == 40
+    for raw, want in (("true", True), ("TRUE", True), ("1", True), ("on", True), ("false", False), ("0", False)):
+        assert Settings(_env_file=None, VERIFY_FINDINGS=raw).VERIFY_FINDINGS is want, raw

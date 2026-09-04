@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from config.logging import get_logger
 from config.settings import Settings
-from services.diff import locate_evidence, parse_patch
+from services.diff import locate_evidence, locate_evidence_part, parse_patch
 from services.prompts import MARK_BEGIN, MARK_END, delimiters, review_prompt, verify_prompt
 from services.redaction import redact_text
 from services.schemas import SEVERITY_ORDER, FileReview, Finding, Verdict, output_schema, verdict_schema
@@ -149,13 +149,15 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float)
     for f in review.findings:
         if f.confidence < min_confidence:
             continue
-        located = locate_evidence(parsed, f.line, f.evidence)
+        located, part = locate_evidence_part(parsed, f.line, f.evidence)
         if located is None:
             continue
         key = (located, f.title.strip().lower())
         if key in seen:
             continue
         seen.add(key)
+        if part != f.evidence:
+            f = f.model_copy(update={"evidence": part.strip()[:300]})
         kept.append(f.model_copy(update={"line": located}))
     kept.sort(key=lambda x: (SEVERITY_ORDER[x.severity], x.line))
     return FileReview(findings=kept, summary=review.summary), len(review.findings) - len(kept)
@@ -168,6 +170,7 @@ class FileReviewer:
         self.prompt = prompt
         self.verifier_prompt = verifier_prompt
         self.verify_enabled = settings.VERIFY_FINDINGS if verify is None else verify
+        self.verify_budget = settings.MAX_VERIFY_CALLS_PER_REVIEW  # shared across every file of one review
         self.chain = prompt | llm.bind(format=output_schema())
         self.verify_chain = verifier_prompt | llm.bind(format=verdict_schema())
 
@@ -179,6 +182,11 @@ class FileReviewer:
         kept: List[Finding] = []
         refuted = calls = tokens_in = tokens_out = 0
         for f in review.findings:
+            if self.verify_budget <= 0:
+                logger.warning("verify budget exhausted for this review, keeping the remaining findings unverified", filename=_meta(filename))
+                kept.append(f)
+                continue
+            self.verify_budget -= 1
             data_begin, data_end = delimiters(secrets.token_hex(8))
             inputs = {"filename": _meta(filename), "language": _meta(language, 40), "code_diff": _defang(patch or ""),
                       "category": f.category.value, "severity": f.severity.value, "line": f.line,
@@ -205,13 +213,23 @@ class FileReviewer:
                 kept.append(f)
                 continue
             if not verdict.confirmed:
+                if verdict.confidence < self.settings.MIN_FINDING_CONFIDENCE:
+                    logger.info("verifier unsure, keeping the finding", filename=_meta(filename), line=f.line, confidence=verdict.confidence)
+                    kept.append(f)
+                    continue
                 refuted += 1
                 logger.info("finding refuted by the verify pass", filename=_meta(filename), line=f.line, reason=verdict.reason[:200])
                 continue
             severity = f.severity if SEVERITY_ORDER[f.severity] >= SEVERITY_ORDER[verdict.severity] else verdict.severity
             kept.append(f.model_copy(update={"severity": severity}))
         kept.sort(key=lambda x: (SEVERITY_ORDER[x.severity], x.line))
-        return FileReview(findings=kept, summary=review.summary), refuted, calls, tokens_in, tokens_out
+        summary = review.summary
+        if refuted and not kept:
+            summary = "Nothing survived verification for this file."
+        elif refuted:
+            note = f" ({refuted} finding{'s' if refuted != 1 else ''} did not survive verification and {'are' if refuted != 1 else 'is'} not shown.)"
+            summary = (summary or "")[: 500 - len(note)].rstrip() + note
+        return FileReview(findings=kept, summary=summary), refuted, calls, tokens_in, tokens_out
 
     async def review_file(self, filename: str, language: str, status: str, patch: str) -> FileReviewResult:
         started = time.perf_counter()

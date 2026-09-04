@@ -49,7 +49,8 @@ Backend:
 ```
 cd backend
 python3.13 -m venv .venv
-.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+.venv/bin/pip install --require-hashes -r requirements.lock
+.venv/bin/pip install -r requirements-dev.txt   # requirements.txt is only the input to pip-compile
 cp .env.example .env      # GitHub App id, private key path, webhook secret, and a LOCAL_API_TOKEN
 ollama pull qwen3.5:9b
 .venv/bin/python main.py  # 127.0.0.1:8000

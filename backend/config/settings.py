@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     MAX_INLINE_COMMENTS: int = 25
     MIN_FINDING_CONFIDENCE: float = 0.5
     VERIFY_FINDINGS: bool = False  # second model pass per finding that tries to refute it
+    MAX_VERIFY_CALLS_PER_REVIEW: int = 40  # the verify pass stops after this many calls in one review
 
     LOCAL_API_TOKEN: str = ""
     STRICT_LOCAL: bool = True
@@ -82,10 +83,14 @@ class Settings(BaseSettings):
         """Accept PEM text, a path to a PEM file, or base64-encoded PEM."""
         if not v:
             return v
-        if v.startswith("/") or v.startswith("./") or v.startswith("~"):
-            path = os.path.expanduser(v)
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
+        if "-----BEGIN" not in v and "\n" not in v.strip():
+            # A path in any of the forms a reader might write: absolute, ~, or
+            # relative (resolved against the backend directory, not the shell's cwd).
+            candidate = os.path.expanduser(v.strip())
+            if not os.path.isabs(candidate):
+                candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), candidate)
+            if os.path.isfile(candidate):
+                with open(candidate, "r", encoding="utf-8") as f:
                     return f.read()
         if "-----BEGIN" not in v:
             try:

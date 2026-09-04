@@ -134,7 +134,7 @@ export default function SetupPage() {
               </p>
               <CopySnippet
                 text={`GITHUB_APP_ID=
-GITHUB_PRIVATE_KEY=./github-app.pem
+GITHUB_PRIVATE_KEY=~/.config/reviewbot/github-app.pem
 GITHUB_WEBHOOK_SECRET=
 LOCAL_API_TOKEN=`}
                 label="the backend environment block"

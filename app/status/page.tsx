@@ -117,6 +117,10 @@ export default async function StatusPage() {
                     />
                   }
                 />
+                <Row
+                  label="Model address"
+                  value={status.data.ollama.base_url ?? 'not reported'}
+                />
                 {status.data.ollama.error ? (
                   <Row
                     label="Last error"

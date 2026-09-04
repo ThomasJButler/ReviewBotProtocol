@@ -1,3 +1,4 @@
+import pytest
 from services.redaction import is_excluded_path, redact
 
 
@@ -41,6 +42,26 @@ def test_url_password_and_auth_header_are_masked():
     out, counts = redact("DATABASE_URL=postgres://app:S3cret@Pass@word@db:5432/x\nAuthorization: Bearer abcdefghijklmnop.123\n")
     assert "S3cret" not in out and "Pass@word" not in out and "@db:5432/x" in out
     assert "abcdefghijklmnop.123" not in out
+
+
+@pytest.mark.parametrize("text", [
+    '{"api_key": "abcd1234efgh5678"}',
+    "{'password': 'hunter2hunter2'}",
+    '{"client_secret": "s3cr3tvaluehere"}',
+    '{"DB_PASSWORD":"p4ssw0rdp4ssw0rd"}',
+    'd["password"] = "hunter2hunter2"',
+    '+  "api_key": "abcd1234efgh5678",',
+])
+def test_quoted_keys_in_json_and_dict_literals_are_redacted(text):
+    out, counts = redact(text)
+    for secret in ("abcd1234efgh5678", "hunter2hunter2", "s3cr3tvaluehere", "p4ssw0rdp4ssw0rd"):
+        assert secret not in out
+    assert sum(counts.values()) == 1 and out.count("\n") == text.count("\n")
+
+
+@pytest.mark.parametrize("text", ['# set the password: see the wiki', 'get_token("user") == "abc"', 'if token == "placeholder":'])
+def test_quoted_key_widening_does_not_over_redact(text):
+    assert redact(text)[0] == text
 
 
 def test_quoted_and_unquoted_assignments_are_masked_but_code_and_placeholders_kept():

@@ -55,7 +55,7 @@ async def main() -> int:
         "secret redacted from everything posted": "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd" not in text and "sk-proj-" not in text,
         "redaction is announced": "redacted before review" in text,
         ".env was never reviewed": "`.env`" in text and "never sent to the model" in text,
-        "footer names the local model": settings.OLLAMA_MODEL in text and "via Ollama" in text,
+        "footer names the model": settings.OLLAMA_MODEL in text and "via Ollama" in text,
     }
     for name, ok in checks.items():
         print(("PASS" if ok else "FAIL"), name)

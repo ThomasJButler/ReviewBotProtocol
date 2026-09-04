@@ -33,12 +33,12 @@ _PATTERNS: List[Tuple[str, re.Pattern, int]] = [
     ("url-password", re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s:/@]+:([^\s/]{3,})@"), 1),
     ("auth-header", re.compile(r"(?i)\bauthorization\b['\"\]]*\s*[:=]\s*['\"]?(?:bearer|basic|token)\s+([A-Za-z0-9._~+/=-]{8,})"), 1),
     ("assigned-secret", re.compile(
-        r"(?i)(?:\b|_)(?:password|passwd|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key)\b"
+        r"(?i)(?:\b|_)(?:password|passwd|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key)\b['\"\]]*"
         r"\s*[:=]\s*['\"]([^'\"\n]{8,})['\"]"), 1),
     # Unquoted assignments (YAML, dotenv, Dockerfile, shell). The value must look like
     # a credential rather than an expression: no brackets or spaces, and at least one digit.
     ("assigned-secret", re.compile(
-        r"(?i)(?:\b|_)(?:password|passwd|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key)\b"
+        r"(?i)(?:\b|_)(?:password|passwd|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key)\b['\"\]]*"
         r"\s*[:=]\s*(?=[A-Za-z0-9_./+=-]*\d)([A-Za-z0-9_./+=-]{12,})(?=\s|$|[,;])"), 1),
 ]
 
@@ -51,6 +51,7 @@ _PLACEHOLDER_PREFIXES = ("your-", "your_", "changeme", "placeholder", "xxxx", "[
 _PLACEHOLDER_EXACT = {"example", "test", "secret", "password", "changeme", "none", "null"}
 
 EXCLUDED_BASENAMES = {
+    "credentials",
     ".env", ".npmrc", ".pypirc", ".netrc", "kubeconfig", "credentials.json", ".htpasswd", ".git-credentials",
     "secrets.yaml", "secrets.yml", "secrets.json", "secret.yaml", "secret.yml", "credentials.yaml", "credentials.yml",
     "vault.yaml", "vault.yml", ".dockercfg",

@@ -75,6 +75,7 @@ export interface Status {
   version: string
   model: string
   ollama: {
+    base_url?: string
     reachable: boolean
     model: string
     model_present: boolean

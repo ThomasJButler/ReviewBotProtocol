@@ -179,13 +179,17 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                                  redaction_total=redaction_total, files_errored=len(errored))
         posted = await client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
         comment_url = posted.get("html_url")
-        # The review is live on GitHub now: record its URL before anything else can interrupt us.
-        async with deps.session_factory() as session:
-            await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
+        # The review is live on GitHub now: record its URL before anything else can
+        # interrupt us, and shield the writes so a cancel arriving here cannot leave
+        # a posted review recorded as anything but completed.
+        async def _record_url() -> None:
+            async with deps.session_factory() as session:
+                await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
+        await asyncio.wait_for(asyncio.shield(_record_url()), timeout=CLEANUP_SECONDS)
         duration = time.perf_counter() - started
         all_failed = bool(results) and not succeeded
 
-        await _finish(deps, review_id, job.delivery_id, {
+        await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
             "status": "failed" if all_failed else "completed", "head_sha": head_sha,
             "pr_title": sanitise(redact(pr.get("title") or "")[0], 200),
             "files_total": len(raw_files), "files_reviewed": len(succeeded), "files_skipped": len(skipped),
@@ -200,7 +204,7 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
             {"path": r.filename, "line": f.line, "category": f.category.value, "severity": f.severity.value,
              "title": f.title, "evidence": f.evidence, "recommendation": f.recommendation, "confidence": f.confidence}
             for r in succeeded for f in r.review.findings
-        ])
+        ])), timeout=CLEANUP_SECONDS)
         logger.info("review posted", repo=job.repo, pr=job.pr_number, findings=rendered.findings_total,
                     files=len(succeeded), errored=len(errored), seconds=round(duration, 1), url=comment_url)
         return ReviewOutcome(review_id, rendered.findings_total, len(succeeded), len(skipped), comment_url)

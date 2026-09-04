@@ -109,7 +109,7 @@ async def status(request: Request):
     return {
         "version": settings.APP_VERSION,
         "model": settings.OLLAMA_MODEL,
-        "ollama": await ollama_health(settings),
+        "ollama": {**(await ollama_health(settings)), "base_url": settings.OLLAMA_BASE_URL},
         "database": await db_healthy(),
         "queue": {"depth": queue.depth if queue else 0, "alive": bool(queue and queue.alive),
                   "abandoned": queue.abandoned if queue else 0,

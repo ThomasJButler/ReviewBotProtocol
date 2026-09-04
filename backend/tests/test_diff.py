@@ -54,3 +54,25 @@ def test_multi_line_evidence_locates_by_its_first_line_in_the_diff():
     assert locate_evidence(parsed, 2, quoted) == 2
     assert locate_evidence(parsed, 9, "not here\nnor here") is None
     assert locate_evidence(parsed, 1, "import os\nSENTINEL_9f3a = eval(user_input)") == 1
+
+
+def test_mixed_real_and_fabricated_multi_line_evidence_keeps_only_the_real_line():
+    from tests.conftest import DIFF
+    from services.diff import locate_evidence_part
+    parsed = parse_patch(DIFF)
+    line, part = locate_evidence_part(parsed, 2, "SENTINEL_9f3a = eval(user_input)\nos.system(user_input)  # invented")
+    assert line == 2 and part == "SENTINEL_9f3a = eval(user_input)"
+
+
+async def test_postprocess_trims_a_multi_line_quote_to_the_located_line():
+    import json
+    from config.settings import settings
+    from services.ai_reviewer import FileReviewer
+    from tests.conftest import DIFF
+    from tests.fakes import RecordingChatModel
+    reply = json.dumps({"findings": [{"category": "security", "severity": "high", "title": "eval", "line": 2,
+                        "evidence": "SENTINEL_9f3a = eval(user_input)\nos.system(user_input)  # invented",
+                        "recommendation": "x", "confidence": 0.9}], "summary": "s"})
+    result = await FileReviewer(RecordingChatModel(response=reply), settings).review_file("a.py", "python", "modified", DIFF)
+    (f,) = result.review.findings
+    assert f.line == 2 and f.evidence == "SENTINEL_9f3a = eval(user_input)", "the invented line never reaches the comment"

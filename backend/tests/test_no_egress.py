@@ -64,3 +64,18 @@ async def test_real_model_review_completes_with_egress_blocked(no_egress):
     result = await FileReviewer(build_chat_model(local), local).review_file("app.py", "python", "modified", DIFF)
     assert result.parse_ok and result.error is None
     assert any(f.line == 2 for f in result.review.findings), [f.model_dump() for f in result.review.findings]
+
+
+@pytest.mark.e2e
+async def test_real_model_verify_pass_runs_under_the_guard(no_egress):
+    """The verify pass against the real model, still loopback only. It may
+    refute (the 9B is known to over-refute); the proof here is egress and
+    that the pass completes."""
+    if not os.environ.get("REVIEWBOT_E2E"):
+        pytest.skip("set REVIEWBOT_E2E=1 with Ollama running on 127.0.0.1")
+    from config.settings import settings
+    from services.ai_reviewer import FileReviewer
+    from services.llm import build_chat_model
+    local = settings.model_copy(update={"OLLAMA_MODEL": os.environ.get("REVIEWBOT_E2E_MODEL", "qwen3.5:9b")})
+    result = await FileReviewer(build_chat_model(local), local, verify=True).review_file("app.py", "python", "modified", DIFF)
+    assert result.error is None and result.verify_calls >= 1

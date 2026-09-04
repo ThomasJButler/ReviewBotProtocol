@@ -13,8 +13,10 @@ Usage, from backend/ with the venv:
     .venv/bin/python scripts/prompt_eval.py --variants new,new+verify --cases sqli,clean_test
     .venv/bin/python scripts/prompt_eval.py --cases-from-stdin < hostile.json --json
 
-The script never reads backend/.env: it builds its own Settings with the
-model taken from --model or OLLAMA_MODEL, and prints nothing but results."""
+The harness's own Settings ignores backend/.env (the model comes from --model
+or OLLAMA_MODEL, STRICT_LOCAL is forced on); importing config.settings still
+builds the app's module-level Settings, which reads it for logging. The
+script prints nothing but results and writes nothing."""
 
 import argparse
 import asyncio
@@ -92,7 +94,7 @@ def _settings(model: Optional[str]) -> Settings:
     env = {
         "GITHUB_APP_ID": "1", "GITHUB_PRIVATE_KEY": "not-a-key",
         "GITHUB_WEBHOOK_SECRET": "prompt-eval-not-a-secret-0123456789", "LOCAL_API_TOKEN": "",
-        "DATABASE_URL": "sqlite:///:memory:",
+        "DATABASE_URL": "sqlite:///:memory:", "STRICT_LOCAL": "true",
     }
     if model:
         env["OLLAMA_MODEL"] = model
@@ -121,7 +123,7 @@ def _classify_raw(raw_text: str, patch: str, min_confidence: float) -> Tuple[int
 async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_confidence: float) -> Dict[str, Any]:
     before = len(recorder.texts)
     patch_seen = redact_text(case.patch)
-    result = await reviewer.review_file(case.filename, case.language, "modified", case.patch)
+    result = await reviewer.review_file(case.filename, case.language, case.status, case.patch)
     raw_text = recorder.texts[before] if len(recorder.texts) > before else ""
     raw_count, low, unlocatable, raw_rows = _classify_raw(raw_text, patch_seen, min_confidence)
     kept = result.review.findings
@@ -134,7 +136,7 @@ async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_c
         "raw": raw_count, "kept": len(kept), "dropped_low_confidence": low, "dropped_unlocatable": unlocatable,
         "refuted": result.refuted, "verify_calls": result.verify_calls,
         "hit": bool(hit_kept), "hit_before_postprocess": bool(hit_raw),
-        "hit_category_ok": bool(best and best.category.value == case.expect_category) if best else None,
+        "hit_category_ok": bool(best and best.category.value in case.expect_category) if best else None,
         "hit_severity": best.severity.value if best else None,
         "hit_severity_ok": bool(best and SEVERITY_RANK[best.severity.value] >= SEVERITY_RANK[case.min_severity]) if best else None,
         "false_positives": len(kept) if case.clean else None,
@@ -204,7 +206,14 @@ async def main() -> int:
         return 2
 
     if args.cases_from_stdin:
-        cases = [Case(**{**d, "expect": tuple(d.get("expect", ()))}) for d in json.load(sys.stdin)]
+        fields = set(Case.__dataclass_fields__)
+        cases = []
+        for d in json.load(sys.stdin):
+            d = {k: v for k, v in d.items() if k in fields}
+            d["expect"] = tuple(d.get("expect", ()))
+            cat = d.get("expect_category", ("security",))
+            d["expect_category"] = (cat,) if isinstance(cat, str) else tuple(cat)
+            cases.append(Case(**d))
     else:
         keys = [k for k in args.cases.split(",") if k]
         cases = [CASES_BY_KEY[k] for k in keys] if keys else list(CASES)
