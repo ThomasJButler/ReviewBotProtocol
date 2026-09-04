@@ -11,6 +11,7 @@ from pydantic import Field
 
 class RecordingChatModel(BaseChatModel):
     response: str = '{"findings": [], "summary": "Nothing to report."}'
+    responses: Optional[List[str]] = None  # when set, answers are taken from this list in order (last one repeats)
     calls: List[List[BaseMessage]] = Field(default_factory=list)
     bound_kwargs: List[dict] = Field(default_factory=list)
     fail_with: Optional[str] = None
@@ -21,7 +22,10 @@ class RecordingChatModel(BaseChatModel):
         self.bound_kwargs.append(dict(kwargs))
         if self.fail_with:
             raise RuntimeError(self.fail_with)
-        msg = AIMessage(content=self.response,
+        content = self.response
+        if self.responses:
+            content = self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
+        msg = AIMessage(content=content,
                         usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120})
         return ChatResult(generations=[ChatGeneration(message=msg)])
 

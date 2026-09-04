@@ -1,6 +1,6 @@
 # ReviewBot Protocol backend
 
-A FastAPI service that receives GitHub pull request webhooks, reviews the diff with a model running locally in Ollama, and posts the review back to the pull request as one review comment with inline notes. No inference API key exists anywhere in its configuration; during a review the only network peer is api.github.com.
+A FastAPI service that receives GitHub pull request webhooks, reviews the diff with a model running locally in Ollama, and posts the review back to the pull request as one review comment with inline notes. No inference API key exists anywhere in its configuration; in local mode, the default, the only network peer during a review is api.github.com. The same service runs unchanged on a rented server for a bigger model (hosted mode, docs/HOSTED_MODEL_PLAN.md); the sentences below about the machine then describe that server.
 
 ## What it does, precisely
 
@@ -8,14 +8,14 @@ A FastAPI service that receives GitHub pull request webhooks, reviews the diff w
 2. A single worker takes the job. A head SHA that is queued, in flight or already reviewed to completion is not reviewed again; a newer push replaces a waiting job or cancels the one in flight; every job has a deadline. One backend per database: a second instance refuses to start.
 3. It fetches the PR and its changed files with a GitHub App installation token. Deleted, binary, generated, vendored, non-code and oversized files are skipped, and so is anything secret-bearing by name (`.env`, `*.pem`, `id_rsa`, `*.tfvars` and so on).
 4. Every patch is redacted (API keys, tokens, private keys, passwords in URLs and assignments) before it reaches the model, the posted comment, the log or the database.
-5. One structured model call per file: the diff goes inside a delimited data block that the system prompt declares untrusted, and the model must answer with JSON matching a fixed schema. Findings are then dropped unless the quoted evidence really is in the diff and confidence clears a floor.
+5. One structured model call per file, with the model prompted as a specialist security reviewer: the diff goes inside a delimited data block that the system prompt declares untrusted (text in the diff addressed to a reviewer is reported as a prompt-injection attempt, never obeyed), and the model must answer with JSON matching a fixed schema. Findings are then dropped unless the quoted evidence really is in the diff and confidence clears a floor. With `VERIFY_FINDINGS=true` each surviving finding gets a second call whose only job is to disprove it; severity can only go down. `scripts/prompt_eval.py` measures all of this against the real model.
 6. The findings are rendered as one pull request review (event COMMENT, never approve or request changes), sanitised (no HTML, links only to github.com, mentions neutralised, bounded length), with a footer naming the model. Fork PRs are reviewed the same way and labelled.
 7. The review, its findings and timing are stored in SQLite for the dashboard. Patches are not stored.
 
 ## Requirements
 
 - Python 3.13 (3.11 and 3.12 should work; 3.14 does not have wheels for every dependency yet)
-- Ollama on the same machine, with a model pulled (`ollama pull qwen3.5:9b` to start; see Models)
+- Ollama on the same machine as the backend (loopback), with a model pulled (`ollama pull qwen3.5:9b` to start; see Models)
 - A GitHub App you own (see below)
 
 ## Setup
@@ -49,7 +49,7 @@ Set `OLLAMA_MODEL`. Any Ollama chat model works; these were assessed for this jo
 
 | Model | Disk | Notes |
 |---|---|---|
-| `qwen3.5:9b` | 6.6 GB | fast (about 33 tokens per second measured), finds obvious issues, a triage layer rather than an unattended reviewer |
+| `qwen3.5:9b` | 6.6 GB | fast (about 33 tokens per second, one observation), and on the eleven planted diffs in `tests/prompt_corpus.py` it found every planted bug at the right line, reported the planted instruction both times, and flagged nothing on the clean diffs (2026-09-04, two repeats, `scripts/prompt_eval.py`); still a triage layer rather than an unattended reviewer on real code |
 | `qwen3-coder:30b` | 19 GB | mixture-of-experts coder, the recommended primary when disk allows; run with `OLLAMA_NUM_CTX=16384` |
 | `qwen3.6:27b` | 17 GB | dense, thinking-capable, slower (12 to 16 tokens per second estimated, not measured) |
 
@@ -59,7 +59,7 @@ Recommended Ollama server settings on the host: `OLLAMA_NO_CLOUD=1` (disables Ol
 
 ## What leaves the machine, and what is stored
 
-Leaves the machine: requests to `api.github.com` only (fetch the PR and its files, post the review). Nothing is sent to any model provider, error tracker or tracing service, and the process refuses to start if the environment says otherwise (`STRICT_LOCAL`, on by default, fails on `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LANGCHAIN_API_KEY`, `LANGSMITH_API_KEY`, `SENTRY_DSN` and on any LangSmith tracing variable set to true).
+Leaves the machine (local mode; in hosted mode read "the server"): requests to `api.github.com` only (fetch the PR and its files, post the review). Nothing is sent to any model provider, error tracker or tracing service, and the process refuses to start if the environment says otherwise (`STRICT_LOCAL`, on by default, fails on `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LANGCHAIN_API_KEY`, `LANGSMITH_API_KEY`, `SENTRY_DSN` and on any LangSmith tracing variable set to true).
 
 Stored locally in `reviews.db`: repository, PR number and title, head SHA, model, timings and token counts, the skipped files with reasons, the posted review body, and each finding (path, line, severity, title, quoted evidence, recommendation, confidence). Patches are not stored. Logs go to stdout and never contain diffs, prompts or model output unless `LOG_PROMPTS=true`.
 
@@ -69,6 +69,10 @@ Stored locally in `reviews.db`: repository, PR number and title, head SHA, model
 - `REVIEWBOT_E2E=1 .venv/bin/python -m pytest -m e2e` reviews one diff with the real Ollama and model under the same guard. Skipped by default.
 - Manual capture: run `lsof -i -P -a -p $(pgrep -f 'uvicorn main:app')` in a second terminal every second while a real PR is reviewed. The only peers you should ever see are `127.0.0.1:11434` (Ollama) and `api.github.com:443`.
 - `../scripts/prove-local.sh` builds a container holding the backend, Ollama and a small model, then runs one review with `docker run --network none`.
+
+## Measuring the prompt
+
+`scripts/prompt_eval.py` runs eleven small planted diffs (SQL injection, hard-coded key, eval, path traversal, shell=True, MD5 passwords, a missing auth check, a planted instruction next to a command injection, a check-then-act race, and two clean diffs) through the real reviewer against the live Ollama, for the old prompt, the current one, and the current one with the verify pass, and prints recall, drop reasons, false positives, whether the planted instruction was obeyed, tokens and seconds. On qwen3.5:9b on 2026-09-04 (two repeats each): old prompt recall 0.89 with the instruction reported once; current prompt recall 1.0, instruction reported twice, no false positives, about 960 tokens and 8 seconds per file; with the verify pass recall 0.78, because the 9B refuted real findings while there were no false positives left to remove. That is why `VERIFY_FINDINGS` is off by default; measure again on a bigger model before turning it on. `REVIEWBOT_PROMPT_EVAL=1 .venv/bin/python -m pytest -m prompt_eval` is the same corpus as a pass or fail floor.
 
 ## Limits
 

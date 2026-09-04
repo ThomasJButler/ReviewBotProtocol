@@ -317,12 +317,14 @@ export default async function StatusPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Egress proof</h2>
         <p className="max-w-prose text-sm text-muted-foreground">
-          A review reads the diff from GitHub, thinks locally and writes the
-          comment back. Nothing else leaves the machine. Two commands prove it:
-          the first runs whole reviews (GitHub answered in-process, a fake
-          model) inside a socket-level guard that allows loopback only, the
-          second runs a real review with a real model inside a container with no
-          network at all.
+          In local mode a review reads the diff from GitHub, thinks on this
+          machine and writes the comment back; nothing else leaves it. Hosted
+          mode runs the same bot on a server you rent, described in
+          docs/HOSTED_MODEL_PLAN.md. Two commands prove the local claim: the
+          first runs whole reviews (GitHub answered in-process, a fake model)
+          inside a socket-level guard that allows loopback only, the second runs
+          a real review with a real model inside a container with no network at
+          all.
         </p>
         <CopySnippet
           text="cd backend && .venv/bin/python -m pytest tests/test_no_egress.py"

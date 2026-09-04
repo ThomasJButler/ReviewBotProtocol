@@ -1,6 +1,6 @@
 # ReviewBot Protocol
 
-A GitHub App that reviews pull requests with a language model running on your own machine, and a small local dashboard to see what it said. Nothing about the code you review is sent to a model provider. During a review the only network peer is api.github.com. A test fails if anything in the backend process opens a connection or resolves a name outside loopback while a review runs, and a container proof runs a review with no network at all.
+A GitHub App that reviews pull requests with a language model running on your own machine, and a small local dashboard to see what it said. Nothing about the code you review is sent to a model provider. In local mode, the default, the only network peer during a review is api.github.com. A test fails if anything in the backend process opens a connection or resolves a name outside loopback while a review runs, and a container proof runs a review with no network at all.
 
 Built by Tom Butler as a demonstration of private, local AI: AI you own rather than AI you rent. It started as a Codecademy bootcamp project on OpenAI and was rebuilt in September 2026 to run entirely on Ollama, after a security review of the original (see docs/SECURITY_REVIEW.md, which is unsparing).
 
@@ -9,7 +9,7 @@ Built by Tom Butler as a demonstration of private, local AI: AI you own rather t
 1. You install the App on selected repositories. When a pull request is opened, pushed to, reopened or marked ready for review, GitHub sends a webhook to the backend.
 2. The backend verifies the signature, ignores replays, and queues one review per PR head. A single worker fetches the changed files with an installation token.
 3. Secret-bearing files are skipped outright. Every other patch is redacted (API keys, tokens, private keys, passwords) before a model sees it.
-4. One structured call per file to a local Ollama model. The diff is inside a delimited data block the model is told is untrusted; the answer must fit a fixed JSON schema; findings that quote lines not in the diff are dropped.
+4. One structured call per file to a local Ollama model, prompted as a specialist security reviewer rather than a general assistant. The diff sits inside a delimited data block the model is told is untrusted, and an instruction planted in the diff is treated as a finding to report, not an order to follow. The answer must fit a fixed JSON schema; findings that quote lines not in the diff are dropped; an optional second pass asks the model to disprove each finding before it is posted.
 5. One review is posted to the PR (a comment review, never an approval), sanitised so the model cannot inject HTML, off-site links or mentions, with a footer naming the model.
 6. The dashboard shows what was reviewed, what was said, and lets you mark each review useful or not.
 
@@ -24,9 +24,11 @@ Built by Tom Butler as a demonstration of private, local AI: AI you own rather t
 
 Leaves the machine: HTTPS requests to api.github.com to read the PR, its files, and post the review. That is the complete list.
 
-Never leaves the machine: the diff, the prompt, the model's output. The backend refuses to start if the environment contains a LangSmith tracing flag or an OpenAI, Anthropic, Google, Mistral or Sentry key (`STRICT_LOCAL`, on by default). No telemetry, no analytics, no fonts or scripts from a CDN in the dashboard. Next.js telemetry is disabled in the scripts.
+Never leaves the machine in local mode: the diff, the prompt, the model's output. The backend refuses to start if the environment contains a LangSmith tracing flag or an OpenAI, Anthropic, Google, Mistral or Sentry key (`STRICT_LOCAL`, on by default). No telemetry, no analytics, no fonts or scripts from a CDN in the dashboard. Next.js telemetry is disabled in the scripts.
 
 Stored on your disk (SQLite): repository, PR number and title, head SHA, model, timings, token counts, the skipped files, the posted review body, and each finding, including the quoted line of the redacted diff it is about. Whole patches are not stored. Logs never contain diffs or model output unless you set `LOG_PROMPTS=true`.
+
+Hosted mode, optional: the same bot, unchanged, on a server you rent so a stronger open model (qwen3-coder:30b) is not blocked by your laptop. Ollama stays on loopback there and only the webhook is exposed, but the diff is then processed on hardware you rent rather than own, and the README's local claims describe local mode only. Costs, providers and the step-by-step are in docs/HOSTED_MODEL_PLAN.md.
 
 Ollama: bound to loopback. The desktop app checks ollama.com hourly for updates of itself (never prompt content); run `ollama serve` from a terminal instead if you want no outbound connection at all. `OLLAMA_NO_CLOUD=1` disables Ollama's cloud features (remote inference and web search). A cloud-hosted model tag such as `gpt-oss:120b-cloud` would make a local Ollama relay every prompt off the machine; the backend refuses such a tag under `STRICT_LOCAL`, but set `OLLAMA_NO_CLOUD=1` as well.
 

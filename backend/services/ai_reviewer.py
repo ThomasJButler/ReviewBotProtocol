@@ -21,9 +21,9 @@ from pydantic import ValidationError
 from config.logging import get_logger
 from config.settings import Settings
 from services.diff import locate_evidence, parse_patch
-from services.prompts import MARK_BEGIN, MARK_END, delimiters, review_prompt
+from services.prompts import MARK_BEGIN, MARK_END, delimiters, review_prompt, verify_prompt
 from services.redaction import redact_text
-from services.schemas import SEVERITY_ORDER, FileReview, Finding, output_schema
+from services.schemas import SEVERITY_ORDER, FileReview, Finding, Verdict, output_schema, verdict_schema
 
 logger = get_logger(__name__)
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
@@ -62,6 +62,8 @@ class FileReviewResult:
     output_tokens: int = 0
     duration_seconds: float = 0.0
     error: Optional[str] = None
+    refuted: int = 0        # findings the verify pass rejected
+    verify_calls: int = 0   # verify calls made (one per finding that reached the pass)
     redactions: Dict[str, int] = field(default_factory=dict)
 
 
@@ -119,6 +121,27 @@ def parse_file_review(text: str) -> Tuple[FileReview, bool]:
     return FileReview(findings=findings, summary=summary), True
 
 
+def parse_verdict(text: str) -> Optional[Verdict]:
+    """The verifier's JSON, or None when it cannot be read. A verdict that
+    cannot be read keeps the finding: the pass is a filter, not a gate on
+    the model's health."""
+    cleaned = _FENCE.sub("", (text or "").strip())
+    try:
+        data = json.loads(cleaned)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        data["reason"] = redact_text(str(data.get("reason") or ""))[:300]
+        conf = data.get("confidence")
+        if isinstance(conf, (int, float)) and 1 < conf <= 100:
+            data["confidence"] = conf / 100  # a model that answers in percent
+        return Verdict.model_validate(data)
+    except ValidationError:
+        return None
+
+
 def postprocess(review: FileReview, patch: Optional[str], min_confidence: float) -> Tuple[FileReview, int]:
     parsed = parse_patch(patch)
     kept: List[Finding] = []
@@ -139,10 +162,56 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float)
 
 
 class FileReviewer:
-    def __init__(self, llm: BaseChatModel, settings: Settings, prompt=review_prompt):
+    def __init__(self, llm: BaseChatModel, settings: Settings, prompt=review_prompt,
+                 verifier_prompt=verify_prompt, verify: Optional[bool] = None):
         self.settings = settings
         self.prompt = prompt
+        self.verifier_prompt = verifier_prompt
+        self.verify_enabled = settings.VERIFY_FINDINGS if verify is None else verify
         self.chain = prompt | llm.bind(format=output_schema())
+        self.verify_chain = verifier_prompt | llm.bind(format=verdict_schema())
+
+    async def _verify(self, review: FileReview, patch: str, filename: str, language: str) -> Tuple[FileReview, int, int, int, int]:
+        """Run every finding past the verifier. Returns the surviving review,
+        how many were refuted, how many calls were made, and the tokens used.
+        Severity can only go down. An unreadable or failed verdict keeps the
+        finding and is logged."""
+        kept: List[Finding] = []
+        refuted = calls = tokens_in = tokens_out = 0
+        for f in review.findings:
+            data_begin, data_end = delimiters(secrets.token_hex(8))
+            inputs = {"filename": _meta(filename), "language": _meta(language, 40), "code_diff": _defang(patch or ""),
+                      "category": f.category.value, "severity": f.severity.value, "line": f.line,
+                      "title": _meta(_defang(f.title), 120), "evidence": _meta(_defang(f.evidence), 300),
+                      "data_begin": data_begin, "data_end": data_end}
+            human = _content_text(self.verifier_prompt.format_messages(**inputs)[-1].content)
+            if human.count(data_begin) != 1 or human.count(data_end) != 1 or human.index(data_begin) > human.index(data_end):
+                logger.error("verify prompt boundary check failed", filename=_meta(filename))
+                kept.append(f)
+                continue
+            calls += 1
+            try:
+                message = await self.verify_chain.ainvoke(inputs)
+            except Exception as e:
+                logger.warning("verify call failed, keeping the finding", filename=_meta(filename), error=type(e).__name__)
+                kept.append(f)
+                continue
+            usage = getattr(message, "usage_metadata", None) or {}
+            tokens_in += int(usage.get("input_tokens") or 0)
+            tokens_out += int(usage.get("output_tokens") or 0)
+            verdict = parse_verdict(_content_text(message.content))
+            if verdict is None:
+                logger.warning("verify verdict unreadable, keeping the finding", filename=_meta(filename))
+                kept.append(f)
+                continue
+            if not verdict.confirmed:
+                refuted += 1
+                logger.info("finding refuted by the verify pass", filename=_meta(filename), line=f.line, reason=verdict.reason[:200])
+                continue
+            severity = f.severity if SEVERITY_ORDER[f.severity] >= SEVERITY_ORDER[verdict.severity] else verdict.severity
+            kept.append(f.model_copy(update={"severity": severity}))
+        kept.sort(key=lambda x: (SEVERITY_ORDER[x.severity], x.line))
+        return FileReview(findings=kept, summary=review.summary), refuted, calls, tokens_in, tokens_out
 
     async def review_file(self, filename: str, language: str, status: str, patch: str) -> FileReviewResult:
         started = time.perf_counter()
@@ -170,8 +239,15 @@ class FileReviewer:
         review, ok = parse_file_review(text)
         review, dropped = postprocess(review, patch, self.settings.MIN_FINDING_CONFIDENCE)
         usage = getattr(message, "usage_metadata", None) or {}
+        prompt_tokens = int(usage.get("input_tokens") or 0)
+        output_tokens = int(usage.get("output_tokens") or 0)
+        refuted = verify_calls = 0
+        if self.verify_enabled and review.findings:
+            review, refuted, verify_calls, v_in, v_out = await self._verify(review, patch, filename, language)
+            prompt_tokens += v_in
+            output_tokens += v_out
         return FileReviewResult(
             filename=filename, language=language, status=status, review=review, dropped=dropped, parse_ok=ok,
-            prompt_tokens=int(usage.get("input_tokens") or 0), output_tokens=int(usage.get("output_tokens") or 0),
-            duration_seconds=time.perf_counter() - started,
+            prompt_tokens=prompt_tokens, output_tokens=output_tokens,
+            duration_seconds=time.perf_counter() - started, refuted=refuted, verify_calls=verify_calls,
         )

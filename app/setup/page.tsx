@@ -24,7 +24,9 @@ export default function SetupPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Setup</h1>
         <p className="max-w-prose text-muted-foreground">
           Five steps from an empty machine to a reviewed pull request. Every
-          step runs on your own hardware; no inference key is involved.
+          step runs on your own hardware; no inference key is involved. The
+          optional hosted mode for a bigger model is in
+          docs/HOSTED_MODEL_PLAN.md.
         </p>
       </div>
 

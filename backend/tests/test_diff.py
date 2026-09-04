@@ -45,3 +45,12 @@ def test_relocation_picks_the_nearest_matching_line():
     p = parse_patch(patch)
     assert locate_evidence(p, 6, "return value") == 5
     assert locate_evidence(p, 1, "return value") == 2
+
+
+def test_multi_line_evidence_locates_by_its_first_line_in_the_diff():
+    from tests.conftest import DIFF
+    parsed = parse_patch(DIFF)
+    quoted = "SENTINEL_9f3a = eval(user_input)\npassword = 'hunter2hunter2'"
+    assert locate_evidence(parsed, 2, quoted) == 2
+    assert locate_evidence(parsed, 9, "not here\nnor here") is None
+    assert locate_evidence(parsed, 1, "import os\nSENTINEL_9f3a = eval(user_input)") == 1

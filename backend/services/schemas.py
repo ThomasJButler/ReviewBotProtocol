@@ -42,6 +42,29 @@ class FileReview(BaseModel):
     summary: str = Field(max_length=500)
 
 
+class VerdictLabel(str, Enum):
+    REAL = "real"
+    FALSE_POSITIVE = "false_positive"
+
+
+class Verdict(BaseModel):
+    """The verifier's answer about one candidate finding. A named label
+    rather than a boolean, because a small model asked to "confirm" while
+    "trying to disprove" answers the wrong question."""
+    verdict: VerdictLabel
+    severity: Severity
+    reason: str = Field(max_length=300)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+    @property
+    def confirmed(self) -> bool:
+        return self.verdict == VerdictLabel.REAL
+
+
 def output_schema() -> dict:
     """JSON schema handed to Ollama's `format` parameter."""
     return FileReview.model_json_schema()
+
+
+def verdict_schema() -> dict:
+    return Verdict.model_json_schema()

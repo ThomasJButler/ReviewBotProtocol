@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     MAX_WEBHOOK_BODY_BYTES: int = 2 * 1024 * 1024
     MAX_INLINE_COMMENTS: int = 25
     MIN_FINDING_CONFIDENCE: float = 0.5
+    VERIFY_FINDINGS: bool = False  # second model pass per finding that tries to refute it
 
     LOCAL_API_TOKEN: str = ""
     STRICT_LOCAL: bool = True
@@ -95,7 +96,7 @@ class Settings(BaseSettings):
                 pass
         return v.replace("\\n", "\n")
 
-    @field_validator("DEBUG", "REVIEW_DRAFTS", "LOG_PROMPTS", "STRICT_LOCAL", mode="before")
+    @field_validator("DEBUG", "REVIEW_DRAFTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", mode="before")
     @classmethod
     def parse_bool(cls, v):
         if isinstance(v, str):

@@ -74,6 +74,19 @@ def _substantial(ev: str) -> bool:
 
 
 def locate_evidence(parsed: ParsedPatch, line: int, evidence: str) -> Optional[int]:
+    """Where in the new file the quoted evidence really is. A model that
+    quotes several lines is located by the first of them that is in the diff,
+    so a correct multi-line quote is not thrown away."""
+    if evidence and "\n" in evidence.strip():
+        for offset, part in enumerate(p for p in evidence.splitlines() if p.strip()):
+            located = locate_evidence(parsed, line + offset, part)
+            if located is not None:
+                return located
+        return None
+    return _locate_single(parsed, line, evidence)
+
+
+def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[int]:
     """Return the line the evidence actually sits on: the claimed line if it
     matches, otherwise the nearest line in the diff that contains the quote.
     None if the quote is not in the diff at all (a hallucinated quote), or
