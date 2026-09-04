@@ -1,0 +1,16 @@
+[Unit]
+Description=ReviewBot dashboard (loopback only; reach it with ssh -L 3000:127.0.0.1:3000)
+After=reviewbot-backend.service
+
+[Service]
+User=reviewbot
+WorkingDirectory=/home/reviewbot/reviewbot
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
