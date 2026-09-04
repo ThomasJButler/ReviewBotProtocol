@@ -2365,6 +2365,16 @@ Refuted in this round:
 - requirements.lock pins two unexplained packages (httpx2, httpcore2) that nothing in requirements.txt or the codebase declares or imports
 - .gitignore has no CLAUDE-SECURITY-* rule, so a future scan report can be committed straight into the tree
 
+## Claude Security scan (2026-09-04)
+
+Tom ran the Claude Security plugin himself (`/claude-security`, whole repository, high effort) on the tree at commit 37d5482 with the round-four work uncommitted. Its pipeline: an inventory into seven components, a threat model per component, two researchers per component and category cell (50 in all), two breadth sweeps, then a three-lens adversarial panel on every candidate. Twenty-five candidates, thirteen after de-duplication, six survived, seven were rejected unanimously; the report is stamped `verified` and lives in `CLAUDE-SECURITY-20260904-150824/` (kept out of commits by its own `.gitignore`). All six were fixed the same afternoon:
+
+- CS-01 [medium] scripts/hosted/gpu-up.sh:35: the SSH tunnel to the GPU pod accepted any host key on first contact, and every pod start is a first contact. Fixed: the pod's host key is pinned once under a fixed alias in a dedicated known-hosts file; the script refuses to start without the pin and refuses a pod whose key does not match; the plan documents how to pin and verify the fingerprint.
+- CS-02 [medium] backend/services/ai_reviewer.py:42: the marker-defanging regex was quadratic on a line of 32,000 `<` characters and ran on the event loop, so a hostile pull request could stall the webhook and the dashboard. Fixed: bounded, newline-free repeats on both sides of the marker name (linear), and redaction and defanging now run in a worker thread; timing tests pin both.
+- CS-03 and CS-04 [low] backend/handlers/webhook.py:70 and the delivery repository: replay protection was keyed on the delivery-id header, which the signature does not cover, so a captured signed body replayed under a fresh id could cancel an in-flight review of a newer push. Fixed: deliveries also record the SHA-256 of the signed body and a repeat of that body under any id is a duplicate; a head that was already reviewed to completion is refused before it can reach the queue. Note: the deliveries table gained a column; delete a pre-existing `reviews.db` before starting this version (no production database existed yet).
+- CS-05 [low] backend/services/redaction.py:126: two redaction patterns had the same quadratic shape with smaller constants. Fixed: bounded repeats, timing tests.
+- CS-06 [low] backend/services/comment_renderer.py:64: the link allow-list missed CommonMark forms with whitespace after the bracket, a label over 200 characters, a scheme-relative destination, or a reference definition split over two lines. Fixed: the link pattern accepts those forms and checks the destination, scheme-relative destinations are treated as https before the GitHub check, split definitions are removed, bare scheme-relative hosts are removed, and any `](` that survives is broken so it cannot open a link.
+
 ## Refuted findings
 
 These were raised and then knocked down by the verifiers. They stay here because each describes a real design gap that the rebuild must not reintroduce.
@@ -2578,5 +2588,6 @@ Patching an HTTP client would not be a proof; the guard sits below every HTTP st
 - 2026-09-03: backend rewritten on LangChain 1.x with a local Ollama model; statuses updated for every finding; the local claim now has three proofs.
 - 2026-09-03: frontend rebuilt on shadcn/ui (four screens, server-side token, no external requests); README and backend README rewritten; remaining statuses updated.
 - 2026-09-03: second adversarial round on the rewritten backend: 56 findings, all fixed; see "Second round" and the R2 list.
+- 2026-09-04: Claude Security plugin scan (whole repository, high effort, verified): 6 findings, all fixed; see "Claude Security scan".
 - 2026-09-04: expert reviewer prompt measured and adopted; verify pass added but left off on the numbers; hands-on test plan and hosted-model plan written; fourth adversarial round: 35 findings confirmed, 4 refuted, all fixed; see "Fourth round" and the R4 list.
 - 2026-09-03: third adversarial round on the whole branch (backend, dashboard, supply chain, docs, tests): 67 findings confirmed, 1 refuted, all fixed; see "Third round" and the R3 list. Backend suite at 208 tests, 15 dashboard tests.

@@ -98,6 +98,7 @@ class WebhookDelivery(Base):
     repository = Column(String(255), nullable=True, index=True)
     pr_number = Column(Integer, nullable=True)
     head_sha = Column(String(40), nullable=True)
+    body_sha256 = Column(String(64), nullable=True, index=True)  # what the signature actually covers
     received_at = Column(DateTime(timezone=True), default=_now, nullable=False, index=True)
     status = Column(String(20), nullable=False, default="received")  # received, queued, running, completed, failed
     review_id = Column(String(36), nullable=True)

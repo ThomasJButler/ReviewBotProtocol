@@ -4,3 +4,4 @@ tmp/
 app/shadcn-tailwind.css
 backend/
 package-lock.json
+CLAUDE-SECURITY-*/

@@ -157,7 +157,7 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         selected, skipped = select_files(raw_files, settings)
         if truncated:
             skipped.append(("(remaining files)", "the pull request has more files than this bot will fetch"))
-        files, redaction_total = prepare_files(selected)
+        files, redaction_total = await asyncio.to_thread(prepare_files, selected)
         logger.info("review starting", repo=job.repo, pr=job.pr_number, files=len(files), skipped=len(skipped),
                     redactions=redaction_total, model=settings.OLLAMA_MODEL)
 

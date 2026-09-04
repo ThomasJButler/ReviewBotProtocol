@@ -4,6 +4,7 @@ Order matters: cap the body, verify the signature, parse, filter, record the
 delivery (which is the replay check), enqueue, return 202. Nothing slow
 happens here."""
 
+import hashlib
 import json
 from typing import Optional
 
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.logging import get_logger
 from config.settings import settings
 from database.connection import get_db_session
+from database.repositories.review_repository import ReviewRepository
 from database.repositories.webhook_repository import WebhookRepository
 from models.github import PRAction, PRWebhookPayload, REVIEW_TRIGGERS
 from utils.crypto import verify_github_signature
@@ -69,7 +71,8 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
     # ignored events too, and so a replay of any of them is caught.
     recorded = await deliveries.record(
         delivery_id, event, pr.action if pr else (payload.get("action") if isinstance(payload, dict) else None),
-        pr.repository.full_name if pr else None, pr.number if pr else None, pr.pull_request.head.sha if pr else None)
+        pr.repository.full_name if pr else None, pr.number if pr else None, pr.pull_request.head.sha if pr else None,
+        body_sha256=hashlib.sha256(body).hexdigest())
     if not recorded:
         logger.warning("duplicate delivery ignored", delivery_id=delivery_id, github_event=event)
         return _ok("duplicate", delivery_id=delivery_id)
@@ -93,6 +96,11 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
         return _ok("skipped_draft", pr_number=pr.number)
 
     head_sha = pr.pull_request.head.sha
+    # A head that was already reviewed to completion is never queued again, so a
+    # replayed old delivery cannot cancel the review of a newer push.
+    if await ReviewRepository(session).completed_for(pr.repository.full_name, pr.number, head_sha):
+        await deliveries.mark(delivery_id, "duplicate")
+        return _ok("duplicate", delivery_id=delivery_id, reason="head already reviewed")
 
     queue = request.app.state.queue
     try:

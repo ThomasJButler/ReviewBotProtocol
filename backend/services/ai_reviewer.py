@@ -7,6 +7,7 @@ checked against the patch: the quoted evidence must actually be in the diff,
 the line must be a line a comment can attach to, and confidence must clear
 the floor. Findings that fail are dropped, not posted."""
 
+import asyncio
 import json
 import re
 import secrets
@@ -27,7 +28,12 @@ from services.schemas import SEVERITY_ORDER, FileReview, Finding, Verdict, outpu
 
 logger = get_logger(__name__)
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
-_MARKER = re.compile(rf"<*\s*(?:{MARK_BEGIN}|{MARK_END})[A-Za-z0-9_]*\s*>*")
+# Bounded, newline-free repeats on both sides: the engine tries at most 16 characters
+# before the literal at any position, so a line of 32,000 '<' costs linear time, and a
+# marker never swallows the line break before it (line numbers stay honest). Brackets
+# beyond the bound are left behind on their own, which cannot rebuild a delimiter
+# because the marker name itself is gone.
+_MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END})[A-Za-z0-9_]{{0,64}}[\t >]{{0,16}}")
 
 
 class PromptBoundaryError(RuntimeError):
@@ -188,7 +194,7 @@ class FileReviewer:
                 continue
             self.verify_budget -= 1
             data_begin, data_end = delimiters(secrets.token_hex(8))
-            inputs = {"filename": _meta(filename), "language": _meta(language, 40), "code_diff": _defang(patch or ""),
+            inputs = {"filename": _meta(filename), "language": _meta(language, 40), "code_diff": await asyncio.to_thread(_defang, patch or ""),
                       "category": f.category.value, "severity": f.severity.value, "line": f.line,
                       "title": _meta(_defang(f.title), 120), "evidence": _meta(_defang(f.evidence), 300),
                       "data_begin": data_begin, "data_end": data_end}
@@ -233,10 +239,13 @@ class FileReviewer:
 
     async def review_file(self, filename: str, language: str, status: str, patch: str) -> FileReviewResult:
         started = time.perf_counter()
-        patch = redact_text(patch or "")  # idempotent; the runner already redacted, unit callers may not have
+        # Redaction and defanging scan attacker-authored text with regexes; they run in a
+        # worker thread so a pathological patch cannot stall the webhook and the dashboard.
+        patch = await asyncio.to_thread(redact_text, patch or "")  # idempotent; the runner already redacted
+        code_diff = await asyncio.to_thread(_defang, patch)
         data_begin, data_end = delimiters(secrets.token_hex(8))
         inputs = {"filename": _meta(filename), "language": _meta(language, 40), "status": _meta(status, 40),
-                  "code_diff": _defang(patch or ""), "data_begin": data_begin, "data_end": data_end}
+                  "code_diff": code_diff, "data_begin": data_begin, "data_end": data_end}
         rendered = "\n".join(_content_text(m.content) for m in self.prompt.format_messages(**inputs))
         human = _content_text(self.prompt.format_messages(**inputs)[-1].content)
         if human.count(data_begin) != 1 or human.count(data_end) != 1 or human.index(data_begin) > human.index(data_end):

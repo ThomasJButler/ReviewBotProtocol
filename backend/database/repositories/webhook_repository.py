@@ -14,11 +14,17 @@ class WebhookRepository:
         self.session = session
 
     async def record(self, delivery_id: str, event: str, action: Optional[str], repository: Optional[str],
-                     pr_number: Optional[int], head_sha: Optional[str]) -> bool:
-        """Insert the delivery. Returns False if this delivery id was seen
-        before, unless the earlier attempt failed or was interrupted, in which
-        case GitHub's redelivery is accepted and the row reused."""
+                     pr_number: Optional[int], head_sha: Optional[str], body_sha256: Optional[str] = None) -> bool:
+        """Insert the delivery. Returns False if this delivery id, or this exact
+        signed body under any delivery id, was seen before, unless the earlier
+        attempt failed or was interrupted, in which case GitHub's redelivery is
+        accepted and the row reused. The delivery id is idempotency for GitHub's
+        own redelivery; the body hash is what the signature actually covers, so
+        a captured body replayed under a fresh id is still a replay."""
         existing = await self.session.get(WebhookDelivery, delivery_id)
+        if existing is None and body_sha256:
+            stmt = select(WebhookDelivery).where(WebhookDelivery.body_sha256 == body_sha256).limit(1)
+            existing = (await self.session.execute(stmt)).scalar_one_or_none()
         if existing is not None:
             if existing.status not in ("failed", "interrupted"):
                 return False
@@ -27,7 +33,7 @@ class WebhookRepository:
             await self.session.commit()
             return True
         self.session.add(WebhookDelivery(delivery_id=delivery_id, event=event, action=action, repository=repository,
-                                         pr_number=pr_number, head_sha=head_sha, status="received"))
+                                         pr_number=pr_number, head_sha=head_sha, body_sha256=body_sha256, status="received"))
         try:
             await self.session.commit()
         except IntegrityError:

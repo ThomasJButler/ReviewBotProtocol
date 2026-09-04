@@ -30,7 +30,7 @@ _PATTERNS: List[Tuple[str, re.Pattern, int]] = [
     ("stripe-key", re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{20,}"), 0),
     ("langsmith-key", re.compile(r"\b(?:lsv2_[a-z]{2}_[a-f0-9]{32}|ls__[A-Za-z0-9]{20,})"), 0),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), 0),
-    ("url-password", re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s:/@]+:([^\s/]{3,})@"), 1),
+    ("url-password", re.compile(r"(?i)\b[a-z][a-z0-9+.-]{0,64}://[^\s:/@]{1,256}:([^\s/]{3,512})@"), 1),
     ("auth-header", re.compile(r"(?i)\bauthorization\b['\"\]]*\s*[:=]\s*['\"]?(?:bearer|basic|token)\s+([A-Za-z0-9._~+/=-]{8,})"), 1),
     ("assigned-secret", re.compile(
         r"(?i)(?:\b|_)(?:password|passwd|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key)\b['\"\]]*"
@@ -39,7 +39,7 @@ _PATTERNS: List[Tuple[str, re.Pattern, int]] = [
     # a credential rather than an expression: no brackets or spaces, and at least one digit.
     ("assigned-secret", re.compile(
         r"(?i)(?:\b|_)(?:password|passwd|pwd|secret|secret[_-]?key|token|api[_-]?key|access[_-]?key|auth[_-]?token|client[_-]?secret|private[_-]?key)\b['\"\]]*"
-        r"\s*[:=]\s*(?=[A-Za-z0-9_./+=-]*\d)([A-Za-z0-9_./+=-]{12,})(?=\s|$|[,;])"), 1),
+        r"\s*[:=]\s*(?=[A-Za-z0-9_./+=-]{0,256}\d)([A-Za-z0-9_./+=-]{12,512})(?=\s|$|[,;])"), 1),
 ]
 
 _KEY_BEGIN = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----")

@@ -17,6 +17,11 @@ MODEL="${4:-qwen3-coder:30b}"
 LOCAL_PORT="${LOCAL_PORT:-11435}"
 ENV_FILE="${ENV_FILE:-$HOME/reviewbot/backend/.env}"
 UNIT="${UNIT:-reviewbot-backend}"
+# The pod's host key, pinned once through a trusted path (see docs/HOSTED_MODEL_PLAN.md B1).
+# The host and port change between starts, so the key is filed under a fixed alias.
+KNOWN_HOSTS_FILE="${KNOWN_HOSTS_FILE:-$HOME/.config/reviewbot/gpu-pod.known_hosts}"
+HOST_KEY_ALIAS="reviewbot-gpu-pod"
+SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" -o "HostKeyAlias=${HOST_KEY_ALIAS}")
 
 command -v runpodctl >/dev/null || { echo "runpodctl is not installed"; exit 1; }
 command -v autossh >/dev/null || { echo "autossh is not installed (apt install autossh)"; exit 1; }
@@ -25,6 +30,12 @@ command -v autossh >/dev/null || { echo "autossh is not installed (apt install a
 [[ "${SSH_HOST}" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "ssh host has characters this script will not use"; exit 1; }
 [ -f "${ENV_FILE}" ] || { echo "no ${ENV_FILE}; set ENV_FILE"; exit 1; }
 sudo -n true 2>/dev/null || { echo "needs passwordless sudo for: systemctl restart ${UNIT} (see docs/HOSTED_MODEL_PLAN.md B1)"; exit 1; }
+if ! grep -q "^${HOST_KEY_ALIAS} " "${KNOWN_HOSTS_FILE}" 2>/dev/null; then
+  echo "no pinned host key for the pod in ${KNOWN_HOSTS_FILE}. Pin it once, after checking the fingerprint against RunPod's panel:"
+  echo "  ssh-keyscan -p <port> <host> 2>/dev/null | sed 's/^[^ ]* /${HOST_KEY_ALIAS} /' >> ${KNOWN_HOSTS_FILE}"
+  echo "  ssh-keygen -lf ${KNOWN_HOSTS_FILE}   # compare this fingerprint with the one the panel shows"
+  exit 1
+fi
 
 echo "starting pod ${POD_ID}"
 runpodctl start pod "${POD_ID}"
@@ -32,24 +43,24 @@ runpodctl start pod "${POD_ID}"
 echo "waiting for ssh on ${SSH_HOST}:${SSH_PORT}"
 ssh_ok=0
 for _ in $(seq 1 60); do
-  if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -p "${SSH_PORT}" "root@${SSH_HOST}" true 2>/dev/null; then
+  if ssh "${SSH_OPTS[@]}" -o ConnectTimeout=5 -p "${SSH_PORT}" "root@${SSH_HOST}" true 2>/dev/null; then
     ssh_ok=1
     break
   fi
   sleep 5
 done
 if [ "${ssh_ok}" != 1 ]; then
-  echo "ssh never answered on ${SSH_HOST}:${SSH_PORT}; check the pod's Connect panel for a new host or port. Stopping the pod so it does not bill."
+  echo "ssh never answered on ${SSH_HOST}:${SSH_PORT}, or its host key did not match the pinned one; check the pod's Connect panel for a new host or port, and re-pin only if the pod was recreated. Stopping the pod so it does not bill."
   runpodctl stop pod "${POD_ID}" || true
   exit 1
 fi
 
 echo "opening the tunnel on 127.0.0.1:${LOCAL_PORT}"
 pkill -f "autossh.*-L ${LOCAL_PORT}:127.0.0.1:11434" 2>/dev/null || true
-AUTOSSH_GATETIME=0 autossh -M 0 -f -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+AUTOSSH_GATETIME=0 autossh -M 0 -f -N "${SSH_OPTS[@]}" -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
   -L "${LOCAL_PORT}:127.0.0.1:11434" -p "${SSH_PORT}" "root@${SSH_HOST}"
 
-echo "waiting for ${MODEL} on the pod"
+echo "waiting for ${MODEL} on the pod (a liveness check, not proof of identity: that is the pinned host key)"
 for _ in $(seq 1 60); do
   if curl -sf "http://127.0.0.1:${LOCAL_PORT}/api/tags" | grep -q "\"${MODEL}\""; then
     break
