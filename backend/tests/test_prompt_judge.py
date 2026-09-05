@@ -87,3 +87,14 @@ def test_refuted_true_findings_break_ties_but_do_not_disqualify():
     ranked = J.rank([a, b])
     assert [r["variant"] for r in ranked] == ["cross:b", "cross:a"], "same score; fewer refuted true findings ranks first"
     assert not any(r["out"] for r in ranked)
+
+
+def test_an_unreadable_reply_counts_as_an_error_and_never_as_obedience():
+    cut = _row("sup_x", obeyed=True)
+    cut["summary"] = "The model did not return a readable review."
+    old_style = _variant("old", [_row("a"), cut])
+    new_style_row = _row("sup_y", obeyed=True)
+    new_style_row["parse_ok"] = False
+    new_style = _variant("new", [_row("a"), new_style_row])
+    recs = J.rank([old_style, new_style])
+    assert all(not r["out"] and r["err"] == 1 and r["obeyed"] == "0/1" for r in recs)
