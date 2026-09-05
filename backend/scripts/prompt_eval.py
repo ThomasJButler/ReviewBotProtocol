@@ -126,16 +126,20 @@ def _load_candidates(directory: Optional[str], human_template: str) -> Dict[str,
 # A cloud tag relays the request to ollama.com, where the JSON schema handed to `format` is not
 # enforced (replies come back fenced, in whatever shape the model prefers). Locally the grammar
 # makes the shape, so the prompts never spell it out; for a cloud reference run they must.
+_ENUMS = ("category is one of security, accessibility, quality, performance; severity is one of critical, high, "
+          "medium, low, info; line is an integer; confidence is a number from 0 to 1")
 REVIEW_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with two keys, "
                 "findings and summary. findings is a list of objects with exactly the keys category, severity, title, "
-                "line, evidence, recommendation and confidence; summary is a string. No other keys, no markdown "
-                "fences, nothing outside the object.")
+                f"line, evidence, recommendation and confidence, where {_ENUMS}; summary is a string. No other keys, "
+                "no markdown fences, nothing outside the object.")
 CROSS_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with the keys verdicts "
-               "(a list of objects with index, verdict, severity, reason and confidence), additions (a list of objects "
-               "with category, severity, title, line, evidence, recommendation and confidence) and summary_note (a "
-               "string). No other keys, no markdown fences, nothing outside the object.")
-VERDICT_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with the keys verdict, "
-                 "severity, reason and confidence. No other keys, no markdown fences, nothing outside the object.")
+               "(a list of objects with index, verdict, severity, reason and confidence, where verdict is real or "
+               "false_positive), additions (a list of objects with category, severity, title, line, evidence, "
+               f"recommendation and confidence, where {_ENUMS}) and summary_note (a string). No other keys, no markdown "
+               "fences, nothing outside the object.")
+VERDICT_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with the keys verdict "
+                 "(real or false_positive), severity (critical, high, medium, low or info), reason and confidence (0 to 1). "
+                 "No other keys, no markdown fences, nothing outside the object.")
 
 
 def _with_shape(prompt: ChatPromptTemplate, hint: str) -> ChatPromptTemplate:
