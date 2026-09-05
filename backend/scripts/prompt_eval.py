@@ -188,11 +188,14 @@ async def unload_models(settings: Settings, models: List[str]) -> None:
                 print(f"could not unload {model}: {exc}", file=sys.stderr)
 
 
-def _settings(model: Optional[str]) -> Settings:
+def _settings(model: Optional[str], allow_cloud: bool = False) -> Settings:
     env = {
         "GITHUB_APP_ID": "1", "GITHUB_PRIVATE_KEY": _THROWAWAY_KEY,
         "GITHUB_WEBHOOK_SECRET": "prompt-eval-not-a-secret-0123456789", "LOCAL_API_TOKEN": "",
-        "DATABASE_URL": "sqlite:///:memory:", "STRICT_LOCAL": "true",
+        "DATABASE_URL": "sqlite:///:memory:",
+        # --allow-cloud is the one way a cloud tag gets past the guard: a reference measurement of
+        # the synthetic corpus on a bigger model, never a review of real code
+        "STRICT_LOCAL": "false" if allow_cloud else "true",
     }
     if model:
         env["OLLAMA_MODEL"] = model
@@ -320,12 +323,17 @@ async def main() -> int:
                     help="a --out JSON from a reviewer-only run: reuse its recorded replies instead of calling the "
                          "reviewer model, so only the cross-examiner or verifier model is loaded")
     ap.add_argument("--unload", action="store_true", help="ask Ollama to drop every model this run used when it finishes")
+    ap.add_argument("--allow-cloud", action="store_true",
+                    help="permit an Ollama cloud tag (name ending -cloud) for a bigger-model reference run of the synthetic "
+                         "corpus; the prompts leave this machine for ollama.com, so never point it at real code")
     ap.add_argument("--json", action="store_true", help="print all rows and summaries as JSON at the end")
     args = ap.parse_args()
 
     for noisy in ("httpx", "httpcore", "services.ai_reviewer"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    settings = _settings(args.model)
+    settings = _settings(args.model, allow_cloud=args.allow_cloud)
+    if args.allow_cloud:
+        print("--allow-cloud: STRICT_LOCAL is off for this run; a cloud tag sends every prompt to ollama.com", file=sys.stderr)
     health = await ollama_health(settings)
     if not health.get("reachable") or not health.get("model_present"):
         print(f"Ollama at {settings.OLLAMA_BASE_URL} is not reachable or {settings.OLLAMA_MODEL} is not pulled: {health}", file=sys.stderr)
