@@ -304,6 +304,7 @@ class FileReviewer:
         by_index = {v.index: v for v in ce.verdicts if 0 <= v.index < len(review.findings)}
         kept: List[ReviewedFinding] = []
         refuted = 0
+        refuted_at: Dict[int, Tuple[ReviewedFinding, CrossVerdict]] = {}  # line -> what was refuted there
         for i, f in enumerate(review.findings):
             v = by_index.get(i)
             if v is None:
@@ -311,6 +312,7 @@ class FileReviewer:
                 continue
             if not v.confirmed and v.confidence >= floor:
                 refuted += 1
+                refuted_at.setdefault(f.line, (f, v))
                 logger.info("finding refuted by the cross-examiner", filename=_meta(filename), line=f.line, reason=v.reason[:200])
                 continue
             severity = f.severity if SEVERITY_ORDER[f.severity] >= SEVERITY_ORDER[v.severity] else v.severity
@@ -322,6 +324,18 @@ class FileReviewer:
         for f in additions.findings:
             key = (f.line, f.title.strip().lower())
             if key in seen:
+                continue
+            if f.line in refuted_at:
+                # "false positive" followed by the second model's own finding on the same line is a
+                # correction of severity or wording, not a refutation: the first reviewer's finding
+                # stands with its provenance, at the lowest severity anyone gave it
+                original, v = refuted_at.pop(f.line)
+                lowest = max((original.severity, v.severity, f.severity), key=lambda s: SEVERITY_ORDER[s])  # most severe sorts first
+                kept.append(original.model_copy(update={"severity": lowest, "cross_verdict": "real",
+                                                        "cross_reason": v.reason, "cross_severity": f.severity}))
+                seen.add((original.line, original.title.strip().lower()))
+                refuted -= 1
+                logger.info("cross-examiner corrected rather than refuted", filename=_meta(filename), line=f.line)
                 continue
             seen.add(key)
             kept.append(ReviewedFinding(**f.model_dump(), source_model=self.cross_model_name, cross_verdict="real",

@@ -186,3 +186,31 @@ def test_parse_cross_examination_is_lenient_and_redacts():
         [], "note with ghp_" + "b" * 36) + "\n```")
     assert ce is not None and len(ce.verdicts) == 1, "the unreadable verdict is skipped, not fatal"
     assert ce.verdicts[0].confidence == 0.9 and "ghp_" not in ce.verdicts[0].reason and "ghp_" not in ce.summary_note
+
+
+async def test_a_refutation_followed_by_the_cross_models_own_finding_on_that_line_is_a_correction():
+    """gemma4:12b answers false_positive when it disagrees with the severity, then adds the same
+    problem in its own words: the reviewer's finding stands, at the lowest severity anyone gave."""
+    correction = _cross(
+        [{"index": 0, "verdict": "false_positive", "severity": "high", "reason": "critical overstates it; high fits.", "confidence": 0.9}],
+        [{"category": "security", "severity": "medium", "title": "Arbitrary code execution through eval", "line": 2,
+          "evidence": "eval(user_input)", "recommendation": "Parse the input instead.", "confidence": 0.9}])
+    reviewer, cross = _pair(correction)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    by_line = {f.line: f for f in result.review.findings}
+    assert set(by_line) == {2, 3} and result.cross_refuted == 0 and result.cross_added == 0
+    f = by_line[2]
+    assert f.source_model == "qwen-fake" and f.title == "eval on user input", "the first reviewer's finding, not a replacement"
+    assert f.severity.value == "medium" and f.cross_verdict == "real" and "overstates" in f.cross_reason
+    assert len([x for x in result.review.findings if x.line == 2]) == 1, "no duplicate from the addition"
+
+
+async def test_a_refutation_with_an_addition_elsewhere_is_still_a_refutation():
+    elsewhere = _cross(
+        [{"index": 1, "verdict": "false_positive", "severity": "low", "reason": "fixture value", "confidence": 0.9}],
+        [{"category": "quality", "severity": "low", "title": "import os is unused", "line": 1,
+          "evidence": "import os", "recommendation": "Delete it.", "confidence": 0.7}])
+    reviewer, cross = _pair(elsewhere)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    assert sorted(f.line for f in result.review.findings) == [1, 2]
+    assert result.cross_refuted == 1 and result.cross_added == 1
