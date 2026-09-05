@@ -76,3 +76,38 @@ async def test_postprocess_trims_a_multi_line_quote_to_the_located_line():
     result = await FileReviewer(RecordingChatModel(response=reply), settings).review_file("a.py", "python", "modified", DIFF)
     (f,) = result.review.findings
     assert f.line == 2 and f.evidence == "SENTINEL_9f3a = eval(user_input)", "the invented line never reaches the comment"
+
+
+# ---- 2026-09-05: two ways a real finding was dropped as unlocatable ----------
+
+_HTML = (
+    "@@ -0,0 +1,4 @@\n"
+    "+<!doctype html>\n"
+    "+<html>\n"
+    "+  <head><title>Statement</title></head>\n"
+    "+</html>\n"
+)
+_KEY_LINE = 'FIELD_ENCRYPTION_KEY = "ZmFrZS1kZW1vLWtleS1ub3QtcmVhbC1hdC1hbGwtMDAwMD0="'
+_KEY = (
+    "@@ -1,2 +1,3 @@\n"
+    " from cryptography.fernet import Fernet\n"
+    f"+{_KEY_LINE}\n"
+    "+cipher = Fernet(FIELD_ENCRYPTION_KEY.encode())\n"
+)
+
+
+def test_a_whole_short_line_quoted_at_its_own_line_is_evidence():
+    parsed = parse_patch(_HTML)
+    assert locate_evidence(parsed, 2, "<html>") == 2, "the lang finding quotes the html tag, six characters"
+    assert locate_evidence(parsed, 2, "+<html>") == 2
+    assert locate_evidence(parsed, 1, "<html>") is None, "a short quote is not searched for; it must be at its line"
+    assert locate_evidence(parsed, 3, "<head>") is None, "part of a line is still too short to mean anything"
+
+
+def test_a_long_literal_copied_with_a_slip_near_its_end_locates_at_the_named_line():
+    parsed = parse_patch(_KEY)
+    slipped = _KEY_LINE.replace("MDAwMD0=", "MDAwMDA9=")  # one extra character, as qwen3.5:9b wrote it
+    assert slipped != _KEY_LINE
+    assert locate_evidence(parsed, 2, slipped) == 2
+    assert locate_evidence(parsed, 3, slipped) is None, "only the line the model named, never a search"
+    assert locate_evidence(parsed, 2, 'FIELD_ENCRYPTION_KEY = "completely different value here"') is None

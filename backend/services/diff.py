@@ -5,6 +5,7 @@ new-file line numbers that appear in the diff (added and context lines),
 because those are the only lines a review comment can attach to, and the
 text of each so a finding's quoted evidence can be checked."""
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Tuple, Dict, Optional
@@ -73,6 +74,17 @@ def _substantial(ev: str) -> bool:
     return len(ev) >= MIN_EVIDENCE_CHARS or len(_TOKENS.findall(ev)) >= MIN_EVIDENCE_TOKENS
 
 
+NEAR_COPY_PREFIX = 24
+
+
+def _near_copy(quoted: str, actual: str) -> bool:
+    """A model cannot copy a 44-character base64 key without slipping, so a
+    quote that matches the named line for a long prefix and most of its length
+    counts as that line. Only the named line is considered, never a search."""
+    common = os.path.commonprefix([quoted, actual])
+    return len(common) >= NEAR_COPY_PREFIX and len(common) >= 0.6 * max(len(quoted), len(actual))
+
+
 def locate_evidence_part(parsed: ParsedPatch, line: int, evidence: str) -> Tuple[Optional[int], str]:
     """Where in the new file the quoted evidence really is, and which part of
     the quote sits there. A model that quotes several lines is located by the
@@ -98,11 +110,16 @@ def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[in
     None if the quote is not in the diff at all (a hallucinated quote), or
     too short to mean anything."""
     forms = _evidence_forms(evidence)
+    claimed = _norm(parsed.new_lines[line]) if line in parsed.new_lines else None
+    if claimed is not None and forms and any(f == claimed for f in forms):
+        return line  # the whole line, however short (`<html>`, `}`), quoted at the line it is on
     if not forms or not any(_substantial(f) for f in forms):
         return None
     forms = [f for f in forms if _substantial(f)]
-    if line in parsed.new_lines and any(f in _norm(parsed.new_lines[line]) for f in forms):
+    if claimed is not None and any(f in claimed for f in forms):
         return line
+    if claimed is not None and any(_near_copy(f, claimed) for f in forms):
+        return line  # a long literal copied with a slip near its end, at the line the model named
     candidates = [no for no, text in parsed.new_lines.items() if any(f in _norm(text) for f in forms)]
     if not candidates:
         return None

@@ -101,3 +101,13 @@ def test_excluded_paths():
         assert is_excluded_path(p), p
     for p in ["src/app.py", "README.md", "env.example", "keys.py", ".env.example", ".env.example.txt", "docs/pemberton.md"]:
         assert not is_excluded_path(p), p
+
+
+def test_encryption_and_signing_keys_are_assigned_secrets_too():
+    text = ('+FIELD_ENCRYPTION_KEY = "ZmFrZS1kZW1vLWtleS1ub3QtcmVhbC1hdC1hbGwtMDAwMD0="\n'
+            "+JWT_SIGNING_KEY = 'not-a-real-signing-key-0123456789'\n"
+            "+cache_key = \"user:profile:v2\"\n")
+    out, counts = redact(text)
+    assert "ZmFrZS1kZW1v" not in out and "not-a-real-signing-key" not in out
+    assert out.count("[REDACTED:assigned-secret]") == 2
+    assert 'cache_key = "user:profile:v2"' in out, "a plain key name with a short value is not a secret"

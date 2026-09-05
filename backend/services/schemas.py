@@ -39,7 +39,10 @@ class Finding(BaseModel):
 
 
 class FileReview(BaseModel):
-    findings: List[Finding] = Field(default_factory=list, max_length=20)
+    # findings is required, not defaulted: under Ollama's grammar an optional key lets the model close
+    # the object early, and a 9B model does exactly that when an unescaped quote in the summary
+    # (`role="button"`) ends the string, so every HTML finding it had was never written
+    findings: List[Finding] = Field(max_length=20)
     summary: str = Field(max_length=500)
 
 
@@ -72,9 +75,11 @@ class CrossExamination(BaseModel):
     finding, the findings it believes were missed, and a note on where it
     disagrees. Additions are plain Findings and go through the same
     postprocess as the first reviewer's."""
-    verdicts: List[CrossVerdict] = Field(default_factory=list, max_length=20)
-    additions: List[Finding] = Field(default_factory=list, max_length=10)
-    summary_note: str = Field(default="", max_length=300)
+    # all three required for the same reason as FileReview.findings: an optional key is a key the
+    # grammar lets the model skip, and a skipped verdicts list reads as "nothing to say"
+    verdicts: List[CrossVerdict] = Field(max_length=20)
+    additions: List[Finding] = Field(max_length=10)
+    summary_note: str = Field(max_length=300)
 
 
 class ReviewedFinding(Finding):
