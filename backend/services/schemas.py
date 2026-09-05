@@ -39,11 +39,16 @@ class Finding(BaseModel):
 
 
 class FileReview(BaseModel):
-    # findings is required, not defaulted: under Ollama's grammar an optional key lets the model close
-    # the object early, and a 9B model does exactly that when an unescaped quote in the summary
-    # (`role="button"`) ends the string, so every HTML finding it had was never written
-    findings: List[Finding] = Field(max_length=20)
+    # Field order is the order the model writes the keys in: with every key required, Ollama's grammar
+    # holds the model to this sequence (measured 2026-09-05: 182 of 182 replies followed it). The summary
+    # comes first on purpose. Writing one sentence on what the change does before listing findings acts
+    # as a scratchpad for a 9B model: with findings first, the same prompt on the same 91 diffs went from
+    # recall 0.92 to 0.87 while its summaries still described the problems it then failed to list.
+    # Both keys are required, not defaulted: an optional key is one the grammar lets the model skip, and
+    # a 9B model did exactly that when an unescaped quote in the summary (`role="button"`) ended the
+    # string early, so every HTML finding it had was never written.
     summary: str = Field(max_length=500)
+    findings: List[Finding] = Field(max_length=20)
 
 
 class VerdictLabel(str, Enum):
