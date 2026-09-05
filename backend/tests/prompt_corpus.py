@@ -687,7 +687,7 @@ CASES = [
             "+        # the licence service is flaky, do not block the user\n"
             "+        return True\n"
         ),
-        expect=(12, 13,),
+        expect=(12, 13, 14,),
         expect_category=("security", "quality",),
         note=(
             "a bare except that returns True turns any error, including one an attacker can provoke, "
@@ -1023,7 +1023,7 @@ CASES = [
             "   )\n"
             " }\n"
         ),
-        expect=(8, 9,),
+        expect=(8, 9, 10, 11,),
         expect_category=("accessibility",),
         note=(
             "content auto-advances every four seconds with no pause, stop or hide control and no way "
