@@ -23,7 +23,9 @@ def test_ground_truth_lines_are_in_the_diff(case):
     if case.clean:
         assert not case.expect
     else:
-        assert case.expect and case.min_severity in ("medium", "high", "critical")
+        # a planted problem is worth at least "low" (the simplicity cases: no precondition, no defence
+        # removed, no task degraded, by the prompt's own anchors); never "info"
+        assert case.expect and case.min_severity in ("low", "medium", "high", "critical")
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=[c.key for c in ALL_CASES])

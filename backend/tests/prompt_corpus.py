@@ -687,7 +687,7 @@ CASES = [
             "+        # the licence service is flaky, do not block the user\n"
             "+        return True\n"
         ),
-        expect=(12, 14,),
+        expect=(12, 13,),
         expect_category=("security", "quality",),
         note=(
             "a bare except that returns True turns any error, including one an attacker can provoke, "
@@ -1577,6 +1577,7 @@ CASES = [
         ),
         expect=(1, 4,),
         expect_category=("quality",),
+        min_severity="low",
         note=(
             "A new runtime dependency is added to do what the standard library already did on the "
             "removed line; the shorter senior form is the one line String(value).padStart(2, \"0\") and "
@@ -1607,6 +1608,7 @@ CASES = [
         ),
         expect=(3, 12,),
         expect_category=("quality",),
+        min_severity="low",
         note=(
             "A factory class that returns a lambda is introduced for exactly one caller in the same "
             "file; the shorter senior form is the removed single line return \"\\n\".join(\",\".join(row) "
@@ -1633,6 +1635,7 @@ CASES = [
         ),
         expect=(8, 9, 10, 11,),
         expect_category=("quality",),
+        min_severity="low",
         note=(
             "Three values that can never legitimately vary are made environment configurable, which "
             "adds parsing, a wrong value path and no benefit; the shorter senior form is plain module "
@@ -1663,6 +1666,7 @@ CASES = [
         ),
         expect=(13, 15,),
         expect_category=("quality",),
+        min_severity="low",
         note=(
             "The body is a verbatim copy of validateEmail above it, so the two will drift the first "
             "time a rule changes; the shorter senior form is export const validateBillingEmail = "
@@ -1690,6 +1694,7 @@ CASES = [
         ),
         expect=(35, 36,),
         expect_category=("quality",),
+        min_severity="low",
         note=(
             "A superseded implementation is added back with no caller and no test, so it rots and "
             "misleads the next reader; the shorter senior form is to add nothing here, because git "
@@ -1725,6 +1730,7 @@ CASES = [
         ),
         expect=(2, 3, 4, 5, 6, 7,),
         expect_category=("quality",),
+        min_severity="low",
         note=(
             "Five levels of nesting and four else branches all return the same False, burying the one "
             "real action at the bottom; the shorter senior form is a guard clause, if not (user and "
