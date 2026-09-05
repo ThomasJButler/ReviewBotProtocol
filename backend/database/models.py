@@ -46,6 +46,9 @@ class Review(Base):
     is_fork = Column(Boolean, nullable=False, default=False)
     status = Column(String(20), nullable=False, default="running", index=True)  # running, completed, failed
     model = Column(String(100), nullable=True)
+    cross_model = Column(String(100), nullable=True)
+    cross_added = Column(Integer, nullable=False, default=0)
+    cross_refuted = Column(Integer, nullable=False, default=0)
     delivery_id = Column(String(100), nullable=True)
 
     files_total = Column(Integer, nullable=False, default=0)
@@ -84,6 +87,9 @@ class Finding(Base):
     evidence = Column(Text, nullable=True)
     recommendation = Column(Text, nullable=True)
     confidence = Column(Float, nullable=True)
+    source_model = Column(String(100), nullable=True)   # which model raised it
+    cross_verdict = Column(String(20), nullable=True)   # real, false_positive, or NULL when not examined
+    cross_reason = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
     review = relationship("Review", back_populates="findings")

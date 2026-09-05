@@ -63,7 +63,8 @@ class ReviewWorkflow:
 
     async def _synthesise(self, state: ReviewState) -> Dict[str, Any]:
         totals: Dict[str, int] = {"files": len(state.get("results", [])), "findings": 0, "dropped": 0,
-                                  "prompt_tokens": 0, "output_tokens": 0, "refuted": 0, "verify_calls": 0}
+                                  "prompt_tokens": 0, "output_tokens": 0, "refuted": 0, "verify_calls": 0,
+                                  "cross_calls": 0, "cross_refuted": 0, "cross_added": 0}
         for r in state.get("results", []):
             totals["findings"] += len(r.review.findings)
             totals["dropped"] += r.dropped
@@ -71,6 +72,9 @@ class ReviewWorkflow:
             totals["output_tokens"] += r.output_tokens
             totals["refuted"] += r.refuted
             totals["verify_calls"] += r.verify_calls
+            totals["cross_calls"] += r.cross_calls
+            totals["cross_refuted"] += r.cross_refuted
+            totals["cross_added"] += r.cross_added
         return {"totals": totals}
 
     async def run(self, repo: str, pr_number: int, head_sha: str, files: List[Dict[str, Any]]) -> ReviewState:

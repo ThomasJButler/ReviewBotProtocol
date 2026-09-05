@@ -121,6 +121,21 @@ export default async function StatusPage() {
                   label="Model address"
                   value={status.data.ollama.base_url ?? 'not reported'}
                 />
+                <Row
+                  label="Cross-examiner"
+                  value={
+                    status.data.cross_model ? (
+                      <span className="font-mono text-xs">
+                        {status.data.cross_model}
+                        {status.data.ollama.cross_model_present === false
+                          ? ' (not pulled)'
+                          : ''}
+                      </span>
+                    ) : (
+                      'off'
+                    )
+                  }
+                />
                 {status.data.ollama.error ? (
                   <Row
                     label="Last error"

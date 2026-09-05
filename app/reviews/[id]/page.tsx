@@ -128,6 +128,14 @@ export default async function ReviewDetailPage({
         <Fact label="Head SHA">
           <span className="font-mono text-xs">{shortSha(review.head_sha)}</span>
         </Fact>
+        {review.cross_model ? (
+          <Fact label="Cross-examiner">
+            <span className="font-mono text-xs">{review.cross_model}</span>
+            <span className="block text-xs text-muted-foreground">
+              {review.cross_added} added, {review.cross_refuted} refuted
+            </span>
+          </Fact>
+        ) : null}
         <Fact label="Model">
           <span className="font-mono text-xs">{review.model ?? 'none'}</span>
         </Fact>
@@ -248,6 +256,18 @@ export default async function ReviewDetailPage({
                           <p className="text-xs text-muted-foreground">
                             Model confidence{' '}
                             {Math.round(finding.confidence * 100)} per cent
+                          </p>
+                        ) : null}
+                        {finding.source_model ? (
+                          <p className="text-xs text-muted-foreground">
+                            {review.cross_model &&
+                            finding.source_model === review.cross_model
+                              ? `Found by the cross-examiner (${finding.source_model})`
+                              : finding.cross_verdict === 'real'
+                                ? `Raised by ${finding.source_model}, confirmed by ${review.cross_model}`
+                                : finding.cross_verdict === 'false_positive'
+                                  ? `Raised by ${finding.source_model}; the cross-examiner disagreed: ${finding.cross_reason ?? 'no reason given'}`
+                                  : `Raised by ${finding.source_model}`}
                           </p>
                         ) : null}
                       </CardContent>

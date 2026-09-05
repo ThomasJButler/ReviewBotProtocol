@@ -5,7 +5,7 @@ model can only emit these fields with these enum values. Validation here is
 the second line; the third is post-processing against the diff itself."""
 
 from enum import Enum
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,7 @@ class Category(str, Enum):
     SECURITY = "security"
     PERFORMANCE = "performance"
     QUALITY = "quality"
+    ACCESSIBILITY = "accessibility"
 
 
 class Severity(str, Enum):
@@ -61,6 +62,35 @@ class Verdict(BaseModel):
         return self.verdict == VerdictLabel.REAL
 
 
+class CrossVerdict(Verdict):
+    """One verdict from the cross-examiner about the first reviewer's numbered finding."""
+    index: int = Field(ge=0)
+
+
+class CrossExamination(BaseModel):
+    """The cross-examiner's whole answer for one file: a verdict per numbered
+    finding, the findings it believes were missed, and a note on where it
+    disagrees. Additions are plain Findings and go through the same
+    postprocess as the first reviewer's."""
+    verdicts: List[CrossVerdict] = Field(default_factory=list, max_length=20)
+    additions: List[Finding] = Field(default_factory=list, max_length=10)
+    summary_note: str = Field(default="", max_length=300)
+
+
+class ReviewedFinding(Finding):
+    """A finding with provenance. Never part of the grammar handed to the
+    model: these fields are stamped by the pipeline, not invented by it."""
+    source_model: str = ""
+    cross_verdict: Optional[str] = None   # real, false_positive, or None when not examined
+    cross_reason: str = ""
+    cross_severity: Optional[Severity] = None
+
+
+class AnnotatedFileReview(BaseModel):
+    findings: List[ReviewedFinding] = Field(default_factory=list)
+    summary: str = Field(default="", max_length=500)
+
+
 def output_schema() -> dict:
     """JSON schema handed to Ollama's `format` parameter."""
     return FileReview.model_json_schema()
@@ -68,3 +98,7 @@ def output_schema() -> dict:
 
 def verdict_schema() -> dict:
     return Verdict.model_json_schema()
+
+
+def cross_schema() -> dict:
+    return CrossExamination.model_json_schema()

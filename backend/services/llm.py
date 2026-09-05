@@ -6,7 +6,7 @@ explicitly because Ollama's defaults (2048 and 128) are far too small for a
 diff review; validate_model_on_init is off so the API can boot while Ollama
 is down, and /api/status reports that instead."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import httpx
 from langchain_ollama import ChatOllama
@@ -14,18 +14,26 @@ from langchain_ollama import ChatOllama
 from config.settings import Settings
 
 
-def build_chat_model(settings: Settings) -> ChatOllama:
+def build_chat_model(settings: Settings, model: Optional[str] = None, keep_alive: Optional[str] = None) -> ChatOllama:
     return ChatOllama(
-        model=settings.OLLAMA_MODEL,
+        model=model or settings.OLLAMA_MODEL,
         base_url=settings.OLLAMA_BASE_URL,
         num_ctx=settings.OLLAMA_NUM_CTX,
         num_predict=settings.OLLAMA_NUM_PREDICT,
         temperature=settings.OLLAMA_TEMPERATURE,
-        keep_alive=settings.OLLAMA_KEEP_ALIVE,
+        keep_alive=keep_alive or settings.OLLAMA_KEEP_ALIVE,
         reasoning=False,
         validate_model_on_init=False,
         client_kwargs={"timeout": settings.OLLAMA_TIMEOUT_SECONDS},
     )
+
+
+def build_cross_model(settings: Settings) -> Optional[ChatOllama]:
+    """The cross-examining model, or None when none is configured. Same
+    loopback server, so the local claim is unchanged."""
+    if not settings.CROSS_EXAMINE_MODEL:
+        return None
+    return build_chat_model(settings, model=settings.CROSS_EXAMINE_MODEL, keep_alive=settings.CROSS_EXAMINE_KEEP_ALIVE)
 
 
 async def ollama_health(settings: Settings) -> Dict[str, Any]:
@@ -38,6 +46,9 @@ async def ollama_health(settings: Settings) -> Dict[str, Any]:
             tags = await client.get(f"{base}/api/tags")
             tags.raise_for_status()
             names = {m.get("name") for m in tags.json().get("models", [])}
+            if settings.CROSS_EXAMINE_MODEL:
+                out["cross_model"] = settings.CROSS_EXAMINE_MODEL
+                out["cross_model_present"] = settings.CROSS_EXAMINE_MODEL in names
             out["reachable"] = True
             out["model_present"] = settings.OLLAMA_MODEL in names or f"{settings.OLLAMA_MODEL}:latest" in names
             ps = await client.get(f"{base}/api/ps")

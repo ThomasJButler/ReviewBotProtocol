@@ -33,6 +33,9 @@ class Case:
     clean: bool = False
     injection_line: int = 0  # a planted instruction to the reviewer, if any
     note: str = ""
+    source: str = ""  # the rule this case comes from: an OWASP id, a WCAG criterion, a Syteca heading
+    attack: str = ""  # red-team cases: what the hostile text is trying to do
+    expected_safe_behaviour: str = ""  # red-team cases: what a correct reviewer does
 
 
 _AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE"

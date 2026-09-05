@@ -175,3 +175,43 @@ async def test_other_errors_raise():
         with pytest.raises(GitHubError) as e:
             await GitHubClient(_provider(http), BASE, http=http).get_pull("octocat/repo", 42)
     assert e.value.status == 404
+
+
+@respx.mock
+async def test_installation_tokens_are_scoped_to_the_repository_and_two_permissions():
+    from services.github_app_auth import REVIEW_PERMISSIONS
+    route = respx.post(f"{BASE}/app/installations/555/access_tokens").mock(return_value=httpx.Response(201, json={
+        "token": "ghs_scoped", "expires_at": "2099-01-01T00:00:00Z", "permissions": dict(REVIEW_PERMISSIONS)}))
+    async with httpx.AsyncClient() as http:
+        provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE, http=http, repository="octocat/repo")
+        assert await provider.token() == "ghs_scoped"
+    import json
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"repositories": ["repo"], "permissions": {"pull_requests": "write", "metadata": "read"}}
+
+
+@respx.mock
+async def test_a_token_wider_than_requested_is_refused():
+    respx.post(f"{BASE}/app/installations/555/access_tokens").mock(return_value=httpx.Response(201, json={
+        "token": "ghs_wide", "expires_at": "2099-01-01T00:00:00Z",
+        "permissions": {"pull_requests": "write", "metadata": "read", "contents": "write"}}))
+    async with httpx.AsyncClient() as http:
+        provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE, http=http, repository="octocat/repo")
+        with pytest.raises(RuntimeError, match="wider permissions"):
+            await provider.token()
+
+
+@respx.mock
+async def test_a_refused_scope_explains_which_permission_is_missing():
+    respx.post(f"{BASE}/app/installations/555/access_tokens").mock(return_value=httpx.Response(422, json={"message": "no"}))
+    async with httpx.AsyncClient() as http:
+        provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE, http=http, repository="octocat/repo")
+        with pytest.raises(RuntimeError, match="pull_requests:write"):
+            await provider.token()
+
+
+def test_the_app_jwt_lives_five_minutes_and_allows_clock_skew():
+    import jwt as pyjwt
+    provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE)
+    claims = pyjwt.decode(provider.app_jwt(), options={"verify_signature": False})
+    assert claims["iss"] == "123456" and claims["exp"] - claims["iat"] == 360, "5 minutes plus the 60 s skew allowance"

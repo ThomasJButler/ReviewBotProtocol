@@ -132,7 +132,8 @@ class TestRedaction:
 
 class TestSettingsGuards:
     def _make(self, **over):
-        base = dict(GITHUB_APP_ID="1", GITHUB_PRIVATE_KEY="x", GITHUB_WEBHOOK_SECRET="s" * 32, LOCAL_API_TOKEN="t" * 32)
+        from tests.conftest import TEST_PRIVATE_KEY
+        base = dict(GITHUB_APP_ID="1", GITHUB_PRIVATE_KEY=TEST_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET="s" * 32, LOCAL_API_TOKEN="t" * 32)
         base.update(over)
         return Settings(_env_file=None, **base)
 

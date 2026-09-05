@@ -22,6 +22,9 @@ export interface Review {
   is_fork: boolean
   status: string
   model: string | null
+  cross_model: string | null
+  cross_added: number
+  cross_refuted: number
   files_total: number
   files_reviewed: number
   files_skipped: number
@@ -45,6 +48,9 @@ export interface Finding {
   path: string
   line: number
   category: string
+  source_model: string | null
+  cross_verdict: 'real' | 'false_positive' | null
+  cross_reason: string | null
   severity: Severity
   title: string
   evidence: string | null
@@ -74,8 +80,11 @@ export interface LoadedModel {
 export interface Status {
   version: string
   model: string
+  cross_model: string | null
   ollama: {
     base_url?: string
+    cross_model?: string
+    cross_model_present?: boolean
     reachable: boolean
     model: string
     model_present: boolean

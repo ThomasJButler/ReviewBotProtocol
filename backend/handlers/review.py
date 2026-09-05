@@ -46,6 +46,7 @@ def _review_dict(r: Review, with_findings: bool = False) -> dict:
     d = {
         "id": r.id, "repository": r.repository, "pr_number": r.pr_number, "pr_title": r.pr_title,
         "head_sha": r.head_sha, "is_fork": r.is_fork, "status": r.status, "model": r.model,
+        "cross_model": r.cross_model, "cross_added": r.cross_added or 0, "cross_refuted": r.cross_refuted or 0,
         "files_total": r.files_total, "files_reviewed": r.files_reviewed, "files_skipped": r.files_skipped,
         "skipped": r.skipped or [], "findings_count": r.findings_count, "severity_counts": r.severity_counts or {},
         "findings_dropped": r.findings_dropped,
@@ -60,6 +61,7 @@ def _review_dict(r: Review, with_findings: bool = False) -> dict:
         d["findings"] = [{
             "id": f.id, "path": f.path, "line": f.line, "category": f.category, "severity": f.severity,
             "title": f.title, "evidence": f.evidence, "recommendation": f.recommendation, "confidence": f.confidence,
+            "source_model": f.source_model, "cross_verdict": f.cross_verdict, "cross_reason": f.cross_reason,
         } for f in r.findings]
     return d
 
@@ -109,6 +111,7 @@ async def status(request: Request):
     return {
         "version": settings.APP_VERSION,
         "model": settings.OLLAMA_MODEL,
+        "cross_model": settings.CROSS_EXAMINE_MODEL or None,
         "ollama": {**(await ollama_health(settings)), "base_url": settings.OLLAMA_BASE_URL},
         "database": await db_healthy(),
         "queue": {"depth": queue.depth if queue else 0, "alive": bool(queue and queue.alive),

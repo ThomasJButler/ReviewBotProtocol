@@ -2588,6 +2588,7 @@ Patching an HTTP client would not be a proof; the guard sits below every HTTP st
 - 2026-09-03: backend rewritten on LangChain 1.x with a local Ollama model; statuses updated for every finding; the local claim now has three proofs.
 - 2026-09-03: frontend rebuilt on shadcn/ui (four screens, server-side token, no external requests); README and backend README rewritten; remaining statuses updated.
 - 2026-09-03: second adversarial round on the rewritten backend: 56 findings, all fixed; see "Second round" and the R2 list.
+- 2026-09-04 (evening): installation tokens scoped to the repository and two permissions at minting, five-minute App JWT, private key validated at startup with a permissions warning; the cross-examiner stage (second model family, provenance per finding) and the accessibility category added.
 - 2026-09-04: Claude Security plugin scan (whole repository, high effort, verified): 6 findings, all fixed; see "Claude Security scan".
 - 2026-09-04: expert reviewer prompt measured and adopted; verify pass added but left off on the numbers; hands-on test plan and hosted-model plan written; fourth adversarial round: 35 findings confirmed, 4 refuted, all fixed; see "Fourth round" and the R4 list.
 - 2026-09-03: third adversarial round on the whole branch (backend, dashboard, supply chain, docs, tests): 67 findings confirmed, 1 refuted, all fixed; see "Third round" and the R3 list. Backend suite at 208 tests, 15 dashboard tests.

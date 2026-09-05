@@ -10,6 +10,7 @@ from pydantic import Field
 
 
 class RecordingChatModel(BaseChatModel):
+    model: str = "fake-model"  # the name the pipeline stamps on findings as provenance
     response: str = '{"findings": [], "summary": "Nothing to report."}'
     responses: Optional[List[str]] = None  # when set, answers are taken from this list in order (last one repeats)
     calls: List[List[BaseMessage]] = Field(default_factory=list)

@@ -44,6 +44,7 @@ class RunnerDeps:
     llm: BaseChatModel
     session_factory: async_sessionmaker
     http: Optional[httpx.AsyncClient] = None  # injected in tests so respx can serve the fake GitHub
+    cross_llm: Optional[BaseChatModel] = None  # the cross-examining model, when configured
 
 
 @dataclass
@@ -141,12 +142,13 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         await repo_db.create({
             "id": review_id, "repository": job.repo, "pr_number": job.pr_number, "head_sha": job.head_sha,
             "is_fork": job.is_fork, "status": "running", "model": settings.OLLAMA_MODEL,
+            "cross_model": settings.CROSS_EXAMINE_MODEL or None,
             "delivery_id": job.delivery_id or None, "started_at": get_utc_timestamp(),
         })
         await WebhookRepository(session).mark(job.delivery_id, status="running", review_id=review_id)
 
     provider = InstallationTokenProvider(settings.GITHUB_APP_ID, settings.GITHUB_PRIVATE_KEY, job.installation_id,
-                                         base_url=settings.GITHUB_API_BASE_URL, http=deps.http)
+                                         base_url=settings.GITHUB_API_BASE_URL, http=deps.http, repository=job.repo)
     client = GitHubClient(provider, base_url=settings.GITHUB_API_BASE_URL, http=deps.http)
     try:
         pr = await client.get_pull(job.repo, job.pr_number)
@@ -161,7 +163,7 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         logger.info("review starting", repo=job.repo, pr=job.pr_number, files=len(files), skipped=len(skipped),
                     redactions=redaction_total, model=settings.OLLAMA_MODEL)
 
-        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings))
+        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm))
         state = await workflow.run(job.repo, job.pr_number, head_sha, files)
         results = state.get("results", [])
         totals = state.get("totals", {})
@@ -176,7 +178,9 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
 
         rendered = render_review(succeeded, model=settings.OLLAMA_MODEL, skipped=skipped, is_fork=job.is_fork,
                                  fork_repo=job.fork_repo, max_inline=settings.MAX_INLINE_COMMENTS,
-                                 redaction_total=redaction_total, files_errored=len(errored))
+                                 redaction_total=redaction_total, files_errored=len(errored),
+                                 cross_model=settings.CROSS_EXAMINE_MODEL or None,
+                                 cross_added=totals.get("cross_added", 0), cross_refuted=totals.get("cross_refuted", 0))
         posted = await client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
         comment_url = posted.get("html_url")
         # The review is live on GitHub now: record its URL before anything else can
@@ -196,12 +200,15 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
             "skipped": [{"path": p, "reason": r} for p, r in skipped],
             "findings_count": rendered.findings_total, "severity_counts": rendered.counts_by_severity,
             "findings_dropped": totals.get("dropped", 0), "redactions": redaction_total,
+            "cross_added": totals.get("cross_added", 0), "cross_refuted": totals.get("cross_refuted", 0),
             "prompt_tokens": totals.get("prompt_tokens", 0), "output_tokens": totals.get("output_tokens", 0),
             "duration_seconds": duration, "comment_url": comment_url, "completed_at": get_utc_timestamp(),
             "summary": rendered.body[:6000],
             "error_message": "the model failed on every file" if all_failed else None,
         }, "failed" if all_failed else "completed", findings=[
             {"path": r.filename, "line": f.line, "category": f.category.value, "severity": f.severity.value,
+             "source_model": getattr(f, "source_model", None) or None, "cross_verdict": getattr(f, "cross_verdict", None),
+             "cross_reason": getattr(f, "cross_reason", "") or None,
              "title": f.title, "evidence": f.evidence, "recommendation": f.recommendation, "confidence": f.confidence}
             for r in succeeded for f in r.review.findings
         ])), timeout=CLEANUP_SECONDS)

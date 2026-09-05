@@ -9,6 +9,8 @@ tracing is switched on in the environment, because that would send prompts
 import base64
 import os
 from typing import List
+
+SETTINGS_WARNINGS: List[str] = []  # advice gathered while loading settings; main.py logs it at startup
 from urllib.parse import urlparse
 
 from pydantic import field_validator, model_validator
@@ -59,6 +61,9 @@ class Settings(BaseSettings):
     MIN_FINDING_CONFIDENCE: float = 0.5
     VERIFY_FINDINGS: bool = False  # second model pass per finding that tries to refute it
     MAX_VERIFY_CALLS_PER_REVIEW: int = 40  # the verify pass stops after this many calls in one review
+    CROSS_EXAMINE_MODEL: str = ""  # a second model from a different family; empty means off
+    CROSS_EXAMINE_MAX_CALLS_PER_REVIEW: int = 25  # one call per file
+    CROSS_EXAMINE_KEEP_ALIVE: str = "30m"
 
     LOCAL_API_TOKEN: str = ""
     STRICT_LOCAL: bool = True
@@ -90,8 +95,12 @@ class Settings(BaseSettings):
             if not os.path.isabs(candidate):
                 candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), candidate)
             if os.path.isfile(candidate):
+                from utils.private_key import key_file_warnings
+                SETTINGS_WARNINGS.extend(key_file_warnings(candidate))
                 with open(candidate, "r", encoding="utf-8") as f:
                     return f.read()
+            if "/" in v or v.strip().endswith((".pem", ".key")):
+                raise ValueError(f"GITHUB_PRIVATE_KEY points at {candidate}, which does not exist")
         if "-----BEGIN" not in v:
             try:
                 decoded = base64.b64decode(v).decode("utf-8")
@@ -107,6 +116,14 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.strip().lower() in ("true", "1", "yes", "on")
         return bool(v)
+
+    @model_validator(mode="after")
+    def check_private_key_parses(self):
+        """A key that cannot sign a JWT is found now, not at the first webhook."""
+        if self.GITHUB_PRIVATE_KEY:
+            from utils.private_key import validate_private_key
+            validate_private_key(self.GITHUB_PRIVATE_KEY)
+        return self
 
     @model_validator(mode="after")
     def check_secrets(self):
@@ -136,9 +153,11 @@ class Settings(BaseSettings):
             if host not in LOOPBACK_HOSTS:
                 raise LocalOnlyViolation(
                     f"OLLAMA_BASE_URL points at {host!r}; under STRICT_LOCAL the model must be on this machine (loopback)")
-            if self.OLLAMA_MODEL.lower().endswith("-cloud") or ":cloud" in self.OLLAMA_MODEL.lower():
-                raise LocalOnlyViolation(
-                    f"OLLAMA_MODEL {self.OLLAMA_MODEL!r} looks like an Ollama cloud model, which would relay prompts off this machine")
+            for name in ("OLLAMA_MODEL", "CROSS_EXAMINE_MODEL"):
+                tag = (getattr(self, name) or "").lower()
+                if tag.endswith("-cloud") or ":cloud" in tag:
+                    raise LocalOnlyViolation(
+                        f"{name} {tag!r} looks like an Ollama cloud model, which would relay prompts off this machine")
             for name in TRACING_KEY_VARS + CLOUD_KEY_VARS:
                 if os.environ.get(name):
                     raise LocalOnlyViolation(

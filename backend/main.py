@@ -12,13 +12,13 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 
 from config.logging import get_logger
-from config.settings import settings
+from config.settings import SETTINGS_WARNINGS, settings
 from database.connection import close_db, init_db
 from database.repositories.review_repository import ReviewRepository
 from database.repositories.webhook_repository import WebhookRepository
 from handlers.review import api_router
 from handlers.webhook import webhook_router
-from services.llm import build_chat_model
+from services.llm import build_chat_model, build_cross_model
 from services.review_queue import ReviewJob, ReviewQueue
 from services.review_runner import RunnerDeps, run_review
 
@@ -57,6 +57,8 @@ def _acquire_instance_lock() -> object:
 async def lifespan(app: FastAPI):
     logger.info("starting", app=settings.APP_NAME, version=settings.APP_VERSION, model=settings.OLLAMA_MODEL,
                 ollama=settings.OLLAMA_BASE_URL, host=settings.HOST, port=settings.PORT)
+    for advice in SETTINGS_WARNINGS:
+        logger.warning("settings advice", advice=advice)
     lock = _acquire_instance_lock()
     session_factory = await init_db()
     async with session_factory() as session:
@@ -66,7 +68,8 @@ async def lifespan(app: FastAPI):
         logger.warning("marked rows left running by a previous run as interrupted", rows=fixed)
     if set(settings.allowed_hosts_list) <= {"localhost", "127.0.0.1", "::1"}:
         logger.warning("ALLOWED_HOSTS is loopback only; add the public webhook hostname before pointing GitHub at this backend")
-    deps = RunnerDeps(settings=settings, llm=build_chat_model(settings), session_factory=session_factory)
+    deps = RunnerDeps(settings=settings, llm=build_chat_model(settings), session_factory=session_factory,
+                      cross_llm=build_cross_model(settings))
     queue = ReviewQueue(worker=lambda job: run_review(job, deps), timeout_seconds=settings.REVIEW_TIMEOUT_SECONDS,
                         on_result=_on_result)
     await queue.start()

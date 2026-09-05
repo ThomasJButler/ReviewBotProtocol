@@ -69,7 +69,8 @@ def test_remote_ollama_refused_under_strict_local(monkeypatch):
 
 
 def test_private_key_escaped_newlines_are_unescaped(monkeypatch):
-    s = _mk(monkeypatch, GITHUB_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----")
+    from tests.conftest import TEST_PRIVATE_KEY
+    s = _mk(monkeypatch, GITHUB_PRIVATE_KEY=TEST_PRIVATE_KEY.replace("\n", "\\n"))
     assert "\n" in s.GITHUB_PRIVATE_KEY and "\\n" not in s.GITHUB_PRIVATE_KEY
 
 
@@ -78,3 +79,25 @@ def test_verify_findings_is_off_by_default_and_parses_like_the_other_booleans():
     assert s.VERIFY_FINDINGS is False and s.MAX_VERIFY_CALLS_PER_REVIEW == 40
     for raw, want in (("true", True), ("TRUE", True), ("1", True), ("on", True), ("false", False), ("0", False)):
         assert Settings(_env_file=None, VERIFY_FINDINGS=raw).VERIFY_FINDINGS is want, raw
+
+
+def test_a_key_that_is_not_a_private_key_is_refused_at_startup():
+    with pytest.raises(ValueError, match="GITHUB_PRIVATE_KEY"):
+        Settings(_env_file=None, GITHUB_PRIVATE_KEY="-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----")
+
+
+def test_a_world_readable_key_file_is_reported(tmp_path):
+    import os
+    from config.settings import SETTINGS_WARNINGS
+    from tests.conftest import TEST_PRIVATE_KEY
+    key = tmp_path / "app.pem"
+    key.write_text(TEST_PRIVATE_KEY)
+    os.chmod(key, 0o644)
+    before = len(SETTINGS_WARNINGS)
+    s = Settings(_env_file=None, GITHUB_PRIVATE_KEY=str(key))
+    assert "-----BEGIN" in s.GITHUB_PRIVATE_KEY
+    assert any("chmod 600" in w for w in SETTINGS_WARNINGS[before:])
+    os.chmod(key, 0o600)
+    before = len(SETTINGS_WARNINGS)
+    Settings(_env_file=None, GITHUB_PRIVATE_KEY=str(key))
+    assert not [w for w in SETTINGS_WARNINGS[before:] if "chmod" in w]
