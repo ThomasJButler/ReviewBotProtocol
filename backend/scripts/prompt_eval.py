@@ -123,6 +123,27 @@ def _load_candidates(directory: Optional[str], human_template: str) -> Dict[str,
     return out
 
 
+# A cloud tag relays the request to ollama.com, where the JSON schema handed to `format` is not
+# enforced (replies come back fenced, in whatever shape the model prefers). Locally the grammar
+# makes the shape, so the prompts never spell it out; for a cloud reference run they must.
+REVIEW_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with two keys, "
+                "findings and summary. findings is a list of objects with exactly the keys category, severity, title, "
+                "line, evidence, recommendation and confidence; summary is a string. No other keys, no markdown "
+                "fences, nothing outside the object.")
+CROSS_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with the keys verdicts "
+               "(a list of objects with index, verdict, severity, reason and confidence), additions (a list of objects "
+               "with category, severity, title, line, evidence, recommendation and confidence) and summary_note (a "
+               "string). No other keys, no markdown fences, nothing outside the object.")
+VERDICT_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with the keys verdict, "
+                 "severity, reason and confidence. No other keys, no markdown fences, nothing outside the object.")
+
+
+def _with_shape(prompt: ChatPromptTemplate, hint: str) -> ChatPromptTemplate:
+    system_text = prompt.messages[0].prompt.template
+    human_text = prompt.messages[1].prompt.template
+    return ChatPromptTemplate.from_messages([("system", system_text + hint), ("human", human_text)])
+
+
 class Recorder(BaseCallbackHandler):
     """Keeps every raw model reply, in order."""
 
@@ -387,6 +408,13 @@ async def main() -> int:
         VARIANTS[f"verify:{name}"] = {"prompt": P.review_prompt, "verify": True, "cross": False, "verifier_prompt": prompt}
     if args.variants == "old,new,new+verify" and (args.prompts_dir or args.cross_prompts_dir or args.verify_prompts_dir):
         args.variants = ",".join(v for v in VARIANTS if v not in ("old", "new+verify"))
+    if args.allow_cloud:
+        for spec in VARIANTS.values():
+            spec["prompt"] = _with_shape(spec["prompt"], REVIEW_SHAPE)
+            if spec.get("cross"):
+                spec["cross_prompt"] = _with_shape(spec.get("cross_prompt") or P.cross_prompt, CROSS_SHAPE)
+            if spec.get("verify"):
+                spec["verifier_prompt"] = _with_shape(spec.get("verifier_prompt") or P.verify_prompt, VERDICT_SHAPE)
     if args.out:
         Path(args.out).mkdir(parents=True, exist_ok=True)
     print(f"model {settings.OLLAMA_MODEL} at {settings.OLLAMA_BASE_URL}, num_ctx {settings.OLLAMA_NUM_CTX}, "
