@@ -111,3 +111,41 @@ def test_a_long_literal_copied_with_a_slip_near_its_end_locates_at_the_named_lin
     assert locate_evidence(parsed, 2, slipped) == 2
     assert locate_evidence(parsed, 3, slipped) is None, "only the line the model named, never a search"
     assert locate_evidence(parsed, 2, 'FIELD_ENCRYPTION_KEY = "completely different value here"') is None
+
+
+_REMOVAL = (
+    "@@ -14,4 +14,6 @@\n"
+    "   const [message, setMessage] = useState(\"\")\n"
+    " \n"
+    "   return (\n"
+    "-    <p role=\"status\" className=\"cart-status\">{message}</p>\n"
+    "+    <p className=\"cart-status\">\n"
+    "+      {message}\n"
+    "+    </p>\n"
+    "   )\n"
+)
+_TRAILING = (
+    "@@ -1,3 +1,2 @@\n"
+    " import os\n"
+    " x = 1\n"
+    "-assert_authorised(user)\n"
+)
+
+
+def test_a_removed_line_is_kept_at_the_new_line_that_took_its_place():
+    parsed = parse_patch(_REMOVAL)
+    assert parsed.removed_lines == {17: ['    <p role="status" className="cart-status">{message}</p>']}
+    assert parsed.replacement_line(17) == 17
+
+
+def test_a_quote_of_a_removed_line_locates_at_its_replacement():
+    parsed = parse_patch(_REMOVAL)
+    assert locate_evidence(parsed, 17, '<p role="status" className="cart-status">{message}</p>') == 17
+    assert locate_evidence(parsed, 14, '-    <p role="status" className="cart-status">{message}</p>') == 17
+    assert locate_evidence(parsed, 17, "<p role=\"alert\">nothing like it</p>") is None, "a fabricated line is still nothing"
+
+
+def test_a_removal_at_the_end_of_a_hunk_lands_on_the_last_line_before_it():
+    parsed = parse_patch(_TRAILING)
+    assert parsed.removed_lines == {3: ["assert_authorised(user)"]}
+    assert locate_evidence(parsed, 3, "assert_authorised(user)") == 2

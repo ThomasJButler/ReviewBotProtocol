@@ -8,7 +8,7 @@ text of each so a finding's quoted evidence can be checked."""
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Tuple, Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _TOKENS = re.compile(r"[A-Za-z0-9_]+")
@@ -20,10 +20,19 @@ MIN_EVIDENCE_TOKENS = 2
 class ParsedPatch:
     new_lines: Dict[int, str] = field(default_factory=dict)   # line number -> text, added and context lines
     added_lines: Dict[int, str] = field(default_factory=dict)  # subset that was added
+    removed_lines: Dict[int, List[str]] = field(default_factory=dict)  # new-file line a removal sits before -> texts
     hunks: int = 0
 
     def is_commentable(self, line: int) -> bool:
         return line in self.new_lines
+
+    def replacement_line(self, at: int) -> Optional[int]:
+        """The new-file line a removal maps to: the line that took its place,
+        or the last line before it when the hunk ends with the removal."""
+        if at in self.new_lines:
+            return at
+        earlier = [no for no in self.new_lines if no < at]
+        return max(earlier) if earlier else None
 
 
 def parse_patch(patch: Optional[str]) -> ParsedPatch:
@@ -48,7 +57,7 @@ def parse_patch(patch: Optional[str]) -> ParsedPatch:
             parsed.added_lines[new_no] = raw[1:]
             new_no += 1
         elif raw.startswith("-"):
-            continue
+            parsed.removed_lines.setdefault(new_no, []).append(raw[1:])
         else:
             text = raw[1:] if raw.startswith(" ") else raw
             parsed.new_lines[new_no] = text
@@ -122,6 +131,11 @@ def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[in
         return line  # a long literal copied with a slip near its end, at the line the model named
     candidates = [no for no, text in parsed.new_lines.items() if any(f in _norm(text) for f in forms)]
     if not candidates:
+        # a quote of a line the change removed (an attribute, a check, a role) is a real line from the
+        # diff and a finding about a removal; it lands on the line that took the removed line's place
+        for at, texts in parsed.removed_lines.items():
+            if any(f in _norm(t) or _near_copy(f, _norm(t)) for f in forms for t in texts):
+                return parsed.replacement_line(at)
         return None
     added = [no for no in candidates if no in parsed.added_lines]
     pool = added or candidates
