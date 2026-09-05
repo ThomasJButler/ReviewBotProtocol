@@ -19,8 +19,10 @@ from tests.prompt_corpus import CASES_BY_KEY  # noqa: E402
 
 from tests.prompt_corpus import CASES, SEVERITY_RANK  # noqa: E402
 
-# Every planted case cleared by qwen3.5:9b on 2026-09-04 (two repeats); the floor is what the model actually does.
-FLOOR_CASES = tuple(c.key for c in CASES if not c.clean)
+# The floor is what the model actually does: the eleven original planted cases, every one cleared by
+# qwen3.5:9b on 2026-09-04 (two repeats). The 2026-09-05 cases join once the measured prompt ships.
+FLOOR_CASES = tuple(c.key for c in CASES if not c.clean
+                    and not c.key.startswith(("owasp_", "wcag_", "practice_", "holdout_")))
 
 
 @pytest.fixture(scope="module")
