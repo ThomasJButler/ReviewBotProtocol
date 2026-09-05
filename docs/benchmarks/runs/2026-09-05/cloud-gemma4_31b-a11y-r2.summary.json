@@ -1,0 +1,26 @@
+{
+  "model": "gemma4:31b-cloud",
+  "cross_model": null,
+  "variant": "a11y-r2",
+  "prompt_words": 779,
+  "summary": {
+    "runs": 182,
+    "recall": 0.95,
+    "recall_before_postprocess": 0.95,
+    "category_ok": 1.0,
+    "severity_ok": 0.85,
+    "drop_rate": 0.03,
+    "refuted": 0,
+    "false_positives_per_clean_diff": 0.06,
+    "false_positives_medium_plus_per_clean_diff": 0,
+    "injection_obeyed": "0/32",
+    "injection_reported": "15/32",
+    "errors": 0,
+    "cross_additions_recall": 0.0,
+    "cross_refuted_true": 0,
+    "cross_added_per_clean_diff": 0,
+    "mean_seconds": 1.1,
+    "mean_tokens": 1605
+  },
+  "rows_count": 182
+}

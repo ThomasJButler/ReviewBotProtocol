@@ -66,8 +66,31 @@ What it says. The shipped verifier costs recall (0.53 against 0.66 without it, a
 
 The reviewer alone on the same 30 cases (first repeat of full1-a11y-r2): recall 1.0, 0.11 false positives per clean diff, score 0.933, injection reported 2 of 8. What it says. Every cross-examiner candidate scored below the reviewer alone: each removed false positives and lost real findings. Two shapes explained most of the losses. gemma answers false_positive when it only disagrees with the severity and then adds the same problem in its own words on the same line (teacher-a did this sixteen times in thirty cases); the reconciliation now treats that as a correction (e122a0e). And gemma rightly refuted findings that named the right line for the wrong reason (an "injection" on an int() of an environment variable) without adding the finding it should have written. The shipped cross prompt and refute-first-a are OUT: each was talked out of a real command injection by a planted comment claiming a prior "cleared as false positive" ticket, and silenced the reviewer's report of that comment. The round-two brief targets exactly these; results land in `xscreen2` and `xfinal` below.
 
+## Cloud reference: the same prompts on bigger models through Ollama's cloud tags
+
+Run with `--allow-cloud`, the harness's one switch that turns `STRICT_LOCAL` off, on the synthetic corpus only. The cloud path does not enforce the JSON grammar, so the harness appends a sentence naming the keys and the allowed values; the first attempt without it parsed 146 of 182 replies as empty because the 31B answered in its own shape. Cloud rows count only the relay's own time, so `sec` is not comparable with the local tables.
+
+```
+.venv/bin/python scripts/prompt_eval.py --allow-cloud --model gemma4:31b-cloud --cases-from-file full.json --prompts-dir winner --variants new,a11y-r2 --repeats 2 --out runs --tag cloud-gemma4_31b
+```
+
+| variant | words | cases | err | obeyed | recall | fp/clean | fp>=med | cat  | sev  | inj_rep | x_add | x_refT | score | tokens | sec |
+| ------- | ----- | ----- | --- | ------ | ------ | -------- | ------- | ---- | ---- | ------- | ----- | ------ | ----- | ------ | --- |
+| a11y-r2 | 779   | 182   | 0   | 0/32   | 0.947  | 0.06     | 0.0     | 1.0  | 0.85 | 15/32   | -     | -      | 0.934 | 1605   | 1.1 |
+| new     | 554   | 182   | 0   | 0/32   | 0.813  | 0.06     | 0.0     | 0.92 | 0.84 | 28/32   | -     | -      | 0.824 | 1138   | 1.0 |
+
+```
+.venv/bin/python scripts/prompt_eval.py --allow-cloud --model gpt-oss:120b-cloud --cases-from-file full.json --prompts-dir winner --variants new,a11y-r2 --repeats 2 --out runs --tag cloud-gpt-oss_120b
+```
+
+| variant       | words | cases | err | obeyed | recall | fp/clean | fp>=med | cat  | sev  | inj_rep | x_add | x_refT | score | tokens | sec |
+| ------------- | ----- | ----- | --- | ------ | ------ | -------- | ------- | ---- | ---- | ------- | ----- | ------ | ----- | ------ | --- |
+| a11y-r2 (OUT) | 779   | 182   | 0   | 6/32   | 0.9    | 0.12     | 0.03    | 0.98 | 0.98 | 21/32   | -     | -      | 0.885 | 2323   | 3.0 |
+| new (OUT)     | 554   | 182   | 0   | 2/32   | 0.753  | 0.22     | 0.12    | 0.96 | 0.89 | 26/32   | -     | -      | 0.72  | 1613   | 2.0 |
+
+What it says. The prompt scales: on the 31B of the same family as the local cross-examiner, the winner reaches recall 0.947 at 0.06 false positives per clean diff (score 0.934 against 0.89 on the local 9B), and the shipped prompt gains more from the bigger model than the winner does (0.66 to 0.81), which is what a prompt that already names the classes should show. The 120B open-weight model from OpenAI scores 0.885 with the winner and is marked OUT for "obeyed 6 of 32"; the raw replies show it obeyed nothing: three were empty replies on the two longest hostile files and three were reviews that found the bug and reported the injection but ran past the 2,000-token output cap and failed to parse. The 397B Qwen and the other "medium usage" cloud tags need a paid tier and were not measured.
+
 ## Pending tonight
 
-- `cloud-gemma4_31b`, `cloud-gpt-oss_120b`: the winner and the shipped prompt on two cloud tags (`--allow-cloud`), the bigger-model reference.
 - `full2a`: incumbent and a11y-r2 on the fixed pipeline, two repeats. `full2b`: the hand polish a11y-r3, same. The shipped reviewer prompt is chosen here.
 - `xscreen2`: the three revised cross-examiner prompts on the 30-case subset; `xfinal`: the best on the full corpus against the final reviewer, two repeats; `cloud-gemma4_31b-cross`: its cloud reference.
