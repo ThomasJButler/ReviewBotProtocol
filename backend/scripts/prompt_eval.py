@@ -69,6 +69,7 @@ from services.diff import locate_evidence, parse_patch  # noqa: E402
 from services.llm import build_chat_model, ollama_health  # noqa: E402
 from services.redaction import redact_text  # noqa: E402
 from tests.prompt_corpus import CASES, CASES_BY_KEY, SEVERITY_RANK, Case  # noqa: E402
+from tests.prompt_redteam import REDTEAM_CASES  # noqa: E402
 
 # The prompt shipped before the expert persona, kept verbatim so the
 # comparison is against what actually ran.
@@ -242,6 +243,8 @@ async def main() -> int:
     ap.add_argument("--cases", default="", help="comma-separated case keys; default all")
     ap.add_argument("--cases-from-stdin", action="store_true", help="read a JSON list of cases from stdin instead of the corpus")
     ap.add_argument("--cases-from-file", default=None, help="read a JSON list of cases from this file instead of the corpus")
+    ap.add_argument("--redteam", action="store_true", help="run the hostile red-team corpus (tests/prompt_redteam.py) instead of the planted one")
+    ap.add_argument("--all", action="store_true", help="run the planted corpus and the red-team corpus together")
     ap.add_argument("--cross-model", default=None, help="Ollama tag of the cross-examining model; enables the cross variants")
     ap.add_argument("--prompts-dir", default=None, help="directory of *.txt reviewer system prompts, one variant each")
     ap.add_argument("--cross-prompts-dir", default=None, help="directory of *.txt cross-examiner system prompts")
@@ -271,6 +274,10 @@ async def main() -> int:
             cat = d.get("expect_category", ("security",))
             d["expect_category"] = (cat,) if isinstance(cat, str) else tuple(cat)
             cases.append(Case(**d))
+    elif args.redteam:
+        cases = list(REDTEAM_CASES)
+    elif args.all:
+        cases = list(CASES) + list(REDTEAM_CASES)
     else:
         keys = [k for k in args.cases.split(",") if k]
         cases = [CASES_BY_KEY[k] for k in keys] if keys else list(CASES)

@@ -10,9 +10,12 @@ import pytest
 from services.diff import parse_patch
 from services.redaction import redact_text
 from tests.prompt_corpus import CASES, CASES_BY_KEY
+from tests.prompt_redteam import REDTEAM_CASES
+
+ALL_CASES = CASES + REDTEAM_CASES
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.key for c in CASES])
+@pytest.mark.parametrize("case", ALL_CASES, ids=[c.key for c in ALL_CASES])
 def test_ground_truth_lines_are_in_the_diff(case):
     parsed = parse_patch(case.patch)
     for line in case.expect + ((case.injection_line,) if case.injection_line else ()):
@@ -23,7 +26,7 @@ def test_ground_truth_lines_are_in_the_diff(case):
         assert case.expect and case.min_severity in ("medium", "high", "critical")
 
 
-@pytest.mark.parametrize("case", CASES, ids=[c.key for c in CASES])
+@pytest.mark.parametrize("case", ALL_CASES, ids=[c.key for c in ALL_CASES])
 def test_hunk_headers_add_up(case):
     header, *body = case.patch.rstrip("\n").split("\n")
     m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", header)
@@ -40,7 +43,14 @@ def test_key_case_is_redacted_before_the_model_sees_it():
     assert "AKIA" not in seen and "[REDACTED:aws-access-key]" in seen
 
 
-def test_no_token_shaped_literal_in_the_corpus_source():
-    src = Path(__file__).with_name("prompt_corpus.py").read_text()
+@pytest.mark.parametrize("name", ["prompt_corpus.py", "prompt_redteam.py"])
+def test_no_token_shaped_literal_in_the_corpus_source(name):
+    src = Path(__file__).with_name(name).read_text()
     assert not re.search(r"AKIA[0-9A-Z]{16}", src)
     assert not re.search(r"xox[abpr]-[0-9]{10}", src)
+
+
+def test_red_team_cases_carry_their_attack_and_safe_behaviour():
+    for case in REDTEAM_CASES:
+        assert case.attack and case.expected_safe_behaviour and case.injection_line >= 0, case.key
+        assert not case.clean and case.expect, case.key
