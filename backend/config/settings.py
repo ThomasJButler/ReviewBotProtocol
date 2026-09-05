@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     CROSS_EXAMINE_MODEL: str = ""  # a second model from a different family; empty means off
     CROSS_EXAMINE_MAX_CALLS_PER_REVIEW: int = 25  # one call per file
     CROSS_EXAMINE_KEEP_ALIVE: str = "30m"
+    # Run the two models one at a time: review every file, unload the reviewer, cross-examine every
+    # file, unload the cross-examiner. Only for machines that cannot hold both models at once.
+    CROSS_EXAMINE_SEQUENTIAL: bool = False
 
     LOCAL_API_TOKEN: str = ""
     STRICT_LOCAL: bool = True
@@ -110,7 +113,8 @@ class Settings(BaseSettings):
                 pass
         return v.replace("\\n", "\n")
 
-    @field_validator("DEBUG", "REVIEW_DRAFTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", mode="before")
+    @field_validator("DEBUG", "REVIEW_DRAFTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", "CROSS_EXAMINE_SEQUENTIAL",
+                     mode="before")
     @classmethod
     def parse_bool(cls, v):
         if isinstance(v, str):

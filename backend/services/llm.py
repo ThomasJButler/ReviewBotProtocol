@@ -11,7 +11,10 @@ from typing import Any, Dict, Optional
 import httpx
 from langchain_ollama import ChatOllama
 
+from config.logging import get_logger
 from config.settings import Settings
+
+logger = get_logger(__name__)
 
 
 def build_chat_model(settings: Settings, model: Optional[str] = None, keep_alive: Optional[str] = None) -> ChatOllama:
@@ -34,6 +37,22 @@ def build_cross_model(settings: Settings) -> Optional[ChatOllama]:
     if not settings.CROSS_EXAMINE_MODEL:
         return None
     return build_chat_model(settings, model=settings.CROSS_EXAMINE_MODEL, keep_alive=settings.CROSS_EXAMINE_KEEP_ALIVE)
+
+
+async def unload_model(settings: Settings, model: str) -> bool:
+    """Ask Ollama to drop a model now rather than at the end of its keep_alive,
+    so a machine that cannot hold the reviewer and the cross-examiner together
+    can run them one after the other. Same loopback server, no generation; a
+    failure is logged and ignored because an unload must never fail a review."""
+    base = settings.OLLAMA_BASE_URL.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{base}/api/generate", json={"model": model, "keep_alive": 0})
+            resp.raise_for_status()
+        return True
+    except Exception as e:  # noqa: BLE001 - reachability and HTTP errors alike; never CancelledError
+        logger.warning("could not unload model", model=model, error=type(e).__name__)
+        return False
 
 
 async def ollama_health(settings: Settings) -> Dict[str, Any]:

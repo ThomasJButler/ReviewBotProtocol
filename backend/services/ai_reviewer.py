@@ -75,6 +75,7 @@ class FileReviewResult:
     cross_refuted: int = 0  # findings the cross-examiner refuted
     cross_added: int = 0    # findings the cross-examiner added that survived postprocess
     redactions: Dict[str, int] = field(default_factory=dict)
+    patch: str = ""         # the redacted patch, kept so a later cross-examination phase can run on it
 
 
 def _content_text(content: Any) -> str:
@@ -239,6 +240,29 @@ class FileReviewer:
         self.cross_model_name = str(getattr(cross_llm, "model", "") or "cross-examiner") if cross_llm is not None else ""
         self.cross_chain = (cross_prompt_template | cross_llm.bind(format=cross_schema())) if cross_llm is not None else None
         self.cross_budget = settings.CROSS_EXAMINE_MAX_CALLS_PER_REVIEW  # shared across every file of one review
+        # review_file cross-examines each file as it goes; the workflow switches this off when it
+        # runs the two models one at a time and calls cross_examine_file itself in a second phase
+        self.cross_inline = True
+
+    @property
+    def cross_enabled(self) -> bool:
+        return self.cross_chain is not None
+
+    async def cross_examine_file(self, result: FileReviewResult) -> FileReviewResult:
+        """The second model's pass over one finished file review, applied in place:
+        the reconciled review, the counts and the tokens land on the result."""
+        if self.cross_chain is None or result.error:
+            return result
+        started = time.perf_counter()
+        result.review, refuted, added, calls, c_in, c_out = await self.cross_examine(
+            result.review, result.patch, result.filename, result.language)
+        result.cross_refuted += refuted
+        result.cross_added += added
+        result.cross_calls += calls
+        result.prompt_tokens += c_in
+        result.output_tokens += c_out
+        result.duration_seconds += time.perf_counter() - started
+        return result
 
     async def cross_examine(self, review: AnnotatedFileReview, patch: str, filename: str, language: str
                             ) -> Tuple[AnnotatedFileReview, int, int, int, int, int]:
@@ -397,21 +421,17 @@ class FileReviewer:
         first, dropped = postprocess(first, patch, self.settings.MIN_FINDING_CONFIDENCE)
         review = annotate(first, self.model_name)
         usage = getattr(message, "usage_metadata", None) or {}
-        prompt_tokens = int(usage.get("input_tokens") or 0)
-        output_tokens = int(usage.get("output_tokens") or 0)
-        cross_refuted = cross_added = cross_calls = 0
-        if self.cross_chain is not None:
-            review, cross_refuted, cross_added, cross_calls, c_in, c_out = await self.cross_examine(review, patch, filename, language)
-            prompt_tokens += c_in
-            output_tokens += c_out
-        refuted = verify_calls = 0
-        if self.verify_enabled and review.findings:
-            review, refuted, verify_calls, v_in, v_out = await self._verify(review, patch, filename, language)
-            prompt_tokens += v_in
-            output_tokens += v_out
-        return FileReviewResult(
+        result = FileReviewResult(
             filename=filename, language=language, status=status, review=review, dropped=dropped, parse_ok=ok,
-            prompt_tokens=prompt_tokens, output_tokens=output_tokens,
-            duration_seconds=time.perf_counter() - started, refuted=refuted, verify_calls=verify_calls,
-            cross_calls=cross_calls, cross_refuted=cross_refuted, cross_added=cross_added,
+            prompt_tokens=int(usage.get("input_tokens") or 0), output_tokens=int(usage.get("output_tokens") or 0),
+            patch=patch,
         )
+        if self.cross_inline:
+            await self.cross_examine_file(result)
+        if self.verify_enabled and result.review.findings:
+            result.review, result.refuted, result.verify_calls, v_in, v_out = await self._verify(
+                result.review, patch, filename, language)
+            result.prompt_tokens += v_in
+            result.output_tokens += v_out
+        result.duration_seconds = time.perf_counter() - started
+        return result
