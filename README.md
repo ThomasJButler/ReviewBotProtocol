@@ -40,6 +40,14 @@ Three checks, all in the repository:
 - `REVIEWBOT_E2E=1 pytest -m e2e` reviews one diff with the real Ollama and model on your machine under the same guard (no GitHub involved). It is skipped by default and never runs in CI.
 - `scripts/prove-local.sh` builds a container with the backend, Ollama and a small model, then runs one review with `docker run --network none`. The entrypoint first proves the container has only a loopback interface and no route out. The result is printed, not recorded anywhere; it was last run by hand on 2026-09-03 and passed.
 
+## What it is for
+
+A review from this bot is meant to be a stopping point, not another thing to scroll past. AI-assisted development moves faster than understanding, and the hardest part is staying on top of what your own project now contains. So the review is short enough to read whole, each file's summary says what the change does before what is wrong with it, every finding says why the line is a problem, what a senior engineer would write instead and which rule it comes from, and where the two models disagree the review shows both positions rather than picking one for you. Lazy about the solution, never about reading (a line borrowed from ponytail).
+
+Three habits make it a teacher rather than a crutch: read the diff and predict the findings before you open the review; when the reviewer and the cross-examiner disagree, decide who is right before asking either of them why; and when a finding shows the senior version of a line, type the change yourself rather than pasting it.
+
+What is unusual here, as of a survey on 2026-09-04 (a snapshot; this market changes monthly): self-hosted review on a local model is common, and so are secret redaction, a verification pass and a chat with the reviewer. Nothing found combines a runnable proof that nothing leaves the machine, two model families cross-examining each other with the disagreement shown and every finding's provenance recorded, a prompt that ships only when a planted-diff harness says it beats the incumbent, and learning as the goal. Each of those is checkable in this repository; none of them is a promise.
+
 ## Quick start
 
 You need Python 3.13, Node 22, Ollama, and a GitHub App you own.
