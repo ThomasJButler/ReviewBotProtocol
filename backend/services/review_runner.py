@@ -29,7 +29,8 @@ SKIP_LANGUAGES = {"unknown", "markdown", "text", "rst"}
 SKIP_DIRS = ("node_modules/", "vendor/", "dist/", "build/", ".next/", "__pycache__/")
 LOCK_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Pipfile.lock", "Cargo.lock", "go.sum", "composer.lock", "Gemfile.lock"}
 BYTES_PER_TOKEN = 2.8          # conservative for code
-PROMPT_OVERHEAD_TOKENS = 700   # system prompt, schema and framing
+PROMPT_OVERHEAD_TOKENS = 1400  # system prompt, schema and framing: measured up to 1206 on 2026-09-06
+                               # for the 699-word prompt (scripts/prompt_overhead.py), with headroom
 CLEANUP_SECONDS = 15
 
 

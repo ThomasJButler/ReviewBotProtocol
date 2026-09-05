@@ -19,10 +19,15 @@ from tests.prompt_corpus import CASES_BY_KEY  # noqa: E402
 
 from tests.prompt_corpus import CASES, SEVERITY_RANK  # noqa: E402
 
-# The floor is what the model actually does: the eleven original planted cases, every one cleared by
-# qwen3.5:9b on 2026-09-04 (two repeats). The 2026-09-05 cases join once the measured prompt ships.
-FLOOR_CASES = tuple(c.key for c in CASES if not c.clean
-                    and not c.key.startswith(("owasp_", "wcag_", "practice_", "holdout_")))
+# The floor is what the model actually does: every planted case the shipped prompt cleared in all four
+# repeats on qwen3.5:9b on 2026-09-05 and 2026-09-06 (docs/benchmarks/2026-09-05-prompt-refinement.md,
+# runs full2b and full2c). The seven it did not clear every time stay out until a measured prompt
+# clears them; the floor only moves up.
+NOT_YET_CLEARED = {
+    "practice_copy_pasted_validator", "wcag_carousel_no_pause", "wcag_html_no_lang", "wcag_low_contrast_text",
+    "wcag_no_autocomplete", "wcag_status_not_announced", "wcag_target_size_16px",
+}
+FLOOR_CASES = tuple(c.key for c in CASES if not c.clean and c.key not in NOT_YET_CLEARED)
 
 
 @pytest.fixture(scope="module")
