@@ -14,6 +14,13 @@ Usage, from backend/ with the venv:
     .venv/bin/python scripts/prompt_eval.py --cases-from-stdin < hostile.json --json
     .venv/bin/python scripts/prompt_eval.py --cross-model gemma4:12b --variants new,cross
     .venv/bin/python scripts/prompt_eval.py --prompts-dir candidates/ --out results/ --tag round1
+    .venv/bin/python scripts/prompt_eval.py --all --variants new --out results/ --tag pass1 --unload
+    .venv/bin/python scripts/prompt_eval.py --all --replay results/pass1-new.json --cross-model gemma4:12b \
+        --cross-prompts-dir cross/ --out results/ --tag pass2 --unload
+
+The last two lines are the one-model-at-a-time recipe: review everything with the
+reviewer model and unload it, then replay those replies through the cross-examiner
+(or a verifier) with only its model loaded. A 32 GB machine cannot hold both.
 
 Candidate prompts: --prompts-dir loads every *.txt as a reviewer system prompt (one
 variant per file, named after the file), --cross-prompts-dir and --verify-prompts-dir
@@ -60,6 +67,9 @@ for _key, _value in (("GITHUB_APP_ID", "1"), ("GITHUB_PRIVATE_KEY", _THROWAWAY_K
 import logging  # noqa: E402
 
 from langchain_core.callbacks import BaseCallbackHandler  # noqa: E402
+from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E402
+from langchain_core.messages import AIMessage, BaseMessage  # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
 from langchain_core.prompts import ChatPromptTemplate  # noqa: E402
 
 from config.settings import Settings  # noqa: E402
@@ -68,6 +78,7 @@ from services.ai_reviewer import FileReviewer, parse_file_review  # noqa: E402
 from services.diff import locate_evidence, parse_patch  # noqa: E402
 from services.llm import build_chat_model, ollama_health  # noqa: E402
 from services.redaction import redact_text  # noqa: E402
+from services.schemas import verdict_schema  # noqa: E402
 from tests.prompt_corpus import CASES, CASES_BY_KEY, SEVERITY_RANK, Case  # noqa: E402
 from tests.prompt_redteam import REDTEAM_CASES  # noqa: E402
 
@@ -125,6 +136,56 @@ class Recorder(BaseCallbackHandler):
             self.texts.append(msg.content if msg is not None else gen.text)
         except (IndexError, AttributeError):
             self.texts.append("")
+
+
+class ReplayChatModel(BaseChatModel):
+    """Answers the reviewer call with the reply a previous --out run recorded for
+    the same case, so a cross-examiner or verifier can be measured with only its
+    own model loaded. One model resident at a time is what a 32 GB laptop needs:
+    review everything with model A, unload it, then judge with model B."""
+
+    model: str
+    texts: Dict[str, List[str]]  # case key -> the reviewer's raw reply, one per repeat
+    key: str = ""
+    repeat: int = 0
+
+    def _generate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None,
+                  run_manager: Any = None, **kwargs: Any) -> ChatResult:
+        options = self.texts[self.key]
+        content = options[min(self.repeat, len(options) - 1)]
+        msg = AIMessage(content=content, usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+        return ChatResult(generations=[ChatGeneration(message=msg)])
+
+    @property
+    def _llm_type(self) -> str:
+        return "replay"
+
+
+def load_replay(path: str) -> Tuple[Dict[str, Any], Dict[str, List[str]], Dict[str, List[Dict[str, Any]]]]:
+    """The run file, the reviewer's first reply per case and repeat, and the rows
+    themselves (their tokens and seconds are added back so a replayed variant
+    still reports the cost of the whole pipeline)."""
+    run = json.loads(Path(path).read_text(encoding="utf-8"))
+    texts: Dict[str, List[str]] = {}
+    rows: Dict[str, List[Dict[str, Any]]] = {}
+    for r in run["rows"]:
+        first = (r.get("model_texts") or [""])[0]
+        texts.setdefault(r["case"], []).append(first)
+        rows.setdefault(r["case"], []).append(r)
+    return run, texts, rows
+
+
+async def unload_models(settings: Settings, models: List[str]) -> None:
+    """Ask Ollama to drop the models now rather than at the end of keep_alive."""
+    import httpx
+
+    async with httpx.AsyncClient(base_url=settings.OLLAMA_BASE_URL, timeout=30) as client:
+        for model in models:
+            try:
+                await client.post("/api/generate", json={"model": model, "keep_alive": 0})
+                print(f"unloaded {model}")
+            except httpx.HTTPError as exc:
+                print(f"could not unload {model}: {exc}", file=sys.stderr)
 
 
 def _settings(model: Optional[str]) -> Settings:
@@ -194,6 +255,8 @@ async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_c
         "seconds": round(result.duration_seconds, 1),
         "summary": result.review.summary[:160],
         "kept_lines": [(f.line, f.severity.value, f.category.value, f.title[:60]) for f in kept],
+        # every raw model reply for this case, reviewer first, so a reader can judge the wording
+        "model_texts": [t[:8000] for t in recorder.texts[before:]],
     }
     return row
 
@@ -253,6 +316,10 @@ async def main() -> int:
     ap.add_argument("--out", default=None, help="directory to write one JSON per variant as it finishes")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--model", default=None)
+    ap.add_argument("--replay", default=None,
+                    help="a --out JSON from a reviewer-only run: reuse its recorded replies instead of calling the "
+                         "reviewer model, so only the cross-examiner or verifier model is loaded")
+    ap.add_argument("--unload", action="store_true", help="ask Ollama to drop every model this run used when it finishes")
     ap.add_argument("--json", action="store_true", help="print all rows and summaries as JSON at the end")
     args = ap.parse_args()
 
@@ -282,7 +349,17 @@ async def main() -> int:
         keys = [k for k in args.cases.split(",") if k]
         cases = [CASES_BY_KEY[k] for k in keys] if keys else list(CASES)
 
-    llm = build_chat_model(settings)
+    replay_run = replay_rows = None
+    if args.replay:
+        replay_run, replay_texts, replay_rows = load_replay(args.replay)
+        missing = sorted({c.key for c in cases} - set(replay_texts))
+        if missing:
+            print(f"--replay file has no reply for: {', '.join(missing)}", file=sys.stderr)
+            return 2
+        llm: Any = ReplayChatModel(model=replay_run["model"], texts=replay_texts)
+        print(f"replaying the reviewer replies of variant {replay_run['variant']} from {args.replay}")
+    else:
+        llm = build_chat_model(settings)
     recorder = Recorder()
     llm.callbacks = [recorder]
     cross_llm = None
@@ -312,6 +389,7 @@ async def main() -> int:
 
     all_rows: Dict[str, List[Dict[str, Any]]] = {}
     summaries: Dict[str, Dict[str, Any]] = {}
+    live_reviewer: Any = None  # built only when a replayed run still needs the reviewer model for a verify pass
     for variant in [v for v in args.variants.split(",") if v]:
         spec = VARIANTS[variant]
         if spec.get("cross") and cross_llm is None:
@@ -325,20 +403,47 @@ async def main() -> int:
         if spec.get("verifier_prompt") is not None:
             kwargs["verifier_prompt"] = spec["verifier_prompt"]
         reviewer = FileReviewer(llm, settings, **kwargs)
+        if replay_run is not None and spec.get("verify"):
+            # the verify pass is a live call to the reviewer model; only the review itself is replayed
+            if live_reviewer is None:
+                live_reviewer = build_chat_model(settings)
+                live_reviewer.callbacks = [recorder]
+            reviewer.verify_chain = reviewer.verifier_prompt | live_reviewer.bind(format=verdict_schema())
         rows: List[Dict[str, Any]] = []
         for case in cases:
-            for _ in range(args.repeats):
-                rows.append(await run_case(reviewer, recorder, case, settings.MIN_FINDING_CONFIDENCE,
-                                           cross_model=args.cross_model or "" if spec.get("cross") else ""))
+            for i in range(args.repeats):
+                if replay_rows is not None:
+                    llm.key, llm.repeat = case.key, i
+                row = await run_case(reviewer, recorder, case, settings.MIN_FINDING_CONFIDENCE,
+                                     cross_model=args.cross_model or "" if spec.get("cross") else "")
+                if replay_rows is not None:
+                    # the replayed reviewer cost nothing here; add back what it cost when it ran
+                    source = replay_rows[case.key][min(i, len(replay_rows[case.key]) - 1)]
+                    row["prompt_tokens"] += source["prompt_tokens"]
+                    row["output_tokens"] += source["output_tokens"]
+                    row["seconds"] = round(row["seconds"] + source["seconds"], 1)
+                rows.append(row)
         all_rows[variant] = rows
         summaries[variant] = summarise(rows)
         _print_rows(variant, rows)
         if args.out:
             system_text = spec["prompt"].messages[0].prompt.template if hasattr(spec["prompt"].messages[0], "prompt") else ""
-            Path(args.out, f"{args.tag}-{variant.replace(':', '_').replace('+', '_')}.json").write_text(json.dumps({
-                "model": settings.OLLAMA_MODEL, "cross_model": args.cross_model if spec.get("cross") else None,
-                "variant": variant, "prompt_words": len(system_text.split()), "rows": rows, "summary": summaries[variant]},
-                indent=1), encoding="utf-8")
+            out = {
+                "model": replay_run["model"] if replay_run else settings.OLLAMA_MODEL,
+                "cross_model": args.cross_model if spec.get("cross") else None,
+                "variant": variant, "prompt_words": len(system_text.split()), "rows": rows, "summary": summaries[variant],
+            }
+            if replay_run:
+                out["replayed_from"] = {"file": str(args.replay), "variant": replay_run["variant"],
+                                        "prompt_words": replay_run.get("prompt_words")}
+                out["prompt_words"] = replay_run.get("prompt_words")
+            Path(args.out, f"{args.tag}-{variant.replace(':', '_').replace('+', '_')}.json").write_text(
+                json.dumps(out, indent=1), encoding="utf-8")
+
+    if args.unload:
+        live = ([settings.OLLAMA_MODEL] if (replay_run is None or live_reviewer is not None) else [])
+        live += [args.cross_model] if args.cross_model else []
+        await unload_models(settings, live)
 
     print("\n== summary ==")
     keys = list(next(iter(summaries.values())).keys())
