@@ -131,3 +131,6 @@ WHERE_I_LEFT_OFF*.md
 
 # Temporary todo files
 claudetodo.txt
+
+# hands-on run logs from scripts/dev-up.sh
+.dev-logs/
