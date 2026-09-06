@@ -110,5 +110,13 @@ def verdict_schema() -> dict:
     return Verdict.model_json_schema()
 
 
-def cross_schema() -> dict:
-    return CrossExamination.model_json_schema()
+def cross_schema(note_first: bool = False) -> dict:
+    """The cross-examiner's grammar. With note_first the summary_note comes before
+    the verdicts, the same scratchpad-first order the review schema uses; the
+    order is the order the model writes in, so it is measured, not assumed."""
+    schema = CrossExamination.model_json_schema()
+    if note_first:
+        props = schema["properties"]
+        schema["properties"] = {"summary_note": props["summary_note"], **{k: v for k, v in props.items() if k != "summary_note"}}
+        schema["required"] = ["summary_note"] + [k for k in schema["required"] if k != "summary_note"]
+    return schema

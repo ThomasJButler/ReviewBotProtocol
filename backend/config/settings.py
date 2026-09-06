@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # Run the two models one at a time: review every file, unload the reviewer, cross-examine every
     # file, unload the cross-examiner. Only for machines that cannot hold both models at once.
     CROSS_EXAMINE_SEQUENTIAL: bool = False
+    # The cross-examiner writes its summary_note before its verdicts (scratchpad first, as the review
+    # schema does). Measured either way by scripts/prompt_eval.py --cross-note-first; see docs/benchmarks.
+    CROSS_EXAMINE_NOTE_FIRST: bool = False
 
     LOCAL_API_TOKEN: str = ""
     STRICT_LOCAL: bool = True
@@ -114,7 +117,7 @@ class Settings(BaseSettings):
         return v.replace("\\n", "\n")
 
     @field_validator("DEBUG", "REVIEW_DRAFTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", "CROSS_EXAMINE_SEQUENTIAL",
-                     mode="before")
+                     "CROSS_EXAMINE_NOTE_FIRST", mode="before")
     @classmethod
     def parse_bool(cls, v):
         if isinstance(v, str):

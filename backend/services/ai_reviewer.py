@@ -227,7 +227,7 @@ class FileReviewer:
     def __init__(self, llm: BaseChatModel, settings: Settings, prompt=review_prompt,
                  verifier_prompt=verify_prompt, verify: Optional[bool] = None,
                  cross_llm: Optional[BaseChatModel] = None, cross_prompt_template=cross_prompt,
-                 model_name: Optional[str] = None):
+                 model_name: Optional[str] = None, cross_note_first: Optional[bool] = None):
         self.settings = settings
         self.prompt = prompt
         self.verifier_prompt = verifier_prompt
@@ -238,7 +238,8 @@ class FileReviewer:
         self.model_name = model_name or str(getattr(llm, "model", "") or "reviewer")
         self.cross_prompt = cross_prompt_template
         self.cross_model_name = str(getattr(cross_llm, "model", "") or "cross-examiner") if cross_llm is not None else ""
-        self.cross_chain = (cross_prompt_template | cross_llm.bind(format=cross_schema())) if cross_llm is not None else None
+        note_first = settings.CROSS_EXAMINE_NOTE_FIRST if cross_note_first is None else cross_note_first
+        self.cross_chain = (cross_prompt_template | cross_llm.bind(format=cross_schema(note_first=note_first))) if cross_llm is not None else None
         self.cross_budget = settings.CROSS_EXAMINE_MAX_CALLS_PER_REVIEW  # shared across every file of one review
         # review_file cross-examines each file as it goes; the workflow switches this off when it
         # runs the two models one at a time and calls cross_examine_file itself in a second phase

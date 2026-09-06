@@ -355,6 +355,8 @@ async def main() -> int:
                     help="a --out JSON from a reviewer-only run: reuse its recorded replies instead of calling the "
                          "reviewer model, so only the cross-examiner or verifier model is loaded")
     ap.add_argument("--unload", action="store_true", help="ask Ollama to drop every model this run used when it finishes")
+    ap.add_argument("--cross-note-first", action="store_true",
+                    help="bind the cross-examiner schema with summary_note before the verdicts (the scratchpad-first order)")
     ap.add_argument("--allow-cloud", action="store_true",
                     help="permit an Ollama cloud tag (name ending -cloud) for a bigger-model reference run of the synthetic "
                          "corpus; the prompts leave this machine for ollama.com, so never point it at real code")
@@ -445,6 +447,7 @@ async def main() -> int:
         kwargs: Dict[str, Any] = {"prompt": spec["prompt"], "verify": spec.get("verify", False)}
         if spec.get("cross"):
             kwargs["cross_llm"] = cross_llm
+            kwargs["cross_note_first"] = args.cross_note_first
         if spec.get("cross_prompt") is not None:
             kwargs["cross_prompt_template"] = spec["cross_prompt"]
         if spec.get("verifier_prompt") is not None:
