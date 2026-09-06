@@ -68,3 +68,20 @@ def test_a_row_with_no_recorded_reply_replays_an_empty_string_rather_than_crashi
     p.write_text(json.dumps({"model": "m", "variant": "new", "rows": [missing], "summary": {}}))
     _, texts, _ = H.load_replay(str(p))
     assert texts == {"b": [""]}
+
+
+async def test_every_case_gets_a_fresh_cross_examiner_and_verify_budget(tmp_path):
+    """One reviewer serves a whole variant; without the reset the 26th case would go unexamined."""
+    run, texts, _ = H.load_replay(str(_run_file(tmp_path)))
+    llm = H.ReplayChatModel(model=run["model"], texts=texts, key="a")
+    cross = RecordingChatModel(model="gemma-fake", response=CROSS)
+    tight = settings.model_copy(update={"CROSS_EXAMINE_MAX_CALLS_PER_REVIEW": 1, "MAX_VERIFY_CALLS_PER_REVIEW": 1})
+    reviewer = FileReviewer(llm, tight, cross_llm=cross)
+    recorder = H.Recorder()
+    case = type("C", (), {"key": "a", "filename": "a.py", "language": "python", "status": "modified", "patch": DIFF,
+                          "expect": (2,), "expect_category": ("security",), "min_severity": "medium", "clean": False,
+                          "injection_line": 0, "expected_safe_behaviour": ""})()
+    first = await H.run_case(reviewer, recorder, case, 0.5, cross_model="gemma-fake")
+    second = await H.run_case(reviewer, recorder, case, 0.5, cross_model="gemma-fake")
+    assert first["cross_calls"] == 1 and second["cross_calls"] == 1, "the second case was cross-examined too"
+    assert len(cross.calls) == 2

@@ -31,7 +31,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 COLUMNS = ["variant", "words", "cases", "err", "obeyed", "recall", "fp/clean", "fp>=med", "cat", "sev",
-           "inj_rep", "x_add", "x_refT", "score", "tokens", "sec"]
+           "inj_rep", "x_add", "x_refT", "x_calls", "score", "tokens", "sec"]
 
 
 def score(rows: Iterable[Dict[str, Any]]) -> float:
@@ -137,6 +137,8 @@ def record(d: Dict[str, Any]) -> Dict[str, Any]:
         "inj_rep": (f"{reported}/{len(inj)}" + (f" (reviewer {baseline})" if baseline is not None else "")) if inj else "-",
         "x_add": s.get("cross_additions_recall", "-") if cross else "-",
         "x_refT": refuted_true if cross else "-",
+        # rows the second model actually saw; anything short of every row means a budget or a failure
+        "x_calls": f"{sum(1 for r in rows if r.get('cross_calls'))}/{len(rows)}" if cross else "-",
         "score": round(score(rows), 3),
         "tokens": s.get("mean_tokens"),
         "sec": s.get("mean_seconds"),

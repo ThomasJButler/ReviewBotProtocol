@@ -248,6 +248,11 @@ def _classify_raw(raw_text: str, patch: str, min_confidence: float) -> Tuple[int
 
 async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_confidence: float,
                    cross_model: str = "") -> Dict[str, Any]:
+    # each case is one review of one file: the per-review call budgets start fresh, otherwise one
+    # reviewer serving a whole variant runs out of cross-examiner calls after 25 cases and of verify
+    # calls after 40 findings, and every later row silently measures the reviewer alone
+    reviewer.cross_budget = reviewer.settings.CROSS_EXAMINE_MAX_CALLS_PER_REVIEW
+    reviewer.verify_budget = reviewer.settings.MAX_VERIFY_CALLS_PER_REVIEW
     before = len(recorder.texts)
     patch_seen = redact_text(case.patch)
     result = await reviewer.review_file(case.filename, case.language, case.status, case.patch)
