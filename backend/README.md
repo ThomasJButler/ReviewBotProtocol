@@ -95,10 +95,10 @@ Measured on qwen3.5:9b on 2026-09-05, two repeats, on the fixed pipeline: the sh
 All routes need `Authorization: Bearer <LOCAL_API_TOKEN>`. With no token configured they answer 503.
 
 - `GET /api/reviews?repository=&limit=&offset=`
-- `GET /api/reviews/{id}`
+- `GET /api/reviews/{id}` (a running review carries `progress`: phase, files done, files total, current file)
 - `POST /api/reviews/{id}/feedback` with `{"useful": true | false | null}`
 - `GET /api/deliveries?limit=`
-- `GET /api/status` (Ollama reachability and loaded models, queue depth, database, limits)
+- `GET /api/status` (Ollama reachability and loaded models, queue depth and the current job with its progress, database, limits)
 
 `GET /health` is public and returns only `{"status": "ok", "version": ...}`.
 

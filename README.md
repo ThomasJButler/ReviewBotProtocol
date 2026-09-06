@@ -11,7 +11,7 @@ Built by Tom Butler as a demonstration of private, local AI: AI you own rather t
 3. Secret-bearing files are skipped outright. Every other patch is redacted (API keys, tokens, private keys, passwords, encryption and signing keys) before a model sees it.
 4. One structured call per file to a local Ollama model, prompted as a specialist security reviewer rather than a general assistant. The diff sits inside a delimited data block the model is told is untrusted, and an instruction planted in the diff is treated as a finding to report, not an order to follow. The answer must fit a fixed JSON schema and findings that quote lines not in the diff are dropped. Optionally a second model from a different family cross-examines each file's review, refuting false positives and adding what the first model missed, with every finding recording which model raised it and where the two disagreed.
 5. One review is posted to the PR (a comment review, never an approval), sanitised so the model cannot inject HTML, off-site links or mentions, with a footer naming the model.
-6. The dashboard shows what was reviewed, what was said, and lets you mark each review useful or not.
+6. The dashboard shows what was reviewed, what was said, which file a running review is on, and lets you mark each review useful or not.
 
 ## What it deliberately does not do
 
@@ -49,6 +49,16 @@ Three habits make it a teacher rather than a crutch: read the diff and predict t
 The prompts were engineered with Claude Fable 5.1 for use with non-frontier local models: a frontier model spent a night and a day writing planted diffs, drafting candidate prompts, reading the small models' raw replies and fixing what it found, and what ships is about 700 words of plain text and a JSON schema that a 9B model runs on a laptop. Every number that claim rests on is in docs/benchmarks/, with the command that produced it, and docs/PROMPT_DESIGN.md says where each rule in the prompts comes from.
 
 What is unusual here, as of a survey on 2026-09-04 (a snapshot; this market changes monthly): self-hosted review on a local model is common, and so are secret redaction, a verification pass and a chat with the reviewer. Nothing found combines a runnable proof that nothing leaves the machine, two model families cross-examining each other with the disagreement shown and every finding's provenance recorded, a prompt that ships only when a planted-diff harness says it beats the incumbent, and learning as the goal. Each of those is checkable in this repository; none of them is a promise.
+
+## See it in action
+
+The hands-on test plan was run against a public scratch repository on 2026-09-06 and the pull requests are left open as examples of what the bot posts:
+
+- [PR 1, the planted pull request](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/1): an SQL injection, two made-up keys, an instruction planted in a comment, a command injection, a `.env` file, a minified bundle and a rename. Four reviews, one per push; the last cross-examined by `gemma4:12b`.
+- [PR 2, opened as a draft](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/2): skipped until it was marked ready, then reviewed with no findings.
+- [PR 3, thirty files](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/3): twenty-five reviewed, five listed as over the cap.
+
+What each scenario expected and what happened is in docs/TEST_PLAN.md, section 8.
 
 ## Quick start
 
