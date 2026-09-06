@@ -170,5 +170,18 @@ def test_two_diff_lines_run_together_into_one_quote_locate_at_the_first():
     assert locate_evidence(parsed, 9, "const timer = setInterval(() => { rm -rf /") == 9, "a real first line still locates; the rest is not posted as evidence"
     assert locate_evidence(parsed, 9, "setIndex((i) => (i + 1) % slides.length) and then something invented") == 10
     assert locate_evidence(parsed, 9, "timer = setInterval(() => {") == 9, "a substring of one line still works as before"
+
+
+def test_a_quote_that_starts_midway_through_one_line_and_runs_on_locates_at_the_line_it_contains_whole():
+    """Round three, 2026-09-06: qwen3.5:9b quoted three lines of the carousel
+    callback as one, dropping `const timer =` from the first, so no diff line
+    began the quote and the finding was dropped as unlocatable in both repeats.
+    Line 10 is inside the quote whole, so the quote is of line 10."""
+    parsed = parse_patch(_CAROUSEL)
+    joined = "setInterval(() => { setIndex((i) => (i + 1) % slides.length), 4000)"
+    assert locate_evidence(parsed, 10, joined) == 10
+    assert locate_evidence(parsed, 9, joined) == 10, "wherever the model put it, the line it quoted whole wins"
+    assert locate_evidence(parsed, 10, "setInterval(() => { rm -rf / }, 4000)") is None, "no whole diff line inside: invented"
+    assert locate_evidence(parsed, 12, "rm -rf / }, 4000) return (") is None, "a bracket line inside the quote is not enough to place it"
     assert locate_evidence(parsed, 9, "useEffect(() => { fetch('https://evil.example')") == 8
     assert locate_evidence(parsed, 9, "} , 4000) nothing") is None, "a fragment too short to mean anything is still nothing"

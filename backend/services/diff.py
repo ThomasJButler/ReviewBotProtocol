@@ -84,6 +84,7 @@ def _substantial(ev: str) -> bool:
 
 
 NEAR_COPY_PREFIX = 24
+INNER_LINE_TOKENS = 3  # a line quoted whole inside a longer quote must say this much to count
 
 
 def _near_copy(quoted: str, actual: str) -> bool:
@@ -136,10 +137,15 @@ def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[in
         for at, texts in parsed.removed_lines.items():
             if any(f in _norm(t) or _near_copy(f, _norm(t)) for f in forms for t in texts):
                 return parsed.replacement_line(at)
-        # a model that runs two diff lines together into one quote (`setInterval(() => { setIndex(...`)
-        # has still quoted a real line: the whole first one. Locate at that line.
+        # a model that runs several diff lines together into one quote (`setInterval(() => { setIndex(...`)
+        # has still quoted a real line whole: the line the quote begins with, or, when the quote
+        # begins mid-way through a line (`const timer =` dropped from a callback's opening), a line
+        # that sits inside the quote whole and says enough to be more than a closing bracket.
         candidates = [no for no, text in parsed.new_lines.items()
                       if _substantial(_norm(text)) and any(f.startswith(_norm(text)) for f in forms)]
+        if not candidates:
+            candidates = [no for no, text in parsed.new_lines.items()
+                          if len(_TOKENS.findall(_norm(text))) >= INNER_LINE_TOKENS and any(_norm(text) in f for f in forms)]
     if not candidates:
         return None
     added = [no for no in candidates if no in parsed.added_lines]
