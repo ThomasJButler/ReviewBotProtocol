@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 
 import { refreshReviews } from '@/app/actions'
+import { AutoRefresh } from '@/components/auto-refresh'
 import { BackendAlert } from '@/components/backend-alert'
 import { RepositoryFilter } from '@/components/repository-filter'
 import { ReviewsTable } from '@/components/reviews-table'
@@ -32,8 +33,15 @@ export default async function ReviewsPage({
     getStatus(),
   ])
 
+  const running =
+    reviews.ok && reviews.data.items.some(r => r.status === 'running')
+
   return (
     <div className="space-y-8">
+      {/* Keep the list moving while a review is in flight, and pick up new
+          rows at a gentler pace the rest of the time. */}
+      <AutoRefresh interval={running ? 2000 : 10_000} />
+
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight">Reviews</h1>
         <p className="text-muted-foreground">

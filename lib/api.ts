@@ -13,6 +13,16 @@ export interface SkippedFile {
   reason: string
 }
 
+/** How far a running review has got. `done` counts the files finished in that
+ * phase, `total` the files in the review, `file` the one being read right now.
+ * Null on reviews that ran before the backend reported any of this. */
+export interface ReviewProgress {
+  phase: 'review' | 'cross-examine' | 'done'
+  done: number
+  total: number
+  file: string | null
+}
+
 export interface Review {
   id: string
   repository: string
@@ -21,6 +31,7 @@ export interface Review {
   head_sha: string | null
   is_fork: boolean
   status: string
+  progress?: ReviewProgress | null
   model: string | null
   cross_model: string | null
   cross_added: number
@@ -96,7 +107,12 @@ export interface Status {
     depth: number
     alive: boolean
     abandoned: number
-    current: { repository: string; pr_number: number; head_sha: string } | null
+    current: {
+      repository: string
+      pr_number: number
+      head_sha: string
+      progress?: ReviewProgress | null
+    } | null
   }
   limits: {
     max_files_per_review: number

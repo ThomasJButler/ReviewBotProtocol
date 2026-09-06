@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ThumbsDown, ThumbsUp } from 'lucide-react'
 
+import { filesDone, visibleProgress } from '@/components/review-progress'
 import { ReviewStatusBadge } from '@/components/severity-badge'
 import {
   Table,
@@ -23,6 +24,18 @@ function Useful({ useful }: { useful: boolean | null }) {
     <span className="inline-flex items-center gap-1.5">
       <Icon aria-hidden="true" className="size-3.5" />
       {useful ? 'Useful' : 'Not useful'}
+    </span>
+  )
+}
+
+/** How far a running review has got, in the words the badge leaves out. */
+function RunningCount({ review }: { review: Review }) {
+  const progress = visibleProgress(review.status, review.progress)
+  if (!progress) return null
+  return (
+    <span className="ml-1.5 text-xs tabular-nums text-muted-foreground">
+      {filesDone(progress)}/{progress.total}
+      <span className="sr-only"> files done</span>
     </span>
   )
 }
@@ -126,8 +139,9 @@ export function ReviewsTable({
               <TableCell className="whitespace-nowrap">
                 <Useful useful={review.useful} />
               </TableCell>
-              <TableCell>
+              <TableCell className="whitespace-nowrap">
                 <ReviewStatusBadge status={review.status} />
+                <RunningCount review={review} />
               </TableCell>
             </TableRow>
           ))}

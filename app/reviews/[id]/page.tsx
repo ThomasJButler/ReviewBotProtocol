@@ -2,9 +2,14 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, ExternalLink } from 'lucide-react'
 
+import { AutoRefresh } from '@/components/auto-refresh'
 import { BackendAlert } from '@/components/backend-alert'
 import { FeedbackButtons } from '@/components/feedback-buttons'
 import { PostedBody } from '@/components/posted-body'
+import {
+  ReviewProgressBar,
+  visibleProgress,
+} from '@/components/review-progress'
 import { ReviewStatusBadge, SeverityBadge } from '@/components/severity-badge'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -77,6 +82,7 @@ export default async function ReviewDetailPage({
   }
 
   const review = result.data
+  const progress = visibleProgress(review.status, review.progress)
   const grouped = groupByFile(review.findings)
   const counts = SEVERITY_ORDER.map(severity => ({
     severity,
@@ -85,6 +91,9 @@ export default async function ReviewDetailPage({
 
   return (
     <div className="space-y-8">
+      {/* Keep up with the run while it is still going. */}
+      {review.status === 'running' ? <AutoRefresh interval={2000} /> : null}
+
       <Link
         href="/"
         className="inline-flex items-center gap-1.5 rounded-sm text-sm text-muted-foreground underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
@@ -122,6 +131,9 @@ export default async function ReviewDetailPage({
             </a>
           ) : null}
         </div>
+        {progress ? (
+          <ReviewProgressBar progress={progress} className="max-w-md" />
+        ) : null}
       </div>
 
       <dl className="grid grid-cols-2 gap-4 rounded-lg border border-border p-4 sm:grid-cols-3 lg:grid-cols-6">

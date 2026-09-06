@@ -2,8 +2,10 @@ import Link from 'next/link'
 import { RefreshCw } from 'lucide-react'
 
 import { refreshStatus } from '@/app/actions'
+import { AutoRefresh } from '@/components/auto-refresh'
 import { BackendAlert } from '@/components/backend-alert'
 import { CopySnippet } from '@/components/copy-snippet'
+import { ReviewProgressBar } from '@/components/review-progress'
 import { ReviewStatusBadge } from '@/components/severity-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -62,8 +64,14 @@ export default async function StatusPage() {
     listDeliveries(20),
   ])
 
+  const current = status.ok ? status.data.queue.current : null
+
   return (
     <div className="space-y-8">
+      {/* A job in flight moves file by file, so watch it closely while there
+          is one and leave the backend alone the rest of the time. */}
+      <AutoRefresh interval={current ? 2000 : 10_000} />
+
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold tracking-tight">Status</h1>
@@ -202,14 +210,16 @@ export default async function StatusPage() {
                 <Row
                   label="Current job"
                   value={
-                    status.data.queue.current ? (
-                      <span>
-                        {status.data.queue.current.repository} #
-                        {status.data.queue.current.pr_number} at{' '}
-                        <span className="font-mono text-xs">
-                          {shortSha(status.data.queue.current.head_sha)}
+                    current ? (
+                      <div className="space-y-1.5">
+                        <span>
+                          {current.repository} #{current.pr_number} at{' '}
+                          <span className="font-mono text-xs">
+                            {shortSha(current.head_sha)}
+                          </span>
                         </span>
-                      </span>
+                        <ReviewProgressBar progress={current.progress} />
+                      </div>
                     ) : (
                       'Idle'
                     )
