@@ -477,7 +477,10 @@ async def main() -> int:
         summaries[variant] = summarise(rows)
         _print_rows(variant, rows)
         if args.out:
-            system_text = spec["prompt"].messages[0].prompt.template if hasattr(spec["prompt"].messages[0], "prompt") else ""
+            # the words of the prompt this variant is a candidate for: the cross-examiner's or the
+            # verifier's when the variant supplies one, the reviewer's otherwise
+            own = spec.get("cross_prompt") or spec.get("verifier_prompt") or spec["prompt"]
+            system_text = own.messages[0].prompt.template if hasattr(own.messages[0], "prompt") else ""
             out = {
                 "model": replay_run["model"] if replay_run else settings.OLLAMA_MODEL,
                 "cross_model": args.cross_model if spec.get("cross") else None,
@@ -486,7 +489,6 @@ async def main() -> int:
             if replay_run:
                 out["replayed_from"] = {"file": str(args.replay), "variant": replay_run["variant"],
                                         "prompt_words": replay_run.get("prompt_words")}
-                out["prompt_words"] = replay_run.get("prompt_words")
             Path(args.out, f"{args.tag}-{variant.replace(':', '_').replace('+', '_')}.json").write_text(
                 json.dumps(out, indent=1), encoding="utf-8")
 

@@ -1664,7 +1664,7 @@ CASES = [
             "   const errors: string[] = [];\n"
             "   return errors;\n"
         ),
-        expect=(13, 15,),
+        expect=(13, 14, 15, 16, 17, 18, 19),  # the whole duplicated function; a copy is one finding wherever it is quoted
         expect_category=("quality",),
         min_severity="low",
         note=(

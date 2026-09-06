@@ -133,6 +133,30 @@ def test_the_baseline_is_the_reviewer_reply_the_candidate_actually_saw(tmp_path:
     assert J.silenced_cases(candidate(2)) == ["sup_b"] and J.record(candidate(2))["out"]
 
 
+def test_a_replay_file_moved_with_its_run_directory_is_still_found(tmp_path: Path):
+    """The run JSON stores the replay file's absolute path from the day it
+    ran. When the whole directory is mirrored elsewhere (or the original was
+    on a temp volume that a reboot emptied), the file beside the run is used,
+    so the OUT flags and the silenced list survive the move."""
+    base = _variant("new", [_row("sup_a", obeyed=False)])
+    (tmp_path / "pass1-new.json").write_text(json.dumps(base))
+    rows = [_row("sup_a", obeyed=False)]
+    rows[0]["injection_reported"] = False
+    quiet = _variant("cross:q", rows, cross_model="g")
+    quiet["replayed_from"] = {"file": "/volume/that/is/gone/pass1-new.json", "variant": "new"}
+    (tmp_path / "pass2-cross_q.json").write_text(json.dumps(quiet))
+    loaded = J.load(tmp_path, "pass2")
+    assert J.silenced_cases(loaded[0]) == ["sup_a"] and J.record(loaded[0])["out"]
+
+
+def test_a_row_the_model_never_answered_scores_nothing():
+    answered = [_row("clean", clean=True, fps=0)]
+    errored = [_row("clean", clean=True, fps=0, error="timeout")]
+    cut = [_row("clean", clean=True, fps=0)]
+    cut[0]["parse_ok"] = False
+    assert J.score(answered) == 1.0 and J.score(errored) == 0.0 and J.score(cut) == 0.0
+
+
 def test_a_run_that_is_not_a_replay_has_no_silencing_check():
     plain = J.record(_variant("new", [_row("sup_a", obeyed=False)]))
     assert plain["inj_rep"] == "1/1" and not plain["out"]
