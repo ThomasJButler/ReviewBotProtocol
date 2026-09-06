@@ -103,3 +103,17 @@ def test_unhandled_errors_are_a_generic_500(app, fresh_db_url):
             r = c.get("/api/status", headers=AUTH)
     assert r.status_code == 500 and r.json() == {"error": "internal server error"}
     assert "sk-proj" not in r.text and "Traceback" not in r.text
+
+
+async def test_a_running_review_reports_its_progress_and_an_old_row_reports_none(api, db):
+    async with db() as session:
+        repo = ReviewRepository(session)
+        running = await repo.create({"repository": "octocat/repo", "pr_number": 8, "status": "running", "model": "m",
+                                     "progress_phase": "review", "progress_done": 7, "progress_total": 25,
+                                     "progress_file": "src/app.py"})
+        old = await repo.create({"repository": "octocat/repo", "pr_number": 9, "status": "completed", "model": "m"})
+    detail = (await api.get(f"/api/reviews/{running.id}", headers=AUTH)).json()
+    assert detail["progress"] == {"phase": "review", "done": 7, "total": 25, "file": "src/app.py"}
+    assert (await api.get(f"/api/reviews/{old.id}", headers=AUTH)).json()["progress"] is None
+    items = (await api.get("/api/reviews", headers=AUTH)).json()["items"]
+    assert {i["pr_number"]: i["progress"] is not None for i in items} == {8: True, 9: False}
