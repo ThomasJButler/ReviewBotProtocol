@@ -42,8 +42,17 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat()
 
 
+def progress_dict(r: Review) -> Optional[dict]:
+    """Where a review is up to, or None for rows written before progress existed."""
+    if not r.progress_phase:
+        return None
+    return {"phase": r.progress_phase, "done": r.progress_done or 0, "total": r.progress_total or 0,
+            "file": r.progress_file or None}
+
+
 def _review_dict(r: Review, with_findings: bool = False) -> dict:
     d = {
+        "progress": progress_dict(r),
         "id": r.id, "repository": r.repository, "pr_number": r.pr_number, "pr_title": r.pr_title,
         "head_sha": r.head_sha, "is_fork": r.is_fork, "status": r.status, "model": r.model,
         "cross_model": r.cross_model, "cross_added": r.cross_added or 0, "cross_refuted": r.cross_refuted or 0,
@@ -108,6 +117,11 @@ async def list_deliveries(limit: int = Query(20, ge=1, le=100), session: AsyncSe
 async def status(request: Request):
     queue = getattr(request.app.state, "queue", None)
     current = queue.current_job if queue else None
+    progress = None
+    if current:
+        async with request.app.state.session_factory() as session:
+            running = await ReviewRepository(session).running_for(current.repo, current.pr_number, current.head_sha)
+        progress = progress_dict(running) if running else None
     return {
         "version": settings.APP_VERSION,
         "model": settings.OLLAMA_MODEL,
@@ -116,7 +130,8 @@ async def status(request: Request):
         "database": await db_healthy(),
         "queue": {"depth": queue.depth if queue else 0, "alive": bool(queue and queue.alive),
                   "abandoned": queue.abandoned if queue else 0,
-                  "current": {"repository": current.repo, "pr_number": current.pr_number, "head_sha": current.head_sha} if current else None},
+                  "current": {"repository": current.repo, "pr_number": current.pr_number, "head_sha": current.head_sha,
+                              "progress": progress} if current else None},
         "limits": {"max_files_per_review": settings.MAX_FILES_PER_REVIEW, "max_patch_bytes": settings.MAX_PATCH_BYTES,
                    "review_timeout_seconds": settings.REVIEW_TIMEOUT_SECONDS, "num_ctx": settings.OLLAMA_NUM_CTX},
     }

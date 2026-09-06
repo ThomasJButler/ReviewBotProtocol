@@ -1,7 +1,7 @@
 """Async SQLAlchemy engine and session factory."""
 
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -57,8 +57,38 @@ async def init_db(database_url: Optional[str] = None) -> async_sessionmaker:
     async with engine.begin() as conn:
         from . import models  # noqa: F401  registers tables
         await conn.run_sync(Base.metadata.create_all)
+        added = await conn.run_sync(add_missing_columns)
+    if added:
+        logger.info("database columns added", columns=added)
     logger.info("database ready", url=url.split("@")[-1])
     return AsyncSessionLocal
+
+
+def add_missing_columns(sync_conn) -> List[str]:
+    """Columns the models declare that an existing database lacks are added in
+    place (ALTER TABLE ADD COLUMN), so a schema that grows a column does not
+    force anyone to delete their reviews.db. A scalar default travels with the
+    column; a Python-side default (a callable) is applied by the ORM on insert,
+    so such a column is added without NOT NULL, which SQLite could not add
+    anyway. Existing rows read NULL there, which every reader treats as empty."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(sync_conn)
+    added: List[str] = []
+    for table in Base.metadata.sorted_tables:
+        if table.name not in inspector.get_table_names():
+            continue
+        present = {c["name"] for c in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present:
+                continue
+            ddl = f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type.compile(sync_conn.dialect)}"
+            if column.default is not None and getattr(column.default, "is_scalar", False):
+                value = column.default.arg
+                ddl += f" DEFAULT {int(value) if isinstance(value, bool) else value!r}"
+            sync_conn.execute(text(ddl))
+            added.append(f"{table.name}.{column.name}")
+    return added
 
 
 async def close_db() -> None:

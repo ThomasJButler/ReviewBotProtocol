@@ -44,6 +44,12 @@ class ReviewRepository:
                                     Review.head_sha == head_sha, Review.status == "completed").limit(1)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def running_for(self, repository: str, pr_number: int, head_sha: str) -> Optional[Review]:
+        """The review of this head that is running now, for the status page's progress line."""
+        stmt = select(Review).where(Review.repository == repository, Review.pr_number == pr_number,
+                                    Review.head_sha == head_sha, Review.status == "running").limit(1)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get(self, review_id: str) -> Optional[Review]:
         stmt = select(Review).options(selectinload(Review.findings)).where(Review.id == review_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()

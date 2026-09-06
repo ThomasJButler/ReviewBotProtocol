@@ -164,7 +164,14 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         logger.info("review starting", repo=job.repo, pr=job.pr_number, files=len(files), skipped=len(skipped),
                     redactions=redaction_total, model=settings.OLLAMA_MODEL)
 
-        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm))
+        async def _progress(phase: str, done: int, total: int, current: str) -> None:
+            # one small write per file so the dashboard can show where the review is up to
+            async with deps.session_factory() as session:
+                await ReviewRepository(session).update(review_id, {
+                    "progress_phase": phase, "progress_done": done, "progress_total": total,
+                    "progress_file": current[:512] or None})
+
+        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm), on_progress=_progress)
         state = await workflow.run(job.repo, job.pr_number, head_sha, files)
         results = state.get("results", [])
         totals = state.get("totals", {})

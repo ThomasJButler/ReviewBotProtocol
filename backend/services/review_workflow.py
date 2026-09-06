@@ -15,6 +15,8 @@ patches already live."""
 
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypedDict
 
+Progress = Callable[[str, int, int, str], Awaitable[None]]  # phase, files done, files total, current file
+
 from langgraph.graph import END, START, StateGraph
 
 from config.logging import get_logger
@@ -42,8 +44,10 @@ def risk_score(filename: str, additions: int) -> int:
 
 
 class ReviewWorkflow:
-    def __init__(self, reviewer: FileReviewer, unload: Optional[Callable[[str], Awaitable[bool]]] = None):
+    def __init__(self, reviewer: FileReviewer, unload: Optional[Callable[[str], Awaitable[bool]]] = None,
+                 on_progress: Optional[Progress] = None):
         self.reviewer = reviewer
+        self._on_progress = on_progress
         settings = reviewer.settings
         self.two_phase = (reviewer.cross_enabled and settings.CROSS_EXAMINE_SEQUENTIAL
                           and reviewer.cross_model_name != reviewer.model_name)
@@ -69,8 +73,18 @@ class ReviewWorkflow:
         g.add_edge("synthesise", END)
         self.graph = g.compile()
 
+    async def _progress(self, phase: str, done: int, total: int, current: str) -> None:
+        """Tell whoever is watching where the review is up to; never let that fail the review."""
+        if self._on_progress is None:
+            return
+        try:
+            await self._on_progress(phase, done, total, current)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("progress update failed", error=type(e).__name__)
+
     async def _prioritise(self, state: ReviewState) -> Dict[str, Any]:
         files = sorted(state.get("files", []), key=lambda f: -risk_score(f["filename"], f.get("additions", 0)))
+        await self._progress("review", 0, len(files), "")
         return {"files": files, "index": 0, "cross_index": 0, "results": []}
 
     def _route(self, state: ReviewState) -> str:
@@ -84,6 +98,7 @@ class ReviewWorkflow:
         f = state["files"][i]
         logger.info("reviewing file", repo=state.get("repo"), pr=state.get("pr_number"), filename=f["filename"],
                     position=f"{i + 1}/{len(state['files'])}")
+        await self._progress("review", i, len(state["files"]), f["filename"])
         result = await self.reviewer.review_file(f["filename"], f.get("language", "unknown"), f.get("status", "modified"), f["patch"])
         result.redactions = f.get("redactions", {})
         return {"results": list(state.get("results", [])) + [result], "index": i + 1}
@@ -93,6 +108,7 @@ class ReviewWorkflow:
         results = list(state.get("results", []))
         logger.info("cross-examining file", repo=state.get("repo"), pr=state.get("pr_number"),
                     filename=results[i].filename, position=f"{i + 1}/{len(results)}")
+        await self._progress("cross-examine", i, len(results), results[i].filename)
         results[i] = await self.reviewer.cross_examine_file(results[i])
         return {"results": results, "cross_index": i + 1}
 
@@ -112,6 +128,7 @@ class ReviewWorkflow:
         return {}
 
     async def _synthesise(self, state: ReviewState) -> Dict[str, Any]:
+        await self._progress("done", len(state.get("results", [])), len(state.get("results", [])), "")
         totals: Dict[str, int] = {"files": len(state.get("results", [])), "findings": 0, "dropped": 0,
                                   "prompt_tokens": 0, "output_tokens": 0, "refuted": 0, "verify_calls": 0,
                                   "cross_calls": 0, "cross_refuted": 0, "cross_added": 0}

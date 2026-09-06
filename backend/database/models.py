@@ -54,6 +54,12 @@ class Review(Base):
     files_total = Column(Integer, nullable=False, default=0)
     files_reviewed = Column(Integer, nullable=False, default=0)
     files_skipped = Column(Integer, nullable=False, default=0)
+    # where a running review is up to: phase review, cross-examine or done; files finished of total;
+    # the file the model is on. Updated once per file by the runner, shown by the dashboard.
+    progress_phase = Column(String(20), nullable=True)
+    progress_done = Column(Integer, nullable=False, default=0)
+    progress_total = Column(Integer, nullable=False, default=0)
+    progress_file = Column(String(512), nullable=True)
     skipped = Column(JSONString, nullable=True)
     findings_count = Column(Integer, nullable=False, default=0)
     severity_counts = Column(JSONString, nullable=True)
