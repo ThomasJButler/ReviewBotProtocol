@@ -120,6 +120,8 @@ dist/
 *.sqlite
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # Test artifacts and temporary dev files
 **/api-test-report-*.md

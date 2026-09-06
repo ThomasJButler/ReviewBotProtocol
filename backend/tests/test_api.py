@@ -86,6 +86,24 @@ async def test_status_reports_ollama_queue_and_limits(api):
     assert s["limits"]["max_files_per_review"] > 0 and s["database"] is True
 
 
+async def test_status_shows_the_progress_of_the_job_in_flight(api, app, db):
+    """The queue knows which PR is running; the progress line comes from that
+    PR's running row. The two are joined here, through the module's own
+    session factory, so this test fails if the join reaches for anything the
+    app never set up (which is exactly what happened on 2026-09-06)."""
+    from services.review_queue import ReviewJob
+    async with db() as session:
+        await ReviewRepository(session).create({"id": "rev-run", "repository": "o/r", "pr_number": 8, "head_sha": "h8",
+                                                "status": "running", "model": "m", "progress_phase": "cross-examine",
+                                                "progress_done": 3, "progress_total": 9, "progress_file": "a.py"})
+    app.state.queue.current_job = ReviewJob("o/r", 8, "h8", 1)
+    with patch("handlers.review.ollama_health", new=AsyncMock(return_value={"reachable": True, "model": "m", "model_present": True, "loaded": []})):
+        r = await api.get("/api/status", headers=AUTH)
+    assert r.status_code == 200, r.text
+    assert r.json()["queue"]["current"] == {"repository": "o/r", "pr_number": 8, "head_sha": "h8",
+                                             "progress": {"phase": "cross-examine", "done": 3, "total": 9, "file": "a.py"}}
+
+
 async def test_health_is_public_and_minimal(api):
     r = await api.get("/health")
     assert r.status_code == 200 and set(r.json()) == {"status", "version"}

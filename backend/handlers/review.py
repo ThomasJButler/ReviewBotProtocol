@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import settings
+from database import connection as db
 from database.connection import db_healthy, get_db_session
 from database.models import Review
 from database.repositories.review_repository import ReviewRepository
@@ -118,8 +119,8 @@ async def status(request: Request):
     queue = getattr(request.app.state, "queue", None)
     current = queue.current_job if queue else None
     progress = None
-    if current:
-        async with request.app.state.session_factory() as session:
+    if current and db.AsyncSessionLocal is not None:
+        async with db.AsyncSessionLocal() as session:
             running = await ReviewRepository(session).running_for(current.repo, current.pr_number, current.head_sha)
         progress = progress_dict(running) if running else None
     return {
