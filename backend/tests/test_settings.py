@@ -101,3 +101,13 @@ def test_a_world_readable_key_file_is_reported(tmp_path):
     before = len(SETTINGS_WARNINGS)
     Settings(_env_file=None, GITHUB_PRIVATE_KEY=str(key))
     assert not [w for w in SETTINGS_WARNINGS[before:] if "chmod" in w]
+
+
+def test_allowed_hosts_accepts_a_pasted_url_or_a_host_with_a_port(monkeypatch):
+    from tests.conftest import TEST_PRIVATE_KEY
+    env = {"GITHUB_APP_ID": "1", "GITHUB_PRIVATE_KEY": TEST_PRIVATE_KEY, "GITHUB_WEBHOOK_SECRET": "x" * 24,
+           "ALLOWED_HOSTS": "localhost, https://Tunnel.ngrok-free.dev/webhook/github ,127.0.0.1:8000,"}
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    from config.settings import Settings
+    assert Settings(_env_file=None).allowed_hosts_list == ["localhost", "tunnel.ngrok-free.dev", "127.0.0.1"]

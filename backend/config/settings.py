@@ -82,7 +82,17 @@ class Settings(BaseSettings):
 
     @property
     def allowed_hosts_list(self) -> List[str]:
-        return [h.strip() for h in self.ALLOWED_HOSTS.split(",") if h.strip()]
+        # the host check compares bare hostnames, so a pasted URL ("https://x.ngrok-free.dev/webhook/github")
+        # or a host:port entry is reduced to the hostname rather than silently never matching
+        hosts = []
+        for entry in self.ALLOWED_HOSTS.split(","):
+            h = entry.strip()
+            if "://" in h:
+                h = h.split("://", 1)[1]
+            h = h.split("/", 1)[0].split(":", 1)[0].strip().lower()
+            if h:
+                hosts.append(h)
+        return hosts
 
     @property
     def allowed_origins_list(self) -> List[str]:
