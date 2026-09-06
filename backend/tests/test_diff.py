@@ -149,3 +149,26 @@ def test_a_removal_at_the_end_of_a_hunk_lands_on_the_last_line_before_it():
     parsed = parse_patch(_TRAILING)
     assert parsed.removed_lines == {3: ["assert_authorised(user)"]}
     assert locate_evidence(parsed, 3, "assert_authorised(user)") == 2
+
+
+_CAROUSEL = (
+    "@@ -6,3 +6,8 @@\n"
+    "   const [index, setIndex] = useState(0)\n"
+    " \n"
+    "+  useEffect(() => {\n"
+    "+    const timer = setInterval(() => {\n"
+    "+      setIndex((i) => (i + 1) % slides.length)\n"
+    "+    }, 4000)\n"
+    "+  }, [slides.length])\n"
+)
+
+
+def test_two_diff_lines_run_together_into_one_quote_locate_at_the_first():
+    parsed = parse_patch(_CAROUSEL)
+    flattened = "const timer = setInterval(() => { setIndex((i) => (i + 1) % slides.length)"
+    assert locate_evidence(parsed, 10, flattened) == 9, "the quote begins with the whole of line 9"
+    assert locate_evidence(parsed, 9, "const timer = setInterval(() => { rm -rf /") == 9, "a real first line still locates; the rest is not posted as evidence"
+    assert locate_evidence(parsed, 9, "setIndex((i) => (i + 1) % slides.length) and then something invented") == 10
+    assert locate_evidence(parsed, 9, "timer = setInterval(() => {") == 9, "a substring of one line still works as before"
+    assert locate_evidence(parsed, 9, "useEffect(() => { fetch('https://evil.example')") == 8
+    assert locate_evidence(parsed, 9, "} , 4000) nothing") is None, "a fragment too short to mean anything is still nothing"

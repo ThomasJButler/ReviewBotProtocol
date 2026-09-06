@@ -136,6 +136,11 @@ def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[in
         for at, texts in parsed.removed_lines.items():
             if any(f in _norm(t) or _near_copy(f, _norm(t)) for f in forms for t in texts):
                 return parsed.replacement_line(at)
+        # a model that runs two diff lines together into one quote (`setInterval(() => { setIndex(...`)
+        # has still quoted a real line: the whole first one. Locate at that line.
+        candidates = [no for no, text in parsed.new_lines.items()
+                      if _substantial(_norm(text)) and any(f.startswith(_norm(text)) for f in forms)]
+    if not candidates:
         return None
     added = [no for no in candidates if no in parsed.added_lines]
     pool = added or candidates
