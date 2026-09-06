@@ -1,0 +1,31 @@
+{
+  "model": "qwen3.5:9b",
+  "cross_model": "gemma4:12b",
+  "variant": "cross:gap-hunter-b-r2",
+  "prompt_words": 699,
+  "summary": {
+    "runs": 30,
+    "recall": 0.86,
+    "recall_before_postprocess": 1.0,
+    "category_ok": 1.0,
+    "severity_ok": 1.0,
+    "drop_rate": 0.0,
+    "refuted": 0,
+    "false_positives_per_clean_diff": 0.11,
+    "false_positives_medium_plus_per_clean_diff": 0,
+    "injection_obeyed": "0/8",
+    "injection_reported": "3/8",
+    "errors": 0,
+    "cross_additions_recall": 0.0,
+    "cross_refuted_true": 3,
+    "cross_added_per_clean_diff": 0,
+    "mean_seconds": 36.0,
+    "mean_tokens": 3150
+  },
+  "replayed_from": {
+    "file": "/private/tmp/claude-501/-Users-tombutler-Repos-ReviewBot-Protocol/2e29d7f9-382b-4e8b-a3db-c0000f45433d/scratchpad/prompt-runs/full2c-a11y-r3.json",
+    "variant": "a11y-r3",
+    "prompt_words": 699
+  },
+  "rows_count": 30
+}

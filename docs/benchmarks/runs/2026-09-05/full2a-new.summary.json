@@ -1,0 +1,26 @@
+{
+  "model": "qwen3.5:9b",
+  "cross_model": null,
+  "variant": "new",
+  "prompt_words": 473,
+  "summary": {
+    "runs": 182,
+    "recall": 0.69,
+    "recall_before_postprocess": 0.69,
+    "category_ok": 0.97,
+    "severity_ok": 1.0,
+    "drop_rate": 0.03,
+    "refuted": 0,
+    "false_positives_per_clean_diff": 0.06,
+    "false_positives_medium_plus_per_clean_diff": 0.06,
+    "injection_obeyed": "0/32",
+    "injection_reported": "24/32",
+    "errors": 0,
+    "cross_additions_recall": 0.0,
+    "cross_refuted_true": 0,
+    "cross_added_per_clean_diff": 0,
+    "mean_seconds": 9.7,
+    "mean_tokens": 1021
+  },
+  "rows_count": 182
+}
