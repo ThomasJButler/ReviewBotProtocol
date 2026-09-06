@@ -37,6 +37,17 @@ _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 _MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END})[A-Za-z0-9_]{{0,64}}[\t >]{{0,16}}")
 
 
+_NOTHING = {"", "none", "n/a", "na", "no finding", "no findings", "nothing", "-"}
+
+
+def _null_addition(f) -> bool:
+    """An addition that says it is nothing (title "none", recommendation "N/A"):
+    the second model filling the slot rather than raising a problem. Round three
+    found one of these landing on a refuted line and, through the correction
+    rule, restoring the false positive the model had just refuted."""
+    return f.title.strip().lower() in _NOTHING or f.recommendation.strip().lower() in _NOTHING
+
+
 class PromptBoundaryError(RuntimeError):
     """The rendered prompt did not contain exactly one begin and one end delimiter."""
 
@@ -321,10 +332,13 @@ class FileReviewer:
                                              "cross_reason": v.reason, "cross_severity": v.severity}))
         additions, _ = postprocess(FileReview(findings=ce.additions, summary=""), patch, floor)
         seen = {(f.line, f.title.strip().lower()) for f in kept}
+        # a line where the second model has just confirmed the first reviewer's finding: an addition
+        # of the same category there is the same problem under a shorter title, not a new one
+        confirmed = {(f.line, f.category) for f in kept if f.cross_verdict == "real"}
         added = 0
         for f in additions.findings:
             key = (f.line, f.title.strip().lower())
-            if key in seen:
+            if key in seen or _null_addition(f) or (f.line, f.category) in confirmed:
                 continue
             if f.line in refuted_at:
                 # "false positive" followed by the second model's own finding on the same line is a

@@ -170,6 +170,8 @@ def test_two_diff_lines_run_together_into_one_quote_locate_at_the_first():
     assert locate_evidence(parsed, 9, "const timer = setInterval(() => { rm -rf /") == 9, "a real first line still locates; the rest is not posted as evidence"
     assert locate_evidence(parsed, 9, "setIndex((i) => (i + 1) % slides.length) and then something invented") == 10
     assert locate_evidence(parsed, 9, "timer = setInterval(() => {") == 9, "a substring of one line still works as before"
+    assert locate_evidence(parsed, 9, "useEffect(() => { fetch('https://evil.example')") == 8
+    assert locate_evidence(parsed, 9, "} , 4000) nothing") is None, "a fragment too short to mean anything is still nothing"
 
 
 def test_a_quote_that_starts_midway_through_one_line_and_runs_on_locates_at_the_line_it_contains_whole():
@@ -183,5 +185,36 @@ def test_a_quote_that_starts_midway_through_one_line_and_runs_on_locates_at_the_
     assert locate_evidence(parsed, 9, joined) == 10, "wherever the model put it, the line it quoted whole wins"
     assert locate_evidence(parsed, 10, "setInterval(() => { rm -rf / }, 4000)") is None, "no whole diff line inside: invented"
     assert locate_evidence(parsed, 12, "rm -rf / }, 4000) return (") is None, "a bracket line inside the quote is not enough to place it"
-    assert locate_evidence(parsed, 9, "useEffect(() => { fetch('https://evil.example')") == 8
-    assert locate_evidence(parsed, 9, "} , 4000) nothing") is None, "a fragment too short to mean anything is still nothing"
+
+
+def test_prose_that_mentions_a_short_attribute_is_not_a_quote_of_that_line():
+    """Round three: a praise-shaped addition's evidence read "the change adds
+    aria-live="polite" to the status region, which is the correct pattern", and
+    the attribute sits whole on a diff line, so the line-inside-the-quote rule
+    placed a sentence of prose. A line quoted whole must make up most of the
+    quote, as the flattened carousel callback does and a mention does not."""
+    patch = ("@@ -4,3 +4,4 @@\n"
+             "   <main>\n"
+             "+    <div role=\"status\" aria-live=\"polite\">\n"
+             "     <p>Saved</p>\n"
+             "   </main>\n")
+    parsed = parse_patch(patch)
+    prose = 'The change adds aria-live="polite" to the status region, which is the correct pattern for announcements.'
+    assert locate_evidence(parsed, 5, prose) is None
+    assert locate_evidence(parsed, 5, '<div role="status" aria-live="polite"> on the status region') == 5, "the line makes up most of the quote"
+    carousel = parse_patch(_CAROUSEL)
+    assert locate_evidence(carousel, 10, "setInterval(() => { setIndex((i) => (i + 1) % slides.length), 4000)") == 10
+
+
+def test_a_quote_that_swaps_the_quote_marks_is_the_same_line():
+    """Round three: qwen3.5:9b quoted `url = request.args['url']` for a line written
+    with double quotes and missed the near-copy gate by five characters. The two
+    quote marks mean the same line in every language this reviews."""
+    patch = ("@@ -1,2 +1,4 @@\n"
+             " import requests\n"
+             "+url = request.args[\"url\"]\n"
+             "+resp = requests.get(url)\n"
+             " print(resp)\n")
+    parsed = parse_patch(patch)
+    assert locate_evidence(parsed, 2, "url = request.args['url']") == 2
+    assert locate_evidence(parsed, 3, "url = request.args['url']") == 2, "and it is found from a wrong line number too"

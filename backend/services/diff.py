@@ -66,7 +66,9 @@ def parse_patch(patch: Optional[str]) -> ParsedPatch:
 
 
 def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
+    """Whitespace collapsed, and the two quote marks made one: a model that
+    writes `args['url']` for a line written `args["url"]` has quoted that line."""
+    return re.sub(r"\s+", " ", (s or "").replace('"', "'")).strip()
 
 
 def _evidence_forms(evidence: str) -> list:
@@ -144,8 +146,11 @@ def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[in
         candidates = [no for no, text in parsed.new_lines.items()
                       if _substantial(_norm(text)) and any(f.startswith(_norm(text)) for f in forms)]
         if not candidates:
+            # and the line must make up most of the quote: a flattened callback is mostly real lines,
+            # a sentence of prose that mentions `aria-live="polite"` is not a quote of that line
             candidates = [no for no, text in parsed.new_lines.items()
-                          if len(_TOKENS.findall(_norm(text))) >= INNER_LINE_TOKENS and any(_norm(text) in f for f in forms)]
+                          if len(_TOKENS.findall(_norm(text))) >= INNER_LINE_TOKENS
+                          and any(_norm(text) in f and 2 * len(_norm(text)) >= len(f) for f in forms)]
     if not candidates:
         return None
     added = [no for no in candidates if no in parsed.added_lines]

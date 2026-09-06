@@ -205,6 +205,39 @@ async def test_a_refutation_followed_by_the_cross_models_own_finding_on_that_lin
     assert len([x for x in result.review.findings if x.line == 2]) == 1, "no duplicate from the addition"
 
 
+async def test_a_null_addition_on_a_refuted_line_does_not_undo_the_refutation():
+    """Round three, 2026-09-06: gemma4:12b refuted a false positive correctly and then
+    filed an addition titled "none" with recommendation "N/A" on the same line, which
+    the correction rule took as the second model's own finding and restored the
+    refuted one. An addition that says it is nothing is nothing."""
+    null = _cross(
+        [{"index": 1, "verdict": "false_positive", "severity": "low", "reason": "a fixture value, not a credential", "confidence": 0.9}],
+        [{"category": "security", "severity": "low", "title": "none", "line": 3,
+          "evidence": "password = 'hunter2hunter2'", "recommendation": "N/A", "confidence": 0.5}])
+    reviewer, cross = _pair(null)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    assert sorted(f.line for f in result.review.findings) == [2], "the refutation stands and nothing was added"
+    assert result.cross_refuted == 1 and result.cross_added == 0
+
+
+async def test_an_addition_restating_a_confirmed_finding_on_its_line_is_not_an_addition():
+    """The second model confirms the reviewer's finding and then adds the same problem on
+    the same line under a shorter title ("SSRF" for "Server-side request forgery via ...").
+    Same line, same category, after a confirmation: a restatement, not an addition. A
+    finding of another category on that line is still new."""
+    restate = _cross(
+        [{"index": 0, "verdict": "real", "severity": "critical", "reason": "eval on request input at line 2.", "confidence": 0.95}],
+        [{"category": "security", "severity": "critical", "title": "Code execution", "line": 2,
+          "evidence": "eval(user_input)", "recommendation": "Parse it.", "confidence": 0.9},
+         {"category": "quality", "severity": "low", "title": "shrink", "line": 2,
+          "evidence": "eval(user_input)", "recommendation": "SENTINEL_9f3a = parse(user_input)", "confidence": 0.7}])
+    reviewer, cross = _pair(restate)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    on_two = [f for f in result.review.findings if f.line == 2]
+    assert [f.category.value for f in on_two] == ["security", "quality"], "the restatement is dropped, the other category stays"
+    assert on_two[0].title == "eval on user input" and result.cross_added == 1
+
+
 async def test_a_refutation_with_an_addition_elsewhere_is_still_a_refutation():
     elsewhere = _cross(
         [{"index": 1, "verdict": "false_positive", "severity": "low", "reason": "fixture value", "confidence": 0.9}],
