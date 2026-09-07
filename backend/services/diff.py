@@ -91,8 +91,10 @@ INNER_LINE_TOKENS = 3  # a line quoted whole inside a longer quote must say this
 
 def _near_copy(quoted: str, actual: str) -> bool:
     """A model cannot copy a 44-character base64 key without slipping, so a
-    quote that matches the named line for a long prefix and most of its length
-    counts as that line. Only the named line is considered, never a search."""
+    quote that matches a line for a long prefix and most of its length counts
+    as that line. Used on the line the model named and on the lines the change
+    removed (a quote of a removed line is a finding about the removal), never
+    on every line of the diff."""
     common = os.path.commonprefix([quoted, actual])
     return len(common) >= NEAR_COPY_PREFIX and len(common) >= 0.6 * max(len(quoted), len(actual))
 

@@ -1,8 +1,8 @@
 """POST /webhook/github: the only public route.
 
-Order matters: cap the body, verify the signature, parse, filter, record the
-delivery (which is the replay check), enqueue, return 202. Nothing slow
-happens here."""
+Order matters: cap the body, verify the signature, parse, record the delivery
+(which is the replay check, and why every signed delivery is recorded before
+it is filtered), filter, enqueue, return 202. Nothing slow happens here."""
 
 import hashlib
 import json
@@ -106,7 +106,8 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
     try:
         outcome = await queue.submit(repo=pr.repository.full_name, pr_number=pr.number, head_sha=head_sha,
                                      installation_id=pr.installation.id, delivery_id=delivery_id,
-                                     is_fork=pr.is_fork, fork_repo=pr.fork_repo)
+                                     is_fork=pr.is_fork, fork_repo=pr.fork_repo,
+                                     updated_at=pr.pull_request.updated_at or "")
     except Exception as e:
         logger.error("queue submit failed", error=type(e).__name__, delivery_id=delivery_id)
         await deliveries.mark(delivery_id, "failed")
@@ -114,7 +115,7 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
     if outcome in ("shutting_down", "queue_dead"):
         await deliveries.mark(delivery_id, "interrupted")
         raise HTTPException(status_code=503, detail="review queue unavailable; GitHub may redeliver")
-    await deliveries.mark(delivery_id, "queued" if outcome != "duplicate" else "duplicate")
+    await deliveries.mark(delivery_id, "duplicate" if outcome in ("duplicate", "stale") else "queued")
     logger.info("webhook accepted", repo=pr.repository.full_name, pr=pr.number, action=pr.action,
                 head=head_sha[:12], fork=pr.is_fork, outcome=outcome, delivery_id=delivery_id)
     return _ok("queued", 202, outcome=outcome, repository=pr.repository.full_name, pr_number=pr.number, head_sha=head_sha)

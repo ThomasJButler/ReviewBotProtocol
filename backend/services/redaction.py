@@ -12,7 +12,7 @@ import re
 from typing import Dict, List, Tuple
 
 # Single-line patterns: (kind, compiled pattern, group index to replace; 0 = whole match).
-# None of these may match a newline.
+# No captured group here may contain a newline (the whitespace around a value may span one; only the group is replaced).
 _PATTERNS: List[Tuple[str, re.Pattern, int]] = [
     ("openai-key", re.compile(r"\bsk-(?:proj-|svcacct-|ant-)?[A-Za-z0-9_-]{32,}"), 0),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"), 0),

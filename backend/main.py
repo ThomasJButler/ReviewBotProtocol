@@ -1,4 +1,4 @@
-"""ReviewBot Protocol backend. One public route (the webhook), a token-gated
+"""ReviewBot Protocol backend. Two public routes (the webhook, and a health check that says only status and version), a token-gated
 dashboard API, a single-worker review queue, and a local model."""
 
 import fcntl

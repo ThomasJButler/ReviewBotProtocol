@@ -212,3 +212,13 @@ def test_unknown_host_is_rejected(app, fresh_db_url, pr_payload):
     with TestClient(app, base_url="http://evil.example.net") as c:
         r = c.post(URL, content=body, headers=webhook_headers(body))
     assert r.status_code == 400
+
+
+def test_the_pull_requests_updated_at_travels_with_the_job(client, pr_payload, stub_queue):
+    """The queue answers "stale" to a delivery older than the job it holds, so a
+    captured signed body replayed under a fresh id cannot cancel a newer review.
+    The handler has to hand it the timestamp for that to work."""
+    stamped = {**pr_payload, "pull_request": {**pr_payload["pull_request"], "updated_at": "2026-09-07T10:00:00Z"}}
+    body = _body(stamped)
+    assert client.post(URL, content=body, headers=webhook_headers(body)).status_code == 202
+    assert stub_queue.submissions[0]["updated_at"] == "2026-09-07T10:00:00Z"
