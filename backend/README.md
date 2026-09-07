@@ -26,19 +26,22 @@ python3.13 -m venv .venv
 .venv/bin/pip install --require-hashes -r requirements.lock
 .venv/bin/pip install -r requirements-dev.txt
 cp .env.example .env    # fill in GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, LOCAL_API_TOKEN
+ollama pull qwen3.5:9b
 .venv/bin/python main.py
 ```
 
-The service binds 127.0.0.1:8000 by default. To receive webhooks you expose `POST /webhook/github` through a tunnel or a reverse proxy and add that hostname to `ALLOWED_HOSTS`. Do not expose anything else; the dashboard API under `/api` is meant for the local frontend only.
+The service binds 127.0.0.1:8000 by default. To receive webhooks you expose `POST /webhook/github` through a tunnel or a reverse proxy and add that hostname to `ALLOWED_HOSTS` as a bare name in the comma-separated list: `ALLOWED_HOSTS=localhost,127.0.0.1,<tunnel-host>`. Do not expose anything else; the dashboard API under `/api` is meant for the local frontend only.
+
+For a hands-on run, `NGROK_DOMAIN=<your static ngrok domain> ../scripts/dev-up.sh` starts the tunnel, the dashboard and the backend together, and Ctrl-C stops all three; it starts the backend with `uvicorn main:app`, which is the same server `python main.py` runs. Then http://127.0.0.1:3000/status should show Ollama reachable, the model present and the review worker Running. The same setup at length, from creating the App to the first ping, is docs/TEST_PLAN.md sections 1 to 4.
 
 ### GitHub App
 
 Create a GitHub App (Settings, Developer settings, GitHub Apps, New GitHub App):
 
-- Webhook URL: your public URL for `/webhook/github`. Webhook secret: a long random value (`openssl rand -hex 32`), the same one you put in `.env`.
+- Webhook URL: your public URL ending in `/webhook/github`. The path matters: saved without it, GitHub posts to `/` and every delivery is a 404. Webhook secret: a long random value (`openssl rand -hex 32`), the same one you put in `.env`. SSL verification: leave it enabled, the default.
 - Repository permissions: Pull requests, Read and write. Metadata, Read. Nothing else.
 - Subscribe to events: Pull request. Nothing else.
-- Generate a private key and point `GITHUB_PRIVATE_KEY` at the downloaded `.pem`. Keep the file outside the repository; `.gitignore` and `.dockerignore` exclude `*.pem` as a backstop.
+- Generate a private key and point `GITHUB_PRIVATE_KEY` at the downloaded `.pem`. Keep the file outside the repository and `chmod 600` it; a key file readable by other users is logged as a warning at startup. `.gitignore` and `.dockerignore` exclude `*.pem` as a backstop.
 - Install the App on selected repositories, never on all repositories.
 
 A `ping` event arrives when the webhook is saved; it is answered with `{"status": "pong"}` and recorded under `/api/deliveries` with status `pong`. Every signed delivery is recorded, including ignored events and skipped drafts, so the Status page shows what GitHub sent.

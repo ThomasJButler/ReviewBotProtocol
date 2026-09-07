@@ -12,6 +12,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 - `REVIEW_RETENTION_DAYS` (365): reviews, their findings and webhook deliveries older than that are deleted at startup and nightly, never a row still running; 0 keeps everything. `scripts/export_reviews.py` writes what is worth keeping to JSON first.
 - Every setting carries a docstring, and `docs/SETTINGS.md` is generated from them by `scripts/settings_reference.py`; a test keeps the file and the class equal.
 - The dashboard's section cards on the Status and Setup pages are headings, so the page outline reads the way it looks; a root error page (`app/global-error.tsx`) paints a fallback when the layout itself fails.
+- The setup steps say the same thing in the README, the backend README and the test plan; the troubleshooting table carries the rows the live runs turned up; the hosted-model plan and the security review say what they are and what superseded them; `docs/benchmarks/HOW_TO_RUN_A_ROUND.md` writes down how a measurement round is run.
 
 ## 1.1.0 (2026-09-07)
 

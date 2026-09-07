@@ -1,5 +1,7 @@
 # ReviewBot Protocol security review
 
+Note added 2026-09-07. This document is the record of the security review of the original OpenAI implementation. It was written on 2026-09-03 at commit 8ee88ea, before the backend was rewritten around a local Ollama model later the same day (27fb130), so its body quotes code that no longer exists: `OPENAI_API_KEY` as a required setting and both `ChatOpenAI` construction sites are the subject of SR-10, and the same implementation is described throughout the findings. What still holds is the threat model, the finding list with its Status lines, and the sections written against the rewritten code: "Second round", "Third round", "Fourth round", "Claude Security scan (2026-09-04)" and "Re-verified on 2026-09-07", which is the current statement of what is fixed and which two residuals stand. For the design as it is now, read docs/LOCAL_MIGRATION.md; for the setup, the README and backend/README.md.
+
 Date: 2026-09-03. Branch: v1.1-Local-AI at commit 8ee88ea. Reviewer: Claude (Fable 5.1 orchestrating), commissioned by Tom Butler.
 
 This document is the record of the Phase 0 investigation. It is severity-ranked, it names what an attacker actually achieves, and it says how hard each attack is. It also lists what was checked and found fine, so the reader knows what was looked at. Findings are numbered SR-01 onwards. The Status column is updated as fixes land; until then every item is Open.
