@@ -99,7 +99,9 @@ def add_missing_indexes(sync_conn) -> List[str]:
     """Indexes the models declare that an existing table lacks are created in
     place; create_all only builds them with a new table. A unique index is
     skipped, with a warning naming the count, when the table already holds
-    duplicate values, so a strange database still boots."""
+    duplicate values, so a strange database still boots. An index the models
+    no longer declare is dropped when a new one covers the same columns, so a
+    database upgraded from a version with a plain index does not keep both."""
     from sqlalchemy import inspect, text
 
     inspector = inspect(sync_conn)
@@ -109,6 +111,7 @@ def add_missing_indexes(sync_conn) -> List[str]:
         if table.name not in inspector.get_table_names():
             continue
         present = {ix["name"] for ix in inspector.get_indexes(table.name)}
+        declared = {ix.name for ix in table.indexes} | {f"ix_{table.name}_{c.name}" for c in table.columns if c.index}
         have = {c["name"] for c in inspector.get_columns(table.name)}
         for index in table.indexes:
             if index.name in present:
@@ -130,6 +133,10 @@ def add_missing_indexes(sync_conn) -> List[str]:
                    f"ON {quote(table.name)} ({', '.join(quote(c) for c in columns)})")
             sync_conn.execute(text(ddl))
             created.append(index.name)
+            for old in inspector.get_indexes(table.name):
+                if old["name"] in present and old["name"] not in declared and list(old["column_names"]) == columns:
+                    sync_conn.execute(text(f"DROP INDEX IF EXISTS {quote(old['name'])}"))
+                    logger.info("dropped an index the new one covers", table=table.name, index=old["name"], replaced_by=index.name)
     return created
 
 

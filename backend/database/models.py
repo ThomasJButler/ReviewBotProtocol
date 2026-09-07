@@ -104,9 +104,9 @@ class Finding(Base):
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
     # The replay check reads the hash and then inserts; the unique index makes the
-    # race between those two a constraint, and record() already turns the
-    # IntegrityError into "duplicate". An existing database gets it from
-    # add_missing_indexes at startup.
+    # race between those two a constraint. record() already answers the loser's
+    # IntegrityError with False, which the webhook handler reports as "duplicate".
+    # An existing database gets the index from add_missing_indexes at startup.
     __table_args__ = (Index("ix_webhook_deliveries_body_sha256_unique", "body_sha256", unique=True),)
 
     delivery_id = Column(String(100), primary_key=True)

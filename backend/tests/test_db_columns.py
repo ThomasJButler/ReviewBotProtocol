@@ -56,19 +56,42 @@ def test_the_unique_index_on_the_delivery_hash_is_added_to_an_existing_table(tmp
         assert add_missing_indexes(conn) == [], "a second pass has nothing to add"
 
 
-def test_a_table_with_duplicate_hashes_keeps_booting_without_the_index(tmp_path, caplog):
-    import logging
+def test_a_table_with_duplicate_hashes_keeps_booting_without_the_index(tmp_path):
+    from structlog.testing import capture_logs
     engine = create_engine(f"sqlite:///{tmp_path}/dupes.db")
     with engine.begin() as conn:
         conn.execute(text(OLD_DELIVERIES))
         conn.execute(text("INSERT INTO webhook_deliveries VALUES ('d1', 'ping', 'same', '2026-01-01', 'pong'), "
                           "('d2', 'ping', 'same', '2026-01-01', 'pong')"))
         add_missing_columns(conn)
-        with caplog.at_level(logging.WARNING):
+        with capture_logs() as logs:
             created = add_missing_indexes(conn)
         assert "ix_webhook_deliveries_body_sha256_unique" not in created and "ix_webhook_deliveries_repository" in created
+        warned = [e for e in logs if e["event"] == "unique index skipped: the table holds duplicate values"]
+        assert len(warned) == 1 and warned[0]["duplicate_groups"] == 1 and warned[0]["log_level"] == "warning"
     with engine.connect() as conn:
         assert "ix_webhook_deliveries_body_sha256_unique" not in _index_names(conn, "webhook_deliveries")
+
+
+def test_a_database_upgraded_from_the_plain_index_does_not_keep_both(tmp_path):
+    """Every database that ran before this change has a plain index on the hash,
+    because that is what the column declared. create_all never alters a table, so
+    without a drop the upgraded database would carry two indexes on one column
+    forever while a fresh one carries the unique index alone."""
+    engine = create_engine(f"sqlite:///{tmp_path}/plain.db")
+    with engine.begin() as conn:
+        conn.execute(text(OLD_DELIVERIES))
+        conn.execute(text("CREATE INDEX ix_webhook_deliveries_body_sha256 ON webhook_deliveries (body_sha256)"))
+        add_missing_columns(conn)
+        created = add_missing_indexes(conn)
+    assert "ix_webhook_deliveries_body_sha256_unique" in created
+    with engine.connect() as conn:
+        names = _index_names(conn, "webhook_deliveries")
+        assert "ix_webhook_deliveries_body_sha256" not in names, "the plain index the unique one covers is dropped"
+        assert names["ix_webhook_deliveries_body_sha256_unique"]["unique"]
+        assert "ix_webhook_deliveries_repository" in names, "an index the models still declare is left alone"
+    with engine.begin() as conn:
+        assert add_missing_indexes(conn) == []
 
 
 def test_a_fresh_database_has_the_unique_index_from_create_all(tmp_path):
