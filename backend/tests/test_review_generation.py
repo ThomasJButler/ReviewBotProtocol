@@ -232,3 +232,17 @@ class TestRendering:
     def test_empty_review_body(self):
         rendered = render_review([], model="m")
         assert "No findings in 0 reviewed files" in rendered.body and rendered.comments == []
+
+def test_a_truncated_summary_ends_at_a_sentence_not_mid_word():
+    """On the first live reviews the per-file line ended "I flagged the p[truncated]":
+    the cut fell wherever the character count landed. It now falls at the last
+    sentence end in the second half of the room, else at a space, so what is
+    kept still reads."""
+    from services.comment_renderer import sanitise
+    two = "The first reviewer correctly identified the critical risks of pickle and hardcoded secrets. I flagged the predictable cache paths as well."
+    out = sanitise(two, 120, inline=True)
+    assert out == "The first reviewer correctly identified the critical risks of pickle and hardcoded secrets. [truncated]"
+    one_long = "word " * 60
+    out = sanitise(one_long.strip(), 80, inline=True)
+    assert out.endswith("word [truncated]") and len(out) <= 80
+    assert sanitise("short", 80, inline=True) == "short"

@@ -92,8 +92,22 @@ def sanitise(text: str, limit: int, code: bool = False, inline: bool = False) ->
         else:
             out = _BLANKS.sub("\n\n", out).strip()
     if len(out) > limit:
-        out = out[: max(0, limit - 14)].rstrip() + ("" if (code or inline) else "\n") + "[truncated]"
+        out = _cut(out, max(0, limit - 14)) + ("" if (code or inline) else "\n") + "[truncated]"
     return out
+
+
+def _cut(text: str, n: int) -> str:
+    """The first n characters, cut at the last sentence end when one sits in
+    the second half of the room, else at the last space: a per-file summary
+    that ends "I flagged the p[truncated]" teaches nothing, one that ends at
+    a full stop still reads."""
+    head = text[:n]
+    for mark in (". ", "; "):
+        at = head.rfind(mark)
+        if at >= n // 2:
+            return head[: at + 1].rstrip() + " "
+    at = head.rfind(" ")
+    return (head[:at] if at >= n // 2 else head).rstrip() + " "
 
 
 @dataclass
@@ -186,7 +200,7 @@ def render_review(results: Sequence[FileReviewResult], *, model: str, skipped: S
         lines.append("### Per file")
         lines.append("")
         for r in results:
-            summary = sanitise(r.review.summary, 300, inline=True) or "No summary."
+            summary = sanitise(r.review.summary, 500, inline=True) or "No summary."  # the summary plus the cross-examiner's note fit in 500
             lines.append(f"- `{sanitise(r.filename, 200, code=True)}`: {summary}")
         lines.append("")
 

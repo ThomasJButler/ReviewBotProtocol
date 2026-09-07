@@ -173,9 +173,10 @@ def test_select_files_applies_every_rule_and_keeps_the_riskiest_under_the_cap():
     ] + [{"filename": f"f{i}.py", "status": "modified", "patch": "+x"} for i in range(30)] + [
         {"filename": "zz/auth/session.py", "status": "modified", "patch": "+x", "additions": 1},
     ]
-    selected, skipped = select_files(raw, settings)
+    capped = settings.model_copy(update={"MAX_FILES_PER_REVIEW": 25})  # the developer's .env must not decide a test
+    selected, skipped = select_files(raw, capped)
     names = [f["filename"] for f in selected]
-    assert len(selected) == settings.MAX_FILES_PER_REVIEW
+    assert len(selected) == capped.MAX_FILES_PER_REVIEW
     assert names[0] == "zz/auth/session.py", "the riskiest eligible file must survive the cap even when GitHub lists it last"
     assert ".env.example" in names, "templates are reviewed because people commit real values into them"
     reasons = dict(skipped)
@@ -184,7 +185,7 @@ def test_select_files_applies_every_rule_and_keeps_the_riskiest_under_the_cap():
     assert "never sent" in reasons[".env.local"] and reasons["package-lock.json"] == "generated or vendored"
     assert reasons["vendor/lib.js"] == "generated or vendored" and reasons["app.min.js"] == "generated or vendored"
     assert reasons["notes.md"] == "not code" and "larger than" in reasons["huge.py"]
-    assert sum(1 for _, r in skipped if "file limit" in r) == 32 + 1 - settings.MAX_FILES_PER_REVIEW
+    assert sum(1 for _, r in skipped if "file limit" in r) == 32 + 1 - capped.MAX_FILES_PER_REVIEW
 
 
 def test_patch_that_cannot_fit_the_context_window_is_skipped():
