@@ -61,12 +61,17 @@ async def test_the_nightly_loop_sweeps_at_once_and_stops_when_cancelled(db, monk
     await _seed(db)
     monkeypatch.setattr(settings, "REVIEW_RETENTION_DAYS", 365)
     task = asyncio.create_task(run_nightly(db, settings, interval_seconds=60))
-    await asyncio.sleep(0.2)
+    for _ in range(200):  # wait for the sweep, rather than sleeping a guessed amount and hoping
+        await asyncio.sleep(0.02)
+        async with db() as s:
+            if await ReviewRepository(s).count() == 2:
+                break
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    assert task.cancelled() or task.done()
     async with db() as s:
         assert await ReviewRepository(s).count() == 2, "the first sweep ran without waiting a day"
 
@@ -76,9 +81,11 @@ async def test_export_writes_every_selected_review_with_its_findings(db, fresh_d
     from database.connection import close_db
     await close_db()  # the script opens its own engine on the same file
     out = tmp_path / "reviews.json"
-    assert await export_reviews.export(fresh_db_url, out, older_than_days=365) == 2
+    assert await export_reviews.export(fresh_db_url, out, older_than_days=365, now=NOW) == 2
     data = json.loads(out.read_text())
     assert {r["id"] for r in data["reviews"]} == {"old", "old-running"}
     old = next(r for r in data["reviews"] if r["id"] == "old")
     assert len(old["findings"]) == 2 and old["findings"][0]["title"] == "t" and old["created_at"].startswith("2025-")
     assert await export_reviews.export(fresh_db_url, tmp_path / "all.json", repository="o/r") == 3
+    later = await export_reviews.export(fresh_db_url, tmp_path / "later.json", older_than_days=365, now=NOW + timedelta(days=400))
+    assert later == 3, "the cutoff moves with the clock it is given, so this test means the same thing next year"

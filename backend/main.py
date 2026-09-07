@@ -70,7 +70,6 @@ async def lifespan(app: FastAPI):
         fixed += await WebhookRepository(session).mark_interrupted()
     if fixed:
         logger.warning("marked rows left running by a previous run as interrupted", rows=fixed)
-    retention = asyncio.create_task(run_nightly(session_factory, settings), name="retention")
     if set(settings.allowed_hosts_list) <= {"localhost", "127.0.0.1", "::1"}:
         logger.warning("ALLOWED_HOSTS is loopback only; add the public webhook hostname before pointing GitHub at this backend")
     deps = RunnerDeps(settings=settings, llm=build_chat_model(settings), session_factory=session_factory,
@@ -83,6 +82,8 @@ async def lifespan(app: FastAPI):
     await queue.start()
     app.state.deps = deps
     app.state.queue = queue
+    # last, so nothing that can raise sits between creating this task and the finally that cancels it
+    retention = asyncio.create_task(run_nightly(session_factory, settings), name="retention")
     app.state.retention = retention
     try:
         yield

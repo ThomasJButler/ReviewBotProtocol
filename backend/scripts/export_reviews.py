@@ -32,7 +32,7 @@ def _plain(row) -> Dict[str, Any]:
 
 
 async def export(database_url: Optional[str], out: Path, repository: Optional[str] = None,
-                 older_than_days: Optional[int] = None) -> int:
+                 older_than_days: Optional[int] = None, now: Optional[datetime] = None) -> int:
     from database.connection import close_db, init_db
     from database.models import Review
     factory = await init_db(database_url)
@@ -41,7 +41,8 @@ async def export(database_url: Optional[str], out: Path, repository: Optional[st
         if repository:
             stmt = stmt.where(Review.repository == repository)
         if older_than_days is not None:
-            stmt = stmt.where(Review.created_at < datetime.now(timezone.utc) - timedelta(days=older_than_days))
+            # the same seam services/retention.py has, so a test is not a date away from meaning something else
+            stmt = stmt.where(Review.created_at < (now or datetime.now(timezone.utc)) - timedelta(days=older_than_days))
         async with factory() as session:
             reviews = list((await session.execute(stmt)).scalars().all())
             rows: List[Dict[str, Any]] = []
