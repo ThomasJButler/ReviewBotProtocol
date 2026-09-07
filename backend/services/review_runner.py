@@ -14,7 +14,7 @@ from config.logging import get_logger
 from config.settings import Settings
 from database.repositories.review_repository import ReviewRepository
 from database.repositories.webhook_repository import WebhookRepository
-from services.ai_reviewer import FileReviewer
+from services.ai_reviewer import FileReviewer, FileReviewResult
 from services.comment_renderer import render_review, sanitise
 from services.github_app_auth import InstallationTokenProvider
 from services.github_client import GitHubClient
@@ -130,6 +130,60 @@ async def _finish(deps: RunnerDeps, review_id: str, delivery_id: str, review_upd
         await session.commit()
 
 
+@dataclass
+class Posted:
+    comment_url: Optional[str]
+    findings_total: int
+
+
+def _finding_rows(succeeded: List[FileReviewResult]) -> List[Dict[str, Any]]:
+    return [
+        {"path": r.filename, "line": f.line, "category": f.category.value, "severity": f.severity.value,
+         "source_model": getattr(f, "source_model", None) or None, "cross_verdict": getattr(f, "cross_verdict", None),
+         "cross_reason": getattr(f, "cross_reason", "") or None,
+         "title": f.title, "evidence": f.evidence, "recommendation": f.recommendation, "confidence": f.confidence}
+        for r in succeeded for f in r.review.findings
+    ]
+
+
+async def _post_and_record(deps: RunnerDeps, client: GitHubClient, job: ReviewJob, review_id: str, *, head_sha: str,
+                           succeeded: List[FileReviewResult], errored: List[FileReviewResult],
+                           skipped: List[Tuple[str, str]], redaction_total: int, totals: Dict[str, int],
+                           pr_title: str, files_total: int, started: float, status: str,
+                           error_message: Optional[str]) -> Posted:
+    """Render what was reviewed, post it, and write the review row, its
+    findings and the delivery row: the one path a finished review ends on,
+    whatever its status."""
+    settings = deps.settings
+    rendered = render_review(succeeded, model=settings.OLLAMA_MODEL, skipped=skipped, is_fork=job.is_fork,
+                             fork_repo=job.fork_repo, max_inline=settings.MAX_INLINE_COMMENTS,
+                             redaction_total=redaction_total, files_errored=len(errored),
+                             cross_model=settings.CROSS_EXAMINE_MODEL or None,
+                             cross_added=totals.get("cross_added", 0), cross_refuted=totals.get("cross_refuted", 0))
+    posted = await client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
+    comment_url = posted.get("html_url")
+    # The review is live on GitHub now: record its URL before anything else can
+    # interrupt us, and shield the writes so a cancel arriving here cannot leave
+    # a posted review recorded as anything but completed.
+    async def _record_url() -> None:
+        async with deps.session_factory() as session:
+            await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
+    await asyncio.wait_for(asyncio.shield(_record_url()), timeout=CLEANUP_SECONDS)
+    duration = time.perf_counter() - started
+    await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
+        "status": status, "head_sha": head_sha, "pr_title": pr_title,
+        "files_total": files_total, "files_reviewed": len(succeeded), "files_skipped": len(skipped),
+        "skipped": [{"path": p, "reason": r} for p, r in skipped],
+        "findings_count": rendered.findings_total, "severity_counts": rendered.counts_by_severity,
+        "findings_dropped": totals.get("dropped", 0), "redactions": redaction_total,
+        "cross_added": totals.get("cross_added", 0), "cross_refuted": totals.get("cross_refuted", 0),
+        "prompt_tokens": totals.get("prompt_tokens", 0), "output_tokens": totals.get("output_tokens", 0),
+        "duration_seconds": duration, "comment_url": comment_url, "completed_at": get_utc_timestamp(),
+        "summary": rendered.body[:6000], "error_message": error_message,
+    }, status, findings=_finding_rows(succeeded))), timeout=CLEANUP_SECONDS)
+    return Posted(comment_url, rendered.findings_total)
+
+
 async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
     settings = deps.settings
     review_id = str(uuid.uuid4())
@@ -186,45 +240,16 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         if (latest.get("head", {}).get("sha") or head_sha) != head_sha:
             raise Superseded("head moved while the review was running; the newer push will be reviewed")
 
-        rendered = render_review(succeeded, model=settings.OLLAMA_MODEL, skipped=skipped, is_fork=job.is_fork,
-                                 fork_repo=job.fork_repo, max_inline=settings.MAX_INLINE_COMMENTS,
-                                 redaction_total=redaction_total, files_errored=len(errored),
-                                 cross_model=settings.CROSS_EXAMINE_MODEL or None,
-                                 cross_added=totals.get("cross_added", 0), cross_refuted=totals.get("cross_refuted", 0))
-        posted = await client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
-        comment_url = posted.get("html_url")
-        # The review is live on GitHub now: record its URL before anything else can
-        # interrupt us, and shield the writes so a cancel arriving here cannot leave
-        # a posted review recorded as anything but completed.
-        async def _record_url() -> None:
-            async with deps.session_factory() as session:
-                await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
-        await asyncio.wait_for(asyncio.shield(_record_url()), timeout=CLEANUP_SECONDS)
-        duration = time.perf_counter() - started
         all_failed = bool(results) and not succeeded
-
-        await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
-            "status": "failed" if all_failed else "completed", "head_sha": head_sha,
-            "pr_title": sanitise(redact(pr.get("title") or "")[0], 200),
-            "files_total": len(raw_files), "files_reviewed": len(succeeded), "files_skipped": len(skipped),
-            "skipped": [{"path": p, "reason": r} for p, r in skipped],
-            "findings_count": rendered.findings_total, "severity_counts": rendered.counts_by_severity,
-            "findings_dropped": totals.get("dropped", 0), "redactions": redaction_total,
-            "cross_added": totals.get("cross_added", 0), "cross_refuted": totals.get("cross_refuted", 0),
-            "prompt_tokens": totals.get("prompt_tokens", 0), "output_tokens": totals.get("output_tokens", 0),
-            "duration_seconds": duration, "comment_url": comment_url, "completed_at": get_utc_timestamp(),
-            "summary": rendered.body[:6000],
-            "error_message": "the model failed on every file" if all_failed else None,
-        }, "failed" if all_failed else "completed", findings=[
-            {"path": r.filename, "line": f.line, "category": f.category.value, "severity": f.severity.value,
-             "source_model": getattr(f, "source_model", None) or None, "cross_verdict": getattr(f, "cross_verdict", None),
-             "cross_reason": getattr(f, "cross_reason", "") or None,
-             "title": f.title, "evidence": f.evidence, "recommendation": f.recommendation, "confidence": f.confidence}
-            for r in succeeded for f in r.review.findings
-        ])), timeout=CLEANUP_SECONDS)
-        logger.info("review posted", repo=job.repo, pr=job.pr_number, findings=rendered.findings_total,
-                    files=len(succeeded), errored=len(errored), seconds=round(duration, 1), url=comment_url)
-        return ReviewOutcome(review_id, rendered.findings_total, len(succeeded), len(skipped), comment_url)
+        posted = await _post_and_record(deps, client, job, review_id, head_sha=head_sha, succeeded=succeeded,
+                                        errored=errored, skipped=skipped, redaction_total=redaction_total, totals=totals,
+                                        pr_title=sanitise(redact(pr.get("title") or "")[0], 200), files_total=len(raw_files),
+                                        started=started, status="failed" if all_failed else "completed",
+                                        error_message="the model failed on every file" if all_failed else None)
+        logger.info("review posted", repo=job.repo, pr=job.pr_number, findings=posted.findings_total,
+                    files=len(succeeded), errored=len(errored), seconds=round(time.perf_counter() - started, 1),
+                    url=posted.comment_url)
+        return ReviewOutcome(review_id, posted.findings_total, len(succeeded), len(skipped), posted.comment_url)
     except BaseException as e:
         elapsed = time.perf_counter() - started
         if isinstance(e, asyncio.CancelledError):
