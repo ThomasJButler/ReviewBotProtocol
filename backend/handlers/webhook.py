@@ -94,6 +94,10 @@ async def github_webhook(request: Request, session: AsyncSession = Depends(get_d
     if pr.pull_request.draft and not settings.REVIEW_DRAFTS:
         await deliveries.mark(delivery_id, "skipped_draft")
         return _ok("skipped_draft", pr_number=pr.number)
+    if pr.pull_request.user.type == "Bot" and not settings.REVIEW_BOT_PULL_REQUESTS:
+        # dependabot opened nine in one afternoon; each would have queued an hour of the machine
+        await deliveries.mark(delivery_id, "skipped_bot")
+        return _ok("skipped_bot", pr_number=pr.number)
 
     head_sha = pr.pull_request.head.sha
     # A head that was already reviewed to completion is never queued again, so a

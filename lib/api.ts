@@ -120,6 +120,8 @@ export interface Status {
     review_timeout_seconds: number
     review_seconds_per_file: number
     num_ctx: number
+    review_drafts: boolean
+    review_bot_pull_requests: boolean
   }
 }
 

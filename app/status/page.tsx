@@ -280,6 +280,20 @@ export default async function StatusPage() {
                   label="Context window"
                   value={status.data.limits.num_ctx.toLocaleString('en-GB')}
                 />
+                <Row
+                  label="Draft pull requests"
+                  value={
+                    status.data.limits.review_drafts ? 'reviewed' : 'skipped'
+                  }
+                />
+                <Row
+                  label="Bot pull requests"
+                  value={
+                    status.data.limits.review_bot_pull_requests
+                      ? 'reviewed'
+                      : 'skipped'
+                  }
+                />
               </dl>
             </CardContent>
           </Card>

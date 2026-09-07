@@ -60,6 +60,7 @@ const STATUS_STYLES: Record<string, string> = {
   duplicate: GREY,
   ignored: GREY,
   skipped_draft: GREY,
+  skipped_bot: GREY,
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -75,6 +76,7 @@ const STATUS_LABELS: Record<string, string> = {
   duplicate: 'Duplicate',
   ignored: 'Ignored',
   skipped_draft: 'Draft, skipped',
+  skipped_bot: 'Bot author, skipped',
 }
 
 /** The state of a review run. Lives here so both badges share one palette. */

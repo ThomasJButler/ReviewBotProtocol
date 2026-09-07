@@ -86,6 +86,7 @@ async def test_status_reports_ollama_queue_and_limits(api):
     assert s["queue"]["depth"] == 0 and s["queue"]["alive"] is True
     assert s["limits"]["max_files_per_review"] > 0 and s["database"] is True
     assert s["limits"]["review_seconds_per_file"] == settings.REVIEW_SECONDS_PER_FILE
+    assert s["limits"]["review_bot_pull_requests"] is False and s["limits"]["review_drafts"] is False
 
 
 async def test_status_shows_the_progress_of_the_job_in_flight(api, app, db):
