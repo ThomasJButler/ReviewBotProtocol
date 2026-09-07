@@ -11,6 +11,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 - The replay check's body hash is a unique index, so the read-then-insert race is a constraint; an existing database gets the index at startup, or a warning if it holds duplicates.
 - `REVIEW_RETENTION_DAYS` (365): reviews, their findings and webhook deliveries older than that are deleted at startup and nightly, never a row still running; 0 keeps everything. `scripts/export_reviews.py` writes what is worth keeping to JSON first.
 - Every setting carries a docstring, and `docs/SETTINGS.md` is generated from them by `scripts/settings_reference.py`; a test keeps the file and the class equal.
+- The dashboard's section cards on the Status and Setup pages are headings, so the page outline reads the way it looks; a root error page (`app/global-error.tsx`) paints a fallback when the layout itself fails.
 
 ## 1.1.0 (2026-09-07)
 
