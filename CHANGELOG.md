@@ -5,7 +5,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 ## Unreleased
 
 - A review cut short by the time ceiling posts the files that finished and lists the rest under Not reviewed; each review also gets its own budget of `REVIEW_SECONDS_PER_FILE` (300) times its file count, under the ceiling; a review that fails before posting leaves one line on the pull request.
-- A forged data-block delimiter inside a diff is rewritten to `[forged-data-marker]` (it was `[data-marker]`), so a model cannot read it as the pipeline's own framing.
+- A forged data-block delimiter inside a diff is rewritten to `[forged-data-marker]`. It was `[data-marker]`, which the verifier read as the pipeline's own framing before standing down on a planted instruction (`docs/benchmarks/2026-09-06-round-three.md`). Naming the token in the prompts is a separate change and waits on a measured round.
 
 ## 1.1.0 (2026-09-07)
 
