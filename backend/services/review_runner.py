@@ -198,28 +198,31 @@ async def _post_and_record(deps: RunnerDeps, client: GitHubClient, job: ReviewJo
                            skipped: List[Tuple[str, str]], redaction_total: int, totals: Dict[str, int],
                            pr_title: str, files_total: int, started: float, status: str,
                            error_message: Optional[str], cut_short: str = "", post: bool = True,
-                           post_seconds: Optional[float] = None) -> Posted:
+                           post_seconds: Optional[float] = None, cross_examined: bool = True) -> Posted:
     """Render what was reviewed, post it, and write the review row, its
     findings and the delivery row: the one path a finished review ends on,
     whatever its status. A review cut short passes post_seconds, since it
     runs inside a cancel with the queue's grace period as its whole budget,
     and post=False when the head has moved, so the row still gets its findings
-    but nothing goes to a stale commit."""
+    but nothing goes to a stale commit. cross_examined is false when a review
+    was cut short before the second model saw anything: naming it then would
+    tell the author the findings were checked when they were not."""
     settings = deps.settings
     rendered = render_review(succeeded, model=settings.OLLAMA_MODEL, skipped=skipped, is_fork=job.is_fork,
                              fork_repo=job.fork_repo, max_inline=settings.MAX_INLINE_COMMENTS,
                              redaction_total=redaction_total, files_errored=len(errored),
-                             cross_model=settings.CROSS_EXAMINE_MODEL or None,
+                             cross_model=(settings.CROSS_EXAMINE_MODEL or None) if cross_examined else None,
                              cross_added=totals.get("cross_added", 0), cross_refuted=totals.get("cross_refuted", 0),
                              cut_short=cut_short)
     comment_url = None
     if post:
+        # No shield on the post itself: a shielded request that outlives its deadline would
+        # go on to land a review nobody recorded, and the next delivery would post a second
+        # one. Cancelling it is the lesser risk. The writes below are shielded, because by
+        # then the review is on GitHub and the row has to say so.
         call = client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
-        posted = await call if post_seconds is None else await asyncio.wait_for(asyncio.shield(call), timeout=post_seconds)
+        posted = await call if post_seconds is None else await asyncio.wait_for(call, timeout=post_seconds)
         comment_url = posted.get("html_url")
-        # The review is live on GitHub now: record its URL before anything else can
-        # interrupt us, and shield the writes so a cancel arriving here cannot leave
-        # a posted review recorded as anything but completed.
         async def _record_url() -> None:
             async with deps.session_factory() as session:
                 await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
@@ -258,7 +261,7 @@ async def _post_cut_short(deps: RunnerDeps, client: GitHubClient, job: ReviewJob
         if f["filename"] not in done:
             skipped.append((f["filename"], "not reached before the review's time ran out"))
     elapsed = time.perf_counter() - started
-    if where.get("phase") == "cross-examine":
+    if where.get("phase") == "cross-examine" and totals_for(results)["cross_calls"]:
         cut_short = (f"All {len(files)} files were reviewed; the cross-examiner reached {where.get('done', 0)} of them "
                      f"before time ran out after {elapsed:.0f} s.")
     elif results:
@@ -267,7 +270,7 @@ async def _post_cut_short(deps: RunnerDeps, client: GitHubClient, job: ReviewJob
     else:
         cut_short = f"This review ran out of time after {elapsed:.0f} s before finishing a file."
     try:
-        latest = await asyncio.wait_for(asyncio.shield(client.get_pull(job.repo, job.pr_number)), timeout=PARTIAL_HEAD_CHECK_SECONDS)
+        latest = await asyncio.wait_for(client.get_pull(job.repo, job.pr_number), timeout=PARTIAL_HEAD_CHECK_SECONDS)
         current = (latest.get("head", {}).get("sha") or head_sha) == head_sha
         if not current:
             logger.info("head moved while the review was being cut short; recording it without posting", repo=job.repo, pr=job.pr_number)
@@ -275,12 +278,14 @@ async def _post_cut_short(deps: RunnerDeps, client: GitHubClient, job: ReviewJob
         logger.warning("could not check the head before posting a review cut short; recording it without posting",
                        repo=job.repo, pr=job.pr_number, error=type(e).__name__)
         current = False
+    totals = totals_for(results)
     try:
         posted = await _post_and_record(deps, client, job, review_id, head_sha=head_sha, succeeded=succeeded, errored=errored,
-                                        skipped=skipped, redaction_total=redaction_total, totals=totals_for(results),
+                                        skipped=skipped, redaction_total=redaction_total, totals=totals,
                                         pr_title=sanitise(redact(pr.get("title") or "")[0], 200), files_total=len(raw_files),
                                         started=started, status="timed_out", error_message=message, cut_short=cut_short,
-                                        post=current, post_seconds=PARTIAL_POST_SECONDS)
+                                        post=current, post_seconds=PARTIAL_POST_SECONDS,
+                                        cross_examined=totals["cross_calls"] > 0)
     except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
         logger.warning("could not post or record the review cut short", repo=job.repo, pr=job.pr_number, error=type(e).__name__)
         return False

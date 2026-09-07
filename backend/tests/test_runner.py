@@ -265,6 +265,32 @@ def test_the_budget_is_files_times_the_per_file_setting_under_the_ceiling():
 
 
 @respx.mock
+async def test_a_review_cut_short_before_the_cross_examiner_ran_does_not_claim_it_did(db):
+    """With the two models run one at a time, a review cut short in the first
+    phase has findings no second model has seen. Naming the cross-examiner
+    then, with 0 added and 0 refuted, would read as verified and clean."""
+    reviews_route = _routes(extra=[LATE])
+    two_phase = settings.model_copy(update={"CROSS_EXAMINE_MODEL": "gemma-fake", "CROSS_EXAMINE_SEQUENTIAL": True})
+    model = SlowAfter(response=MODEL_REPLY)
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=two_phase, llm=model, session_factory=db, http=http,
+                          cross_llm=RecordingChatModel(model="gemma-fake"))
+        job = ReviewJob("octocat/repo", 42, "c" * 40, 555, "")
+        task = asyncio.create_task(run_review(job, deps))
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if model.started >= 2:
+                break
+        job.state["cancel_reason"] = "timeout"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    posted = json.loads(reviews_route.calls[0].request.content)
+    assert "Cross-examined by" not in posted["body"], posted["body"]
+    assert "1 of 2 files were reviewed" in posted["body"]
+
+
+@respx.mock
 async def test_a_review_cut_short_before_any_file_finished_says_so(db):
     """Nothing reviewed is still worth one line on the pull request: silence
     reads as approval."""

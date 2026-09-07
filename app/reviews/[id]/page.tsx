@@ -175,7 +175,7 @@ export default async function ReviewDetailPage({
           <p className="mt-1 font-mono text-xs break-words text-muted-foreground">
             {review.error_message}
           </p>
-          {review.comment_url ? (
+          {review.status === 'timed_out' && review.comment_url ? (
             <p className="mt-2 text-sm text-muted-foreground">
               What finished was posted; the files it did not reach are listed
               under Not reviewed.
