@@ -101,7 +101,8 @@ export function ReviewsTable({
                   {review.repository}
                 </Link>
               </TableCell>
-              <TableCell className="max-w-72">
+              {/* the shared cell never wraps; a long title must, or it runs into the next column */}
+              <TableCell className="max-w-72 whitespace-normal break-words">
                 <a
                   href={pullRequestUrl(review.repository, review.pr_number)}
                   target="_blank"
