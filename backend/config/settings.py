@@ -41,13 +41,15 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.1.0"
     """The version /health and /api/status report, matching the CHANGELOG entry. Bumped with a release."""
     DEBUG: bool = False
-    """Console-formatted logs instead of JSON lines, and FastAPI's debug mode. Off for anything GitHub can reach."""
+    """Console-formatted logs instead of JSON lines, `/docs` and `/openapi.json` served, uvicorn reloading on a
+    file change, and the exception's type name in the body of a 500. Off for anything GitHub can reach."""
 
     HOST: str = "127.0.0.1"
     """The interface uvicorn binds. Loopback by default: GitHub reaches the webhook through a tunnel or a
     reverse proxy that forwards only that path, never through this port being public."""
     PORT: int = 8000
-    """The port uvicorn binds. The dashboard's BACKEND_URL and scripts/dev-up.sh point at it."""
+    """The port uvicorn binds when the backend is started with `python main.py`. The dashboard's BACKEND_URL must
+    name the same one; `scripts/dev-up.sh` assumes the default and passes 8000 to uvicorn and to the tunnel."""
     ALLOWED_HOSTS: str = "localhost,127.0.0.1"
     """Comma-separated bare hostnames the backend answers for (the Host header check). Add the tunnel or
     proxy hostname without scheme or path; a pasted URL is reduced to its hostname. Loopback only means
@@ -140,7 +142,7 @@ class Settings(BaseSettings):
 
     LOCAL_API_TOKEN: str = ""
     """The bearer token the dashboard sends on every /api call; the same value goes in the dashboard's .env.local.
-    Empty leaves the dashboard routes open, safe only while the port is loopback."""
+    Empty switches the dashboard API off: every /api route answers 503 and the dashboard shows nothing."""
     STRICT_LOCAL: bool = True
     """The local-only guard: refuse to start if OLLAMA_BASE_URL is not loopback, a model tag looks like an Ollama
     cloud model, or a cloud API key (OpenAI, Anthropic, Google, Mistral, Sentry, LangSmith) is in the environment.

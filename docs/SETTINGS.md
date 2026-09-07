@@ -7,9 +7,9 @@ Generated from `backend/config/settings.py` by `backend/scripts/settings_referen
 | --- | --- | --- | --- |
 | `APP_NAME` | str | `ReviewBot Protocol` | The name in the startup log and the API's OpenAPI title. Cosmetic. |
 | `APP_VERSION` | str | `1.1.0` | The version /health and /api/status report, matching the CHANGELOG entry. Bumped with a release. |
-| `DEBUG` | bool | `false` | Console-formatted logs instead of JSON lines, and FastAPI's debug mode. Off for anything GitHub can reach. |
+| `DEBUG` | bool | `false` | Console-formatted logs instead of JSON lines, `/docs` and `/openapi.json` served, uvicorn reloading on a file change, and the exception's type name in the body of a 500. Off for anything GitHub can reach. |
 | `HOST` | str | `127.0.0.1` | The interface uvicorn binds. Loopback by default: GitHub reaches the webhook through a tunnel or a reverse proxy that forwards only that path, never through this port being public. |
-| `PORT` | int | `8000` | The port uvicorn binds. The dashboard's BACKEND_URL and scripts/dev-up.sh point at it. |
+| `PORT` | int | `8000` | The port uvicorn binds when the backend is started with `python main.py`. The dashboard's BACKEND_URL must name the same one; `scripts/dev-up.sh` assumes the default and passes 8000 to uvicorn and to the tunnel. |
 | `ALLOWED_HOSTS` | str | `localhost,127.0.0.1` | Comma-separated bare hostnames the backend answers for (the Host header check). Add the tunnel or proxy hostname without scheme or path; a pasted URL is reduced to its hostname. Loopback only means GitHub cannot reach the webhook, and startup says so. |
 | `ALLOWED_ORIGINS` | str | `http://localhost:3000` | Comma-separated origins allowed by CORS. The dashboard calls the backend server-side, so this rarely changes. |
 | `GITHUB_APP_ID` | str | required | The App's numeric id from its settings page. Required. |
@@ -40,7 +40,7 @@ Generated from `backend/config/settings.py` by `backend/scripts/settings_referen
 | `CROSS_EXAMINE_KEEP_ALIVE` | str | `30m` | How long Ollama keeps the cross-examiner loaded after a call, like OLLAMA_KEEP_ALIVE. |
 | `CROSS_EXAMINE_SEQUENTIAL` | bool | `false` | Run the two models one at a time: review every file, unload the reviewer, cross-examine every file, unload the cross-examiner. For a machine that cannot hold both at once (the 32 GB reference laptop); costs a reload between the phases. |
 | `CROSS_EXAMINE_NOTE_FIRST` | bool | `false` | The cross-examiner writes its summary note before its verdicts. Measured both ways in docs/benchmarks; verdicts first (off) scored higher on the corpus. |
-| `LOCAL_API_TOKEN` | str | empty | The bearer token the dashboard sends on every /api call; the same value goes in the dashboard's .env.local. Empty leaves the dashboard routes open, safe only while the port is loopback. |
+| `LOCAL_API_TOKEN` | str | empty | The bearer token the dashboard sends on every /api call; the same value goes in the dashboard's .env.local. Empty switches the dashboard API off: every /api route answers 503 and the dashboard shows nothing. |
 | `STRICT_LOCAL` | bool | `true` | The local-only guard: refuse to start if OLLAMA_BASE_URL is not loopback, a model tag looks like an Ollama cloud model, or a cloud API key (OpenAI, Anthropic, Google, Mistral, Sentry, LangSmith) is in the environment. LangSmith tracing variables are fatal regardless. False only when your shell carries keys for other projects. |
 | `LOG_LEVEL` | str | `INFO` | The logging level for the backend's JSON log lines. |
 | `LOG_PROMPTS` | bool | `false` | Log the full prompt of every model call, diff included. Off; on only for a debugging session, since the log then holds the code. |
