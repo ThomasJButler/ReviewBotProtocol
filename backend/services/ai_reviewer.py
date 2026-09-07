@@ -37,6 +37,17 @@ _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 _MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END})[A-Za-z0-9_]{{0,64}}[\t >]{{0,16}}")
 
 
+TAG_WORDS = {"yagni", "delete", "stdlib", "native", "shrink"}
+
+
+def _tag_only_title(title: str) -> bool:
+    """A simplicity finding titled with the tag alone ("shrink"), which both prompts
+    forbid ("then what to remove, never the tag alone"): the model filling the slot
+    rather than naming a problem. Round three's like-for-like key-order pair showed
+    22 of these on one side and 11 on the other, all on diffs with nothing wrong."""
+    return title.strip().lower().rstrip(".:") in TAG_WORDS
+
+
 _NOTHING = {"", "none", "n/a", "na", "no finding", "no findings", "nothing", "-"}
 
 
@@ -218,7 +229,7 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float)
     kept: List[Finding] = []
     seen = set()
     for f in review.findings:
-        if f.confidence < min_confidence:
+        if f.confidence < min_confidence or _tag_only_title(f.title):
             continue
         located, part = locate_evidence_part(parsed, f.line, f.evidence)
         if located is None:

@@ -23,6 +23,31 @@ CROSS = json.dumps({"verdicts": [{"index": 0, "verdict": "real", "severity": "hi
                     "additions": [], "summary_note": ""})
 
 
+async def test_a_cross_run_replays_both_models_through_the_current_pipeline(tmp_path: Path):
+    """A cross-examined run records the reviewer's reply and the second model's
+    reply in every row, so the whole run can be pushed through a changed
+    pipeline with no model loaded: --replay for the first, --replay-cross for
+    the second. Here the recorded cross reply refutes the finding, and the
+    pipeline applies it without either model existing."""
+    refute = json.dumps({"verdicts": [{"index": 0, "verdict": "false_positive", "severity": "low",
+                                       "reason": "a fixture value", "confidence": 0.9}], "additions": [], "summary_note": "fixture"})
+    p = tmp_path / "pass2-cross_x.json"
+    p.write_text(json.dumps({"model": "qwen-recorded", "cross_model": "gemma-recorded", "variant": "cross:x", "rows": [
+        {"case": "a", "model_texts": [REVIEW, refute], "prompt_tokens": 2000, "output_tokens": 300, "seconds": 30.0},
+        {"case": "a", "model_texts": [REVIEW, CROSS], "prompt_tokens": 2000, "output_tokens": 300, "seconds": 30.0},
+    ], "summary": {}}))
+    run, texts, _ = H.load_replay(str(p))
+    cross_texts = H.load_replay_cross(str(p))
+    assert cross_texts == {"a": [refute, CROSS]}
+    reviewer = H.ReplayChatModel(model=run["model"], texts=texts, key="a", repeat=0)
+    cross = H.ReplayChatModel(model="gemma-recorded", texts=cross_texts, key="a", repeat=0)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    assert result.cross_refuted == 1 and result.review.findings == [], "repeat 0 replays the refutation"
+    reviewer.repeat = cross.repeat = 1
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    assert result.cross_refuted == 0 and [f.line for f in result.review.findings] == [2], "repeat 1 replays the confirmation"
+
+
 def _run_file(tmp_path: Path) -> Path:
     p = tmp_path / "pass1-new.json"
     p.write_text(json.dumps({"model": "qwen-recorded", "variant": "new", "prompt_words": 500, "rows": [

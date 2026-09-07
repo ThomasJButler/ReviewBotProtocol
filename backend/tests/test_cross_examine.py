@@ -229,13 +229,33 @@ async def test_an_addition_restating_a_confirmed_finding_on_its_line_is_not_an_a
         [{"index": 0, "verdict": "real", "severity": "critical", "reason": "eval on request input at line 2.", "confidence": 0.95}],
         [{"category": "security", "severity": "critical", "title": "Code execution", "line": 2,
           "evidence": "eval(user_input)", "recommendation": "Parse it.", "confidence": 0.9},
-         {"category": "quality", "severity": "low", "title": "shrink", "line": 2,
+         {"category": "quality", "severity": "low", "title": "shrink: parse instead of eval", "line": 2,
           "evidence": "eval(user_input)", "recommendation": "SENTINEL_9f3a = parse(user_input)", "confidence": 0.7}])
     reviewer, cross = _pair(restate)
     result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
     on_two = [f for f in result.review.findings if f.line == 2]
     assert [f.category.value for f in on_two] == ["security", "quality"], "the restatement is dropped, the other category stays"
     assert on_two[0].title == "eval on user input" and result.cross_added == 1
+
+
+async def test_a_finding_titled_with_the_tag_alone_is_slot_filling_and_is_dropped():
+    """Both prompts say a simplicity title opens with the tag and then names what to
+    remove, never the tag alone. The like-for-like key-order pair of 2026-09-07
+    found gemma4:12b writing a bare "shrink" on diffs with nothing wrong, 22 times
+    under one order and 11 under the other; that was the whole difference between
+    the orders. A bare tag is not a finding, from either model."""
+    bare = _cross([], [{"category": "quality", "severity": "low", "title": "shrink", "line": 1,
+                        "evidence": "import os", "recommendation": "Use a generator expression.", "confidence": 0.8},
+                       {"category": "quality", "severity": "low", "title": "yagni: drop the unused import", "line": 1,
+                        "evidence": "import os", "recommendation": "Delete the import.", "confidence": 0.8}])
+    reviewer, cross = _pair(bare)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    on_one = [f for f in result.review.findings if f.line == 1]
+    assert [f.title for f in on_one] == ["yagni: drop the unused import"] and result.cross_added == 1
+    tagged = FIND.replace('"title": "eval on user input"', '"title": "Shrink."')
+    reviewer, cross = _pair(CONFIRM_BOTH, reviewer_response=tagged)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    assert [f.line for f in result.review.findings] == [3], "the reviewer's own bare tag is dropped before the cross pass"
 
 
 async def test_a_refutation_with_an_addition_elsewhere_is_still_a_refutation():

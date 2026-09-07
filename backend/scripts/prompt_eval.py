@@ -186,6 +186,19 @@ class ReplayChatModel(BaseChatModel):
         return "replay"
 
 
+def load_replay_cross(path: str) -> Dict[str, List[str]]:
+    """The cross-examiner's raw reply per case and repeat from a cross run's rows
+    (the second recorded text of each row), so a cross run can be pushed through
+    a changed pipeline with no model at all: --replay for the reviewer's replies
+    and --replay-cross for the second model's."""
+    run = json.loads(Path(path).read_text(encoding="utf-8"))
+    texts: Dict[str, List[str]] = {}
+    for r in run["rows"]:
+        recorded = r.get("model_texts") or []
+        texts.setdefault(r["case"], []).append(recorded[1] if len(recorded) > 1 else "")
+    return texts
+
+
 def load_replay(path: str) -> Tuple[Dict[str, Any], Dict[str, List[str]], Dict[str, List[Dict[str, Any]]]]:
     """The run file, the reviewer's first reply per case and repeat, and the rows
     themselves (their tokens and seconds are added back so a replayed variant
@@ -351,6 +364,10 @@ async def main() -> int:
     ap.add_argument("--out", default=None, help="directory to write one JSON per variant as it finishes")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--model", default=None)
+    ap.add_argument("--replay-cross", default=None,
+                    help="a --out JSON from a cross-examined run: reuse its recorded cross-examiner replies too, so "
+                         "the run is pushed through the current pipeline with no model loaded (pair with --replay "
+                         "pointing at the same file, and --cross-model naming the model it recorded)")
     ap.add_argument("--replay", default=None,
                     help="a --out JSON from a reviewer-only run: reuse its recorded replies instead of calling the "
                          "reviewer model, so only the cross-examiner or verifier model is loaded")
@@ -405,7 +422,11 @@ async def main() -> int:
     recorder = Recorder()
     llm.callbacks = [recorder]
     cross_llm = None
-    if args.cross_model:
+    if args.cross_model and args.replay_cross:
+        cross_llm = ReplayChatModel(model=args.cross_model, texts=load_replay_cross(args.replay_cross))
+        cross_llm.callbacks = [recorder]
+        print(f"replaying the cross-examiner replies from {args.replay_cross}")
+    elif args.cross_model:
         cross_llm = build_chat_model(settings, model=args.cross_model)
         cross_llm.callbacks = [recorder]
     # Candidate prompts become variants: reviewer candidates run without the cross-examiner
@@ -464,6 +485,8 @@ async def main() -> int:
             for i in range(args.repeats):
                 if replay_rows is not None:
                     llm.key, llm.repeat = case.key, i
+                if args.replay_cross and cross_llm is not None:
+                    cross_llm.key, cross_llm.repeat = case.key, i
                 row = await run_case(reviewer, recorder, case, settings.MIN_FINDING_CONFIDENCE,
                                      cross_model=args.cross_model or "" if spec.get("cross") else "")
                 if replay_rows is not None:
@@ -494,7 +517,7 @@ async def main() -> int:
 
     if args.unload:
         live = ([settings.OLLAMA_MODEL] if (replay_run is None or live_reviewer is not None) else [])
-        live += [args.cross_model] if args.cross_model else []
+        live += [args.cross_model] if (args.cross_model and not args.replay_cross) else []  # a replayed model was never loaded
         await unload_models(settings, live)
 
     print("\n== summary ==")
