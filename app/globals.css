@@ -162,7 +162,7 @@
     @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.8125rem];
   }
   .posted-body a {
-    @apply underline underline-offset-4;
+    @apply rounded-sm underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring;
   }
   .posted-body hr {
     @apply border-border;

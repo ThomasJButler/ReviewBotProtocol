@@ -52,9 +52,13 @@ _MAX_KEY_BODY_LINES = 200
 _PLACEHOLDER_PREFIXES = ("your-", "your_", "changeme", "placeholder", "xxxx", "[redacted:", "${", "{{", "<", "example")
 _PLACEHOLDER_EXACT = {"example", "test", "secret", "password", "changeme", "none", "null"}
 
+# Files that are secret material by nature are never sent to the model at all. This is the
+# second net: the first is redact() below, whose assigned-secret pattern catches a credential
+# by its shape in any file, whatever the file is called.
 EXCLUDED_BASENAMES = {
     "credentials",
-    ".env", ".npmrc", ".pypirc", ".netrc", "kubeconfig", "credentials.json", ".htpasswd", ".git-credentials",
+    ".env", ".npmrc", ".pypirc", ".netrc", ".pgpass", ".s3cfg", ".boto", "kubeconfig", "credentials.json",
+    ".htpasswd", ".git-credentials",
     "secrets.yaml", "secrets.yml", "secrets.json", "secret.yaml", "secret.yml", "credentials.yaml", "credentials.yml",
     "vault.yaml", "vault.yml", ".dockercfg",
 }

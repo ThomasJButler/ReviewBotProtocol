@@ -82,7 +82,8 @@ def add_missing_columns(sync_conn) -> List[str]:
         for column in table.columns:
             if column.name in present:
                 continue
-            ddl = f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type.compile(sync_conn.dialect)}"
+            quote = sync_conn.dialect.identifier_preparer.quote  # names come from the models, quoted anyway
+            ddl = f"ALTER TABLE {quote(table.name)} ADD COLUMN {quote(column.name)} {column.type.compile(sync_conn.dialect)}"
             if column.default is not None and getattr(column.default, "is_scalar", False):
                 value = column.default.arg
                 ddl += f" DEFAULT {int(value) if isinstance(value, bool) else value!r}"

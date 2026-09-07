@@ -97,7 +97,7 @@ def test_clean_text_is_untouched():
 def test_excluded_paths():
     for p in [".env", ".env.production", "config/.env.local", "certs/server.pem", "id_rsa", "keys/id_ed25519",
               "infra/prod.tfvars", "terraform.tfstate", ".npmrc", "credentials.json", "service-account-prod.json",
-              "kubeconfig", "secrets.yaml", "secret.yml", "vault.yaml", ".git-credentials", "store.jks", "svc.keytab"]:
+              "kubeconfig", "secrets.yaml", "secret.yml", "vault.yaml", ".git-credentials", "store.jks", "svc.keytab", ".pgpass", "config/.s3cfg", "home/.boto"]:
         assert is_excluded_path(p), p
     for p in ["src/app.py", "README.md", "env.example", "keys.py", ".env.example", ".env.example.txt", "docs/pemberton.md"]:
         assert not is_excluded_path(p), p
