@@ -57,6 +57,7 @@ The hands-on test plan was run against a public scratch repository on 2026-09-06
 - [PR 1, the planted pull request](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/1): an SQL injection, two made-up keys, an instruction planted in a comment, a command injection, a `.env` file, a minified bundle and a rename. Four reviews, one per push; the last cross-examined by `gemma4:12b`.
 - [PR 2, opened as a draft](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/2): skipped until it was marked ready, then reviewed with no findings.
 - [PR 3, thirty files](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/3): twenty-five reviewed, five listed as over the cap.
+- [PR 4](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/4), [PR 5](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/5) and [PR 6](https://github.com/ThomasJButler/ReviewBot-Protocol-Testing/pull/6): a small Mandelbrot renderer built the way a junior would, across three stacked pull requests, reviewed by the 9B with `gemma4:12b` cross-examining. Unbounded query parameters, a save path joined from user input, debug mode on the network, a gallery page with no `lang`, colour-only status and a `div` as a button, titles inserted with `innerHTML`, a file route with no containment check, a pickle cache and a hard-coded placeholder secret: read the reviews and decide which findings you agree with.
 
 What each scenario expected and what happened is in docs/TEST_PLAN.md, section 8.
 
