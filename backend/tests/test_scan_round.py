@@ -142,7 +142,6 @@ def test_the_gpu_tunnel_script_keeps_its_host_key_pin():
 def test_the_link_pattern_is_linear_on_a_whitespace_flood():
     """F17's widened link pattern was quadratic on a bracket followed by a run of
     spaces; the runs are bounded now, like the delimiter pattern's."""
-    import time
     from services.comment_renderer import sanitise
     flood = "[x](" + " " * 30_000 + "https://evil.example)"
     started = time.perf_counter()
