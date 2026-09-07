@@ -66,6 +66,22 @@ def review_budget(settings: Settings, files: int, elapsed: float) -> float:
     return max(1.0, total - elapsed - TIMEOUT_MARGIN_SECONDS)
 
 
+async def _post_failure_note(client: GitHubClient, job: ReviewJob, head_sha: str, elapsed: float, error_name: str) -> None:
+    """One line on the pull request when a review failed before anything was
+    posted, so silence cannot read as approval. Bounded, and a failure to post
+    it is logged and swallowed: it is the last thing tried, not a second
+    reason to fail. The exception's name is all it carries; the message stays
+    in the dashboard."""
+    body = ("## ReviewBot review\n\n"
+            f"ReviewBot could not complete this review ({error_name} after {elapsed:.0f} s). "
+            "Nothing was reviewed; the dashboard's review page has the reason.")
+    try:
+        await asyncio.wait_for(asyncio.shield(client.create_pull_review(job.repo, job.pr_number, head_sha, body, [])),
+                               timeout=PARTIAL_POST_SECONDS)
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
+        logger.warning("could not leave a note about the failed review", repo=job.repo, pr=job.pr_number, error=type(e).__name__)
+
+
 def _how_far(where: Dict[str, Any]) -> str:
     return f" at {where['done']} of {where['total']} files in the {where['phase']} phase" if where.get("total") else ""
 
@@ -303,6 +319,7 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
     files: List[Dict[str, Any]] = []
     skipped: List[Tuple[str, str]] = []
     redaction_total = 0
+    attempted_post = False  # once a review may be on GitHub, a failure gets no second post
     try:
         pr = await client.get_pull(job.repo, job.pr_number)
         head_sha = pr.get("head", {}).get("sha") or job.head_sha
@@ -348,6 +365,7 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
             raise Superseded("head moved while the review was running; the newer push will be reviewed")
 
         all_failed = bool(results) and not succeeded
+        attempted_post = True
         posted = await _post_and_record(deps, client, job, review_id, head_sha=head_sha, succeeded=succeeded,
                                         errored=errored, skipped=skipped, redaction_total=redaction_total, totals=totals,
                                         pr_title=sanitise(redact(pr.get("title") or "")[0], 200), files_total=len(raw_files),
@@ -376,6 +394,8 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         else:
             status = "failed"
             message = sanitise(redact(f"{type(e).__name__}: {e}")[0], 500)
+            if not attempted_post:
+                await _post_failure_note(client, job, head_sha, elapsed, type(e).__name__)
         if not recorded and not (isinstance(e, Superseded) and "already reviewed" in str(e)):
             try:
                 await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {

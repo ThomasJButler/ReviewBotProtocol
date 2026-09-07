@@ -86,9 +86,54 @@ async def test_full_review_against_a_fake_github(db):
 
 
 @respx.mock
-async def test_github_failure_marks_the_review_failed_without_leaking(db):
+async def test_github_failure_marks_the_review_failed_without_leaking_and_leaves_one_line(db):
+    """A review that fails before anything is posted leaves one line on the
+    pull request naming the exception and nothing else: silence reads as
+    approval, and the message can carry text from GitHub's error body."""
     respx.post(f"{BASE}/app/installations/555/access_tokens").mock(return_value=httpx.Response(201, json={"token": "ghs_t", "expires_at": "2099-01-01T00:00:00Z"}))
     respx.get(f"{BASE}/repos/octocat/repo/pulls/42").mock(return_value=httpx.Response(500, json={"message": "boom sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"}))
+    reviews_route = respx.post(f"{BASE}/repos/octocat/repo/pulls/42/reviews").mock(return_value=httpx.Response(200, json={"id": 2}))
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=settings, llm=RecordingChatModel(), session_factory=db, http=http)
+        with pytest.raises(Exception):
+            await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
+    posted = json.loads(reviews_route.calls[0].request.content)
+    assert "could not complete this review (GitHubError after" in posted["body"] and "Nothing was reviewed" in posted["body"]
+    assert "sk-proj" not in posted["body"] and "boom" not in posted["body"] and "comments" not in posted
+    async with db() as session:
+        (latest,) = await ReviewRepository(session).list(limit=5)
+        assert latest.status == "failed" and "GitHubError" in latest.error_message
+        assert "sk-proj-abcdef" not in latest.error_message
+
+
+@respx.mock
+async def test_a_failure_after_the_post_does_not_post_again(db, monkeypatch):
+    """Once the review may be on GitHub, a failure in the bookkeeping is a
+    failed row, not a second comment saying nothing was reviewed."""
+    reviews_route = _routes()
+
+    async def broken(self, *args, **kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(ReviewRepository, "add_findings", broken)
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=settings, llm=RecordingChatModel(response=MODEL_REPLY), session_factory=db, http=http)
+        with pytest.raises(RuntimeError):
+            await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
+    assert len(reviews_route.calls) == 1
+    async with db() as session:
+        (latest,) = await ReviewRepository(session).list(limit=5)
+        assert latest.status == "failed" and "RuntimeError" in latest.error_message
+        assert latest.comment_url.startswith("https://github.com/"), "the URL was written before the bookkeeping failed"
+
+
+@respx.mock
+async def test_a_note_that_cannot_be_posted_does_not_hide_the_failure(db):
+    """GitHub down is the likeliest reason for a failed review; the note fails
+    the same way and the row still says what happened."""
+    respx.post(f"{BASE}/app/installations/555/access_tokens").mock(return_value=httpx.Response(201, json={"token": "ghs_t", "expires_at": "2099-01-01T00:00:00Z"}))
+    respx.get(f"{BASE}/repos/octocat/repo/pulls/42").mock(return_value=httpx.Response(502, json={"message": "bad gateway"}))
+    respx.post(f"{BASE}/repos/octocat/repo/pulls/42/reviews").mock(return_value=httpx.Response(502, json={"message": "bad gateway"}))
     async with httpx.AsyncClient() as http:
         deps = RunnerDeps(settings=settings, llm=RecordingChatModel(), session_factory=db, http=http)
         with pytest.raises(Exception):
@@ -96,7 +141,6 @@ async def test_github_failure_marks_the_review_failed_without_leaking(db):
     async with db() as session:
         (latest,) = await ReviewRepository(session).list(limit=5)
         assert latest.status == "failed" and "GitHubError" in latest.error_message
-        assert "sk-proj-abcdef" not in latest.error_message
 
 
 @respx.mock

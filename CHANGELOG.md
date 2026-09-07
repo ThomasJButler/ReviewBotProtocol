@@ -4,6 +4,8 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 
 ## Unreleased
 
+- A review cut short by the time ceiling posts the files that finished and lists the rest under Not reviewed; each review also gets its own budget of `REVIEW_SECONDS_PER_FILE` (300) times its file count, under the ceiling; a review that fails before posting leaves one line on the pull request.
+
 ## 1.1.0 (2026-09-07)
 
 The local rewrite. Reviews run on models on your own machine through Ollama; nothing leaves it but api.github.com, and a test proves it.
