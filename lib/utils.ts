@@ -1,129 +1,62 @@
-import { type ClassValue, clsx } from 'clsx'
+import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatDate(date: string | Date) {
-  return new Intl.DateTimeFormat('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(date))
+const WHEN = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  timeZone: 'UTC',
+})
+
+/** Timestamps are rendered in UTC so the server and the browser always agree. */
+export function formatWhen(iso: string | null): string {
+  if (!iso) return 'none'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'none'
+  return WHEN.format(date)
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes'
-
-  const k = 1024
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+export function formatDuration(seconds: number | null): string {
+  if (seconds === null || seconds === undefined) return 'none'
+  if (seconds < 60) return `${seconds.toFixed(1)} s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes} m ${Math.round(seconds - minutes * 60)} s`
 }
 
-export function formatTimeAgo(date: string | Date): string {
-  const now = new Date()
-  const past = new Date(date)
-  const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000)
-
-  if (diffInSeconds < 60) {
-    return `${diffInSeconds} seconds ago`
-  }
-
-  const diffInMinutes = Math.floor(diffInSeconds / 60)
-  if (diffInMinutes < 60) {
-    return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`
-  }
-
-  const diffInHours = Math.floor(diffInMinutes / 60)
-  if (diffInHours < 24) {
-    return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`
-  }
-
-  const diffInDays = Math.floor(diffInHours / 24)
-  if (diffInDays < 30) {
-    return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`
-  }
-
-  const diffInMonths = Math.floor(diffInDays / 30)
-  if (diffInMonths < 12) {
-    return `${diffInMonths} month${diffInMonths > 1 ? 's' : ''} ago`
-  }
-
-  const diffInYears = Math.floor(diffInMonths / 12)
-  return `${diffInYears} year${diffInYears > 1 ? 's' : ''} ago`
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)} kB`
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
 }
 
-export function getStateIcon(state: string) {
-  // Returns color class instead of emoji for consistent styling
-  switch (state.toLowerCase()) {
-    case 'open':
-      return 'text-green-500'
-    case 'closed':
-      return 'text-red-500'
-    case 'merged':
-      return 'text-purple-500'
-    case 'draft':
-      return 'text-gray-400'
-    default:
-      return 'text-gray-500'
+export function shortSha(sha: string | null): string {
+  return sha ? sha.slice(0, 7) : 'none'
+}
+
+/** github.com is the only host this dashboard ever links to. */
+export function pullRequestUrl(repository: string, prNumber: number): string {
+  const [owner = '', name = ''] = repository.split('/')
+  return `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pull/${Math.trunc(prNumber)}`
+}
+
+/** True for http(s) links to github.com or a subdomain of it. */
+export function isGitHubUrl(raw: string | null | undefined): boolean {
+  if (!raw) return false
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return false
   }
-}
-
-export function getStateLabel(state: string) {
-  return state.toUpperCase()
-}
-
-export function calculateComplexity(code: string): number {
-  // Simple cyclomatic complexity calculation
-  const complexityKeywords = [
-    'if',
-    'else',
-    'elif',
-    'while',
-    'for',
-    'switch',
-    'case',
-    'catch',
-    'finally',
-    '&&',
-    '||',
-    '?',
-    ':',
-    'try',
-  ]
-
-  let complexity = 1 // Base complexity
-
-  for (const keyword of complexityKeywords) {
-    const regex = new RegExp(`\\b${keyword}\\b`, 'gi')
-    const matches = code.match(regex)
-    if (matches) {
-      complexity += matches.length
-    }
-  }
-
-  return complexity
-}
-
-export function truncateText(text: string, maxLength: number) {
-  if (text.length <= maxLength) return text
-  return text.slice(0, maxLength) + '...'
-}
-
-export function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  delay: number
-): (...args: Parameters<T>) => void {
-  let timeoutId: NodeJS.Timeout
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeoutId)
-    timeoutId = setTimeout(() => func(...args), delay)
-  }
-}
-
-export function generateId(): string {
-  return Math.random().toString(36).substr(2, 9)
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
+  const host = url.hostname.toLowerCase()
+  return host === 'github.com' || host.endsWith('.github.com')
 }

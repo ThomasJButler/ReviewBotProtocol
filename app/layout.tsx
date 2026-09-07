@@ -1,64 +1,29 @@
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
-import './globals.css'
-import ErrorBoundary from '@/components/error-boundary'
-import { ToastProvider } from '@/components/toast-provider'
-import Navigation from '@/components/layout/Navigation'
-import { AuthProvider } from '@/contexts/AuthContext'
+import type { Metadata, Viewport } from 'next'
 
-const inter = Inter({ subsets: ['latin'] })
+import './globals.css'
+import { SiteHeader } from '@/components/site-header'
+import { ThemeProvider } from '@/components/theme-provider'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 export const metadata: Metadata = {
-  title: 'ReviewBot Protocol',
+  title: {
+    default: 'ReviewBot Protocol',
+    template: '%s | ReviewBot Protocol',
+  },
   description:
-    'AI-powered code review protocol with automated PR analysis and security scanning',
-  keywords: [
-    'AI',
-    'code review',
-    'GitHub',
-    'security',
-    'development',
-    'ReviewBot',
-    'protocol',
-  ],
-  authors: [{ name: 'Tom Butler' }],
+    'Local dashboard for ReviewBot Protocol: what was reviewed, what the bot said, and whether it was any good.',
   icons: {
     icon: [
-      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon-64x64.png', sizes: '64x64', type: 'image/png' },
     ],
-    shortcut: '/favicon-32x32.png',
     apple: '/favicon-256x256.png',
-    other: [
-      {
-        rel: 'icon',
-        type: 'image/svg+xml',
-        url: '/favicon.svg',
-      },
-    ],
   },
-  openGraph: {
-    title: 'ReviewBot Protocol',
-    description:
-      'AI-powered code review protocol with automated PR analysis and security scanning',
-    type: 'website',
-    images: [
-      {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
-        alt: 'ReviewBot Protocol - AI-Powered Code Review',
-      },
-    ],
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'ReviewBot Protocol',
-    description:
-      'AI-powered code review protocol with automated PR analysis and security scanning',
-    images: ['/twitter-card.png'],
-  },
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 }
 
 export default function RootLayout({
@@ -67,17 +32,26 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className={inter.className}>
-        <ErrorBoundary>
-          <AuthProvider>
-            <div className="min-h-screen bg-gradient-to-br from-deep-black via-gray-900 to-deep-black">
-              <Navigation />
-              <main>{children}</main>
-            </div>
-            <ToastProvider />
-          </AuthProvider>
-        </ErrorBoundary>
+    <html lang="en-GB" suppressHydrationWarning>
+      <body className="min-h-screen bg-background text-foreground antialiased">
+        <ThemeProvider>
+          <TooltipProvider>
+            <a
+              href="#main"
+              className="sr-only rounded-md bg-background px-3 py-2 text-sm font-medium underline focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+            >
+              Skip to main content
+            </a>
+            <SiteHeader />
+            <main
+              id="main"
+              tabIndex={-1}
+              className="mx-auto w-full max-w-[1200px] px-4 py-10"
+            >
+              {children}
+            </main>
+          </TooltipProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

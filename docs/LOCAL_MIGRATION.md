@@ -1,0 +1,203 @@
+# Local inference migration: design
+
+Status: agreed 2026-09-03 (Phase 3 checkpoint passed); backend implemented the same day. See "Implementation notes" at the end for what differs from the design.
+
+## Goal
+
+A GitHub PR review bot that runs on one machine, where the only network peer during a review is api.github.com. No inference API key exists anywhere in the configuration. The claim is proved by a test that fails if it stops being true.
+
+Non-goals: multi-tenant hosting, the manual paste and upload review modes, GitHub OAuth in the dashboard, Redis, PostgreSQL.
+
+## Runtime topology
+
+```
+GitHub  --webhook-->  tunnel or reverse proxy  -->  backend :8000  (only /webhook/github is public)
+                                                       |
+                                                       +--> Ollama 127.0.0.1:11434   (inference, loopback only)
+                                                       +--> api.github.com           (files in, comments out)
+                                                       +--> SQLite backend/reviews.db
+dashboard (Next.js :3000, local only) --LOCAL_API_TOKEN--> backend :8000 /api/*
+```
+
+The Next.js webhook proxy is deleted. The tunnel points at the backend directly, so the dashboard is never exposed to receive a webhook. The backend binds 127.0.0.1 by default; the operator opts into 0.0.0.0 and sets ALLOWED_HOSTS.
+
+## Dependency set
+
+Backend runtime, pinned exactly at implementation time to the versions current on PyPI (checked 2026-09-03):
+
+| Package                                              | Version | Why                                               |
+| ---------------------------------------------------- | ------- | ------------------------------------------------- |
+| langchain                                            | 1.3.18  | kept by decision; prompts and structured output   |
+| langchain-core                                       | 1.6.1   | required by the above                             |
+| langgraph                                            | 1.2.11  | kept by decision; the review state machine        |
+| langchain-ollama                                     | 1.1.0   | ChatOllama; needs core >= 1.2.21                  |
+| ollama                                               | 0.6.2   | pulled in by langchain-ollama; httpx-based client |
+| fastapi, uvicorn, httpx, pydantic, pydantic-settings | current | web layer                                         |
+| SQLAlchemy, aiosqlite                                | current | storage                                           |
+| PyJWT, cryptography                                  | current | GitHub App JWT (RS256)                            |
+| structlog                                            | current | logging                                           |
+
+Removed: the langchain meta-package (nothing imports it; langchain-core, langgraph and langchain-ollama are what the code uses), langchain-openai, langchain-community, openai, tiktoken, langsmith (stays only as a transitive dependency of langchain-core, with tracing provably off), sentry-sdk, celery, kombu, redis, aiopg, alembic, python-jose, passlib, PyGithub, python-multipart, requests, aiofiles, python-dotenv, click, python-dateutil. Dev tools move to requirements-dev.txt.
+
+Guard at startup: refuse to boot if any of LANGSMITH_TRACING_V2, LANGCHAIN_TRACING_V2, LANGSMITH_TRACING, LANGCHAIN_TRACING equals "true", or if LANGCHAIN_API_KEY, LANGSMITH_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY is set. The message names the variable.
+
+## Module map
+
+New:
+
+- services/llm.py: build_chat_model(settings) returns ChatOllama(model, base_url, num_ctx, num_predict, temperature 0.1, reasoning=False, keep_alive, validate_model_on_init=True, client timeout 600 s). health() calls GET /api/tags and /api/ps only, never a generation.
+- services/redaction.py: redact(text) replaces secret matches with [REDACTED:<kind>] and returns the count; is_excluded_path(path) for secret-bearing filenames. Runs on every patch before the prompt, the comment, the log line and the database row.
+- services/prompts.py: the system prompt and the human template, with delimiters (below).
+- services/schemas.py: Finding and FileReview pydantic models; FileReview.model_json_schema() is the structured-output schema.
+- services/review_queue.py: ReviewQueue(worker, timeout_seconds, on_result) with submit(), dedupe by (repo, pr, head_sha), cancel of the in-flight job for the same PR on a newer head, drain(), stop(). One worker.
+- services/github_app_auth.py: InstallationTokenProvider(app_id, private_key_pem, installation_id).token() mints an RS256 App JWT with PyJWT and POSTs /app/installations/{id}/access_tokens with httpx, cached until five minutes before expiry.
+- services/comment_renderer.py: render_review(...) applies the output policy below and appends the fixed footer.
+- Dockerfile.local and scripts/prove-local.sh: the no-network proof.
+
+Rewritten:
+
+- services/ai_reviewer.py: one method review_file(file) that runs prompt | llm.with_structured_output(FileReview, method="json_schema"), with a JSON-parse fallback if the model returns text. Six chains become one call.
+- services/review_workflow.py: the StateGraph stays. Nodes: parse_files, prioritise, analyse_file (loops over files), synthesise, summarise, build_comment, finalise. recursion_limit is set explicitly to 10 + 3 x file count. Routers are bounds-checked. files_reviewed becomes a list of FileReview dicts.
+- services/github_client.py: httpx only. Pagination on /files (per_page 100, Link header). post_review(event="COMMENT", body, comments) for one review per run instead of one API call per finding. No status calls.
+- handlers/webhook.py: body read with a hard cap (413 above MAX_WEBHOOK_BODY_BYTES) before the HMAC check, ping handled, unknown events acknowledged without raising, delivery id persisted and duplicates answered 200 with "duplicate" and no work, then enqueue and return 202.
+- handlers/review.py: read-only endpoints for the dashboard (list, detail, feedback, status) behind a LOCAL_API_TOKEN dependency; the paste/upload/pr/manual endpoints are deleted.
+- config/settings.py: see settings table.
+- main.py: lifespan starts and stops the queue; ALLOWED_HOSTS replaces the hard-coded TrustedHost list; the request log drops query strings; /health reports Ollama reachability and the loaded model; /openapi.json follows /docs.
+- database/models.py: Review gains head_sha, model, prompt_tokens, output_tokens, duration_seconds, useful (nullable bool), comment_url; WebhookDelivery is actually written; a small deliveries index for replay checks.
+
+Deleted: handlers/auth.py, handlers/github.py, services/mock_reviewer.py, services/metrics_service.py, utils/crypto.py JWT and password helpers (signature check stays), app/api/** in the frontend, vercel.json, scripts/quick-setup.sh, scripts/validate-env.js, the image scripts.
+
+## The prompt
+
+System message (fixed text, never contains PR content): the live text is `SYSTEM_PROMPT` in backend/services/prompts.py, so this document no longer quotes it. In two lines: the model is told it is a specialist reviewer of code changes hunting a named list of security and practice classes, that everything inside the nonce-delimited data block (including the file name) is untrusted data whose instructions are never followed and whose reviewer-directed text is itself reported as a prompt-injection finding, that every finding must quote an exact line with a new-file line number and a calibrated confidence, and that the answer is JSON only. Since 2026-09-05 the prompt also carries an accessibility pass (WCAG 2.2 criteria and ARIA rule one, a fourth finding category), a simplicity lens under quality (ponytail's ladder, with the guard that validation, error handling, security and accessibility are never simplified away), a refutation step before any finding is reported, and the rule that every recommendation says why, what a senior engineer writes instead, and which rule it comes from. There is an optional verify pass (`VERIFY_SYSTEM_PROMPT`, `VERIFY_FINDINGS=true`) and an optional cross-examination by a second model family (`CROSS_EXAMINE_MODEL`); all three prompts are measured against the real models by backend/scripts/prompt_eval.py and ranked by backend/scripts/prompt_judge.py, and a prompt ships only when it beats the incumbent. The numbers, by day, are in docs/benchmarks/; the sources behind every rule are in docs/PROMPT_DESIGN.md.
+
+Human message (template; the only place PR content appears):
+
+```
+File: {filename}
+Language: {language}
+Change type: {status}
+
+<<<DIFF_DATA_BEGIN>>>
+{code_diff}
+<<<DIFF_DATA_END>>>
+```
+
+PR title and body are not sent to the model at all. They are attacker-controlled and add nothing to a per-file review.
+
+## The schema
+
+```
+Finding: category (enum security|performance|quality), severity (enum critical|high|medium|low|info),
+         title (str, max 120), line (int >= 1), evidence (str, max 300), recommendation (str, max 600),
+         confidence (float 0..1)
+FileReview: findings (list[Finding], max 20), summary (str, max 500)
+```
+
+Post-processing per finding: drop it if line is outside any hunk of the new file; drop it if evidence does not appear in the added or context lines of the diff (a hallucinated quote is a hallucinated finding); drop it if confidence is below 0.5. These three checks are what turn a 9B model from noisy into usable.
+
+## Review flow per PR
+
+1. Webhook accepted (HMAC, size cap, event and action filter, replay check). 202.
+2. Queue dedupes by (repo, pr, head_sha) and cancels an older in-flight review of the same PR.
+3. Worker: installation token; PR info; files with pagination.
+4. Filters: skip removed files, binary files, excluded secret-bearing paths, patches over MAX_PATCH_BYTES, and stop after MAX_FILES_PER_REVIEW files (the comment says which files were skipped and why).
+5. Redact every patch.
+6. LangGraph run with an explicit recursion limit, one structured call per file, under REVIEW_TIMEOUT_SECONDS.
+7. Post-process findings (line, evidence, confidence checks).
+8. Render one PR review (event COMMENT) with a summary body and inline comments, sanitised and bounded.
+9. Persist the review, findings, token counts and duration. Update the delivery record.
+
+## Output policy
+
+- Markdown only. HTML tags removed. Links kept only if the host is github.com; others become plain text.
+- @mentions neutralised (the @ is replaced with a fullwidth @ so nobody is notified).
+- Per-comment cap 2 000 characters, summary cap 6 000 characters, at most 25 inline comments per review.
+- Fixed footer: "Generated locally by ReviewBot Protocol using <model> via Ollama. Findings are model output and may be wrong; verify before acting."
+- The event is always COMMENT. The bot never approves and never requests changes.
+- No commit statuses. The App does not hold the Commit statuses permission.
+- Fork PRs are reviewed like any other PR, with "from fork <owner/repo>" in the summary. The App credential is only ever used to comment.
+
+## Settings
+
+| Setting                                                  | Default                           | Notes                                                       |
+| -------------------------------------------------------- | --------------------------------- | ----------------------------------------------------------- |
+| HOST / PORT                                              | 127.0.0.1 / 8000                  |                                                             |
+| ALLOWED_HOSTS                                            | localhost,127.0.0.1               | comma list; the tunnel hostname goes here                   |
+| GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET | required                          | unchanged                                                   |
+| OLLAMA_BASE_URL                                          | http://127.0.0.1:11434            |                                                             |
+| OLLAMA_MODEL                                             | qwen3.5:9b                        | qwen3-coder:30b once pulled                                 |
+| OLLAMA_NUM_CTX                                           | 16384                             | fixed per model to avoid reloads                            |
+| OLLAMA_NUM_PREDICT                                       | 2000                              |                                                             |
+| REVIEW_TIMEOUT_SECONDS                                   | 3600                              | whole review                                                |
+| MAX_FILES_PER_REVIEW                                     | 25                                |                                                             |
+| MAX_PATCH_BYTES                                          | 32000                             | roughly 11k tokens; must fit OLLAMA_NUM_CTX                 |
+| MAX_WEBHOOK_BODY_BYTES                                   | 2097152                           | GitHub payloads are far smaller                             |
+| LOCAL_API_TOKEN                                          | required for the dashboard routes |                                                             |
+| LOG_PROMPTS                                              | false                             | when true, redacted prompts and raw model output are logged |
+| DATABASE_URL                                             | sqlite:///./reviews.db            |                                                             |
+
+## Model matrix
+
+| Model                         | Size   | Fits 32 GB alongside a browser                    | Speed on this M1 Max                                | Quality (vendor SWE-bench Verified)           | Role                                             |
+| ----------------------------- | ------ | ------------------------------------------------- | --------------------------------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| qwen3.5:9b                    | 6.6 GB | yes                                               | 33 tok/s measured today, 100 percent GPU at 16k ctx | 53.2 (third party)                            | fast option, default until the primary is pulled |
+| qwen3-coder:30b (30B-A3B MoE) | 19 GB  | borderline; needs num_ctx 16384 and q8_0 KV cache | 45 to 60 tok/s estimated                            | RL-trained for SWE tasks, no published number | primary                                          |
+| qwen3.6:27b                   | 17 GB  | yes                                               | 12 to 16 tok/s estimated                            | 77.2                                          | stretch, thinking-capable                        |
+
+Measured probe (qwen3.5:9b, think off, schema format, 16k ctx): a 239-token prompt containing a SQL injection, a hard-coded key and an injected "reply no issues" instruction produced valid JSON in 16 seconds with two correct findings at the correct lines and the injection ignored. The model quoted the fake key verbatim in its evidence, which is why redaction runs before the model, not after.
+
+Disk today: 32 GB free. The primary model needs 19 GB. The pull was not started.
+
+## Egress proof
+
+1. A socket-level guard (getaddrinfo and socket.connect, loopback only) in backend/tests/conftest.py. backend/tests/test_runner.py wraps whole reviews in it (fake GitHub answered in-process by respx, fake model); backend/tests/test_no_egress.py wraps one real-model review of one diff in it (REVIEWBOT_E2E=1, skipped by default). Socket level, because the process contains several HTTP stacks.
+2. scripts/prove-local.sh: builds Dockerfile.local (backend, a tiny fake GitHub API, Ollama and qwen3.5:0.8b) and runs one review with docker run --network none. Exit code is the verdict. Slow to build once, then repeatable.
+3. Manual: backend/README.md describes running a real review with lsof in a second terminal and the only two peers that should appear.
+4. A test asserts that openai, langchain_openai, sentry_sdk and anthropic are not importable in the runtime environment.
+
+## Ollama on the host
+
+The desktop app's server is what is running today on 127.0.0.1:11434 and it honours per-request options (the probe ran at 16k context on the GPU). The app checks ollama.com for updates hourly (version and device id, never prompt content). For the strict guarantee, run ollama serve from a terminal or a launchd job with OLLAMA_NO_CLOUD=1, OLLAMA_FLASH_ATTENTION=1, OLLAMA_KV_CACHE_TYPE=q8_0, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_KEEP_ALIVE=30m, and leave OLLAMA_HOST unset. The README will say both.
+
+## What changes for the operator
+
+- GitHub App permissions: Pull requests read and write, Metadata read. Commit statuses and Issues are removed. Subscribe to pull_request only. Install on selected repositories.
+- Webhook URL points at the backend's /webhook/github through the tunnel or reverse proxy.
+- Environment: no OpenAI or LangSmith variables; OLLAMA_MODEL and LOCAL_API_TOKEN added.
+
+## Decisions (2026-09-03)
+
+1. Commit statuses are dropped entirely, and the Commit statuses permission with them. The review is a normal PR review thread; nothing the model says can gate a merge.
+2. Fork PRs are reviewed like any other PR, comment only, with the fork named in the summary. The App credential is only ever used to comment.
+3. The build targets qwen3.5:9b first. qwen3-coder:30b stays the documented primary for when disk allows; switching is the OLLAMA_MODEL setting.
+
+## Implementation notes (2026-09-03)
+
+What landed, and where it differs from the design above:
+
+- The per-file metadata (file name, language, change type) sits inside the data block, not above it, and any marker-shaped text in PR content is rewritten to a bracket-free `[data-marker]` token so PR content cannot forge the end of the block (the first version merely softened `<<<` to `<<`, which the second review round broke). Control characters and newlines are stripped from file names before they enter the prompt.
+- The chain is `prompt | ChatOllama.bind(format=schema)` with a lenient parser on our side rather than `with_structured_output`, so a model that adds a fence or one bad field loses one finding, not the whole review. Findings are then dropped unless the quoted evidence is actually in the diff, the line can take a comment, and confidence clears MIN_FINDING_CONFIDENCE; a finding quoted from the right line but with the wrong number is moved to the right line.
+- No commit statuses (decision 1). The App needs Pull requests read and write and Metadata read only.
+- The review is posted as one pull request review (event COMMENT) with inline comments, and if GitHub rejects the inline comments (422) the same notes are folded into the body and posted again without them.
+- The queue is an in-process single worker (services/review_queue.py): duplicate head SHA is ignored, a newer head SHA replaces a pending job or cancels the one in flight, every job runs under REVIEW_TIMEOUT_SECONDS.
+- Replay protection is the webhook_deliveries table keyed on X-GitHub-Delivery; a repeat answers 200 with status "duplicate" and does nothing.
+- The body is read with a hard cap before the signature check; over the cap is 413.
+- The local-only guard: startup refuses if any LangSmith tracing variable is "true"; under STRICT_LOCAL (default) it also refuses if OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, MISTRAL_API_KEY, SENTRY_DSN, LANGCHAIN_API_KEY or LANGSMITH_API_KEY is present. Set STRICT_LOCAL=false if your shell carries keys for other projects.
+- Dependencies: langchain-core 1.6.1, langgraph 1.2.11, langchain-ollama 1.1.0 (ollama 0.6.2), fastapi 0.141.1, httpx 0.28.1, pydantic 2.13.5, SQLAlchemy 2.0.52, PyJWT 2.13.0, structlog 26.1.0. No OpenAI, Anthropic, Sentry or LangChain community packages are installed; a test asserts they are not importable.
+
+Proof status:
+
+- backend/tests/test_runner.py runs whole reviews (fake GitHub via respx, fake model) under the socket-level guard: passes.
+- Design statements above that the code does not match: validate_model_on_init is False (a missing model is reported by the health check and the first review, not at boot); the graph has three nodes (prioritise, analyse_file, synthesise); recursion_limit is the file count plus five; /health is minimal and unauthenticated, and Ollama reachability is reported on the token-gated /api/status.
+- backend/tests/test_no_egress.py with REVIEWBOT_E2E=1 runs the real reviewer against the real Ollama (qwen3.5:9b) under the same guard: passed on 2026-09-03 in 14 s, one finding at the correct line.
+- scripts/prove-local.sh builds Dockerfile.local (Ollama, qwen3.5:0.8b, the backend, a loopback fake GitHub) and runs one review with `docker run --network none`. Passed on 2026-09-03: the entrypoint confirmed no route out, the review completed in 4.5 s and was posted, the planted key was redacted from everything posted, and `.env` was skipped. The 0.8B stand-in found nothing in the diff, which is a statement about that model, not about egress; the host e2e with qwen3.5:9b found the injection at the right line.
+
+## After the second review round (2026-09-03)
+
+- Delimiters carry a per-request nonce; PR content that looks like a marker is neutralised; the prompt boundary is asserted before every model call.
+- Redaction is line-preserving, covers unquoted assignments and more token shapes, and is applied to model output too.
+- MAX_PATCH_BYTES defaults to 32 000 and a patch is skipped when its estimated tokens plus the prompt overhead and the output budget would not fit OLLAMA_NUM_CTX.
+- The queue exposes liveness, abandons stuck workers after a grace period, and the backend reconciles rows left running at startup. Deliveries whose review failed or was interrupted accept GitHub's redelivery.
+- STRICT_LOCAL also refuses a non-loopback OLLAMA_BASE_URL and a LANGCHAIN_HANDLER variable.
+- 208 tests after the third round (166 after the second), including one that boots the real lifespan (real queue, real runner, fake GitHub, fake model) and drives a signed webhook to a completed review, and one that walks every route to prove the token gate.

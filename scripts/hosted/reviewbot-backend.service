@@ -1,0 +1,18 @@
+[Unit]
+Description=ReviewBot backend
+After=network-online.target ollama.service
+Wants=ollama.service
+
+[Service]
+User=reviewbot
+WorkingDirectory=/home/reviewbot/reviewbot/backend
+ExecStart=/home/reviewbot/reviewbot/backend/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/home/reviewbot/reviewbot/backend
+
+[Install]
+WantedBy=multi-user.target

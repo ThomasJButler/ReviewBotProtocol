@@ -1,0 +1,22 @@
+# Black-box proof that a review needs no network. Build once (this step
+# downloads the model), then run with --network none via scripts/prove-local.sh.
+FROM ollama/ollama:0.33.1
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv curl ca-certificates iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY backend/requirements.lock /app/backend/requirements.lock
+RUN python3 -m venv /app/venv && /app/venv/bin/pip install --no-cache-dir -q --require-hashes -r /app/backend/requirements.lock
+
+ARG MODEL=qwen3.5:0.8b
+ENV OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 OLLAMA_MODEL=${MODEL} OLLAMA_NUM_CTX=8192 STRICT_LOCAL=true
+RUN (ollama serve > /tmp/pull.log 2>&1 &) && for i in $(seq 1 60); do curl -sf http://127.0.0.1:11434/api/tags > /dev/null && break; sleep 1; done \
+    && ollama pull ${MODEL}
+
+COPY backend /app/backend
+COPY scripts/prove_local /app/prove_local
+RUN rm -rf /app/backend/.venv /app/backend/tests /app/backend/__pycache__ && chmod +x /app/prove_local/entrypoint.sh
+
+ENTRYPOINT ["/app/prove_local/entrypoint.sh"]

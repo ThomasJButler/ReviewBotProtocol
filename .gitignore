@@ -88,6 +88,17 @@ temp/
 backend/.venv/
 backend/.env
 backend/logs/
+backend/*.db.lock
+
+# Private keys and secrets, wherever they land
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -109,15 +120,19 @@ dist/
 *.sqlite
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # Test artifacts and temporary dev files
 **/api-test-report-*.md
 FIXES_SUMMARY*.md
 WHERE_I_LEFT_OFF*.md
 *-simple.py
-test_*.py
-!backend/tests/test_*.py
-!backend/tests/**/test_*.py
+/test_*.py
+/simple_pattern_test.py
 
 # Temporary todo files
 claudetodo.txt
+
+# hands-on run logs from scripts/dev-up.sh
+.dev-logs/

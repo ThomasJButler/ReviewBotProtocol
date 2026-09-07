@@ -1,0 +1,10 @@
+# Only the webhook path reaches the backend. Everything else is a 404 at the
+# edge, so /health and the dashboard API never touch the internet.
+reviewbot.yourdomain.example {
+    handle /webhook/github /webhook/github/ {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle {
+        respond 404
+    }
+}
