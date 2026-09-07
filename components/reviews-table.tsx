@@ -15,6 +15,21 @@ import {
 import { formatDuration, formatWhen, pullRequestUrl } from '@/lib/utils'
 import type { Review, Severity } from '@/lib/api'
 
+/** The owner muted, the name in full: every row here shares the owner, and the
+ * long form was the widest thing on the page. */
+function RepositoryName({ repository }: { repository: string }) {
+  const slash = repository.indexOf('/')
+  if (slash === -1) return <>{repository}</>
+  return (
+    <>
+      <span className="text-xs font-normal text-muted-foreground">
+        {repository.slice(0, slash + 1)}
+      </span>
+      {repository.slice(slash + 1)}
+    </>
+  )
+}
+
 function Useful({ useful }: { useful: boolean | null }) {
   if (useful === null) {
     return <span className="text-muted-foreground">No answer</span>
@@ -38,6 +53,11 @@ function RunningCount({ review }: { review: Review }) {
       <span className="sr-only"> files done</span>
     </span>
   )
+}
+
+/** A review that has no numbers yet, so the columns say so instead of 0 / 0. */
+function inProgress(review: Review): boolean {
+  return review.status === 'running' || review.status === 'queued'
 }
 
 const SEVERITIES: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
@@ -75,7 +95,9 @@ export function ReviewsTable({
         <TableHeader>
           <TableRow>
             <TableHead scope="col">Repository</TableHead>
-            <TableHead scope="col">Pull request</TableHead>
+            <TableHead scope="col" className="min-w-[18rem]">
+              Pull request
+            </TableHead>
             <TableHead scope="col">When</TableHead>
             <TableHead scope="col">Model</TableHead>
             <TableHead scope="col">
@@ -98,21 +120,27 @@ export function ReviewsTable({
                   href={`/reviews/${review.id}`}
                   className="rounded-sm after:absolute after:inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
-                  {review.repository}
+                  <RepositoryName repository={review.repository} />
                 </Link>
               </TableCell>
-              {/* the shared cell never wraps; a long title must, or it runs into the next column */}
-              <TableCell className="max-w-72 whitespace-normal break-words">
-                <a
-                  href={pullRequestUrl(review.repository, review.pr_number)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="relative z-10 underline underline-offset-4"
+              {/* The shared cell never wraps. The title gets a bounded column, two
+                  lines at most, and the whole of it on hover and on the review page. */}
+              <TableCell className="max-w-[26rem] min-w-[18rem] whitespace-normal">
+                <span
+                  className="line-clamp-2 break-words"
+                  title={review.pr_title ?? undefined}
                 >
-                  #{review.pr_number}
-                </a>{' '}
-                <span className="text-muted-foreground">
-                  {review.pr_title ?? ''}
+                  <a
+                    href={pullRequestUrl(review.repository, review.pr_number)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="relative z-10 underline underline-offset-4"
+                  >
+                    #{review.pr_number}
+                  </a>{' '}
+                  <span className="text-muted-foreground">
+                    {review.pr_title ?? ''}
+                  </span>
                 </span>
               </TableCell>
               <TableCell className="whitespace-nowrap text-muted-foreground">
@@ -124,23 +152,33 @@ export function ReviewsTable({
                 {review.model ?? 'none'}
               </TableCell>
               <TableCell className="whitespace-nowrap tabular-nums">
-                {review.files_reviewed}
-                <span className="text-muted-foreground">
-                  {' '}
-                  / {review.files_skipped}
-                </span>
+                {inProgress(review) ? (
+                  <span className="text-muted-foreground">in progress</span>
+                ) : (
+                  <>
+                    {review.files_reviewed}
+                    <span className="text-muted-foreground">
+                      {' '}
+                      / {review.files_skipped}
+                    </span>
+                  </>
+                )}
               </TableCell>
               <TableCell className="tabular-nums">
                 {review.findings_count}
                 <SeverityBreakdown counts={review.severity_counts} />
               </TableCell>
               <TableCell className="whitespace-nowrap tabular-nums">
-                {formatDuration(review.duration_seconds)}
+                {inProgress(review) ? (
+                  <span className="text-muted-foreground">in progress</span>
+                ) : (
+                  formatDuration(review.duration_seconds)
+                )}
               </TableCell>
               <TableCell className="whitespace-nowrap">
                 <Useful useful={review.useful} />
               </TableCell>
-              <TableCell className="whitespace-nowrap">
+              <TableCell className="whitespace-nowrap pr-4">
                 <ReviewStatusBadge status={review.status} />
                 <RunningCount review={review} />
               </TableCell>
