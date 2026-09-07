@@ -68,6 +68,7 @@ class PullRequest(_Loose):
     head: GitRef
     base: GitRef
     user: GitHubUser
+    updated_at: Optional[str] = None  # GitHub's ISO timestamp; a replayed old body carries an older one
 
 
 class PRWebhookPayload(_Loose):

@@ -19,6 +19,14 @@ from config.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _older(incoming: "ReviewJob", held: "ReviewJob") -> bool:
+    """Whether the incoming delivery describes an older state of the pull request
+    than the job already held, by GitHub's own updated_at (ISO 8601 in UTC, so the
+    strings order as the times do). Unknown on either side means not older: an old
+    client or a test without the field keeps the plain newest-wins behaviour."""
+    return bool(incoming.updated_at and held.updated_at and incoming.updated_at < held.updated_at)
+
+
 @dataclass
 class ReviewJob:
     repo: str
@@ -28,6 +36,7 @@ class ReviewJob:
     delivery_id: str = ""
     is_fork: bool = False
     fork_repo: Optional[str] = None
+    updated_at: str = ""  # the payload's pull_request.updated_at, so a replayed old delivery cannot cancel a newer job
     state: Dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -97,22 +106,27 @@ class ReviewQueue:
             self._current["task"].cancel()
 
     async def submit(self, *, repo: str, pr_number: int, head_sha: str, installation_id: int,
-                     delivery_id: str = "", is_fork: bool = False, fork_repo: Optional[str] = None) -> str:
+                     delivery_id: str = "", is_fork: bool = False, fork_repo: Optional[str] = None,
+                     updated_at: str = "") -> str:
         if self._stopping:
             return "shutting_down"
         if not self.alive:
             return "queue_dead"
-        job = ReviewJob(repo, pr_number, head_sha, installation_id, delivery_id, is_fork, fork_repo)
+        job = ReviewJob(repo, pr_number, head_sha, installation_id, delivery_id, is_fork, fork_repo, updated_at)
         outcome = "queued"
         if self._current and self._current["job"].key == job.key:
             if self._current["job"].head_sha == job.head_sha:
                 return "duplicate"
+            if _older(job, self._current["job"]):
+                return "stale"  # a captured body replayed under a fresh id: it never cancels the newer review
             self._cancel_current("superseded")
             outcome = "superseded_inflight"
         pending = self._pending.get(job.key)
         if pending is not None:
             if pending.head_sha == job.head_sha and outcome == "queued":
                 return "duplicate"
+            if outcome == "queued" and _older(job, pending):
+                return "stale"
             if outcome == "queued":
                 outcome = "replaced"
         self._pending[job.key] = job

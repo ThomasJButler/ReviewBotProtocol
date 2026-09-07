@@ -126,3 +126,26 @@ async def test_the_hash_of_the_signed_bytes_is_what_is_recorded(db, client, stub
     async with db() as session:
         row = (await session.execute(select(WebhookDelivery).where(WebhookDelivery.delivery_id == "d-1"))).scalar_one()
     assert row.body_sha256 == hashlib.sha256(body).hexdigest(), "the hash covers the raw bytes the signature covers"
+
+
+def test_the_gpu_tunnel_script_keeps_its_host_key_pin():
+    """F1: the hosted-mode tunnel accepted any host key on first contact. The fix
+    pins the key under a fixed alias and refuses to start without it; nothing
+    else pins the script, so this reads it."""
+    from pathlib import Path
+    script = (Path(__file__).resolve().parents[2] / "scripts" / "hosted" / "gpu-up.sh").read_text()
+    assert "StrictHostKeyChecking=yes" in script and "HostKeyAlias=" in script and "UserKnownHostsFile=" in script
+    assert "accept-new" not in script and "StrictHostKeyChecking=no" not in script
+    assert script.count('"${SSH_OPTS[@]}"') >= 2, "the probe and the tunnel both use the pinned options"
+
+
+def test_the_link_pattern_is_linear_on_a_whitespace_flood():
+    """F17's widened link pattern was quadratic on a bracket followed by a run of
+    spaces; the runs are bounded now, like the delimiter pattern's."""
+    import time
+    from services.comment_renderer import sanitise
+    flood = "[x](" + " " * 30_000 + "https://evil.example)"
+    started = time.perf_counter()
+    out = sanitise(flood, 200_000)
+    assert time.perf_counter() - started < 0.5
+    assert "evil.example" not in out or "[link removed]" in out

@@ -158,3 +158,26 @@ async def test_drain_times_out_rather_than_hanging():
     with pytest.raises(asyncio.TimeoutError):
         await q.drain(timeout=0.2)
     await q.stop()
+
+
+async def test_an_older_delivery_never_cancels_the_review_of_a_newer_head():
+    """A captured signed body replayed under a fresh delivery id describes an
+    older state of the pull request. GitHub's updated_at says so, and an older
+    delivery is stale: it neither cancels the in-flight job nor replaces the
+    pending one. Without the timestamp the plain newest-wins rule stands."""
+    import asyncio
+
+    async def slow(job):
+        await asyncio.sleep(5)
+
+    q = ReviewQueue(worker=slow)
+    await q.start()
+    assert await q.submit(repo="octocat/repo", pr_number=1, head_sha="new", installation_id=1, updated_at="2026-09-07T10:00:00Z") == "queued"
+    await asyncio.sleep(0.05)
+    assert await q.submit(repo="octocat/repo", pr_number=1, head_sha="old", installation_id=1, updated_at="2026-09-07T09:00:00Z") == "stale"
+    assert q.current_job is not None and q.current_job.head_sha == "new", "the newer review kept running"
+    assert await q.submit(repo="octocat/repo", pr_number=1, head_sha="newer", installation_id=1, updated_at="2026-09-07T11:00:00Z") == "superseded_inflight"
+    await asyncio.sleep(0.05)
+    assert await q.submit(repo="octocat/repo", pr_number=1, head_sha="older-pending", installation_id=1, updated_at="2026-09-07T10:30:00Z") == "stale"
+    assert await q.submit(repo="octocat/repo", pr_number=1, head_sha="no-stamp", installation_id=1) == "superseded_inflight", "no timestamp: newest wins as before"
+    await q.stop()

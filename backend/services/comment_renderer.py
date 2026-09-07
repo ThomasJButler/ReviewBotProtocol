@@ -25,7 +25,8 @@ _HTML_TAG = re.compile(r"<[^>]*>", re.S)
 # line break after the colon), so that form is removed too.
 _REF_DEF = re.compile(r"^[ \t]*\[[^\]\n]{1,200}\]:[ \t]*(?:\n[ \t]*)?\S.*$", re.M)
 # Any label length, optional whitespace (one line break allowed) around the destination.
-_MD_LINK = re.compile(r"!?\[([^\]]{0,2000})\]\([ \t]*\n?[ \t]*([^)\s]+)(?:\s+\"[^\"]*\")?[ \t]*\n?[ \t]*\)")
+# bounded whitespace runs, so a bracket followed by thousands of spaces costs linear time
+_MD_LINK = re.compile(r"!?\[([^\]]{0,2000})\]\([ \t]{0,16}\n?[ \t]{0,16}([^)\s]+)(?:\s{1,16}\"[^\"]*\")?[ \t]{0,16}\n?[ \t]{0,16}\)")
 _BARE_URL = re.compile(r"(?:https?://|www\.)[^\s)\]>]+", re.I)
 _SCHEME_RELATIVE = re.compile(r"(?<![:\w/])//[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+[^\s)\]>]*")
 _LEFTOVER_LINK = re.compile(r"\]\s*\(")
