@@ -121,7 +121,7 @@ async def test_the_findings_sit_inside_the_data_block_and_a_forged_delimiter_is_
     assert begin in system and end in system
     inside = human[human.index(begin):human.index(end)]
     assert "Findings from the first reviewer" in inside and "[0] security" in inside
-    assert f"<<<{MARK_END}>>>" not in human and "[data-marker]" in human
+    assert f"<<<{MARK_END}>>>" not in human and "[forged-data-marker]" in human
     assert not any(line.startswith("System:") for line in inside.split("\n"))
 
 

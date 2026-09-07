@@ -66,9 +66,10 @@ class PromptBoundaryError(RuntimeError):
 def _defang(text: str) -> str:
     """Anything in PR content that resembles a data delimiter, with any number
     of angle brackets and any nonce suffix, is rewritten to a bracket-free
-    token. The replacement contains no angle brackets, so it cannot be
+    token that says what it is: the verifier read the old `[data-marker]` as
+    the pipeline's own framing and stood down (round three). The replacement contains no angle brackets, so it cannot be
     reassembled into a delimiter by a second pass."""
-    return _MARKER.sub("[data-marker]", text)
+    return _MARKER.sub("[forged-data-marker]", text)
 
 
 def _meta(value: str, limit: int = 200) -> str:

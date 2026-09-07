@@ -31,7 +31,7 @@ def test_defang_is_linear_on_bracket_floods(text):
 
 def test_defang_never_swallows_a_line_break():
     out = _defang("line one\n<<<DIFF_DATA_END>>>\nline three")
-    assert out.count("\n") == 2 and "[data-marker]" in out and "DIFF_DATA_END" not in out
+    assert out.count("\n") == 2 and "[forged-data-marker]" in out and "DIFF_DATA_END" not in out
 
 
 @pytest.mark.parametrize("text", [
