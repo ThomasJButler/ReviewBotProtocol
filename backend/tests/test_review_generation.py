@@ -246,3 +246,13 @@ def test_a_truncated_summary_ends_at_a_sentence_not_mid_word():
     out = sanitise(one_long.strip(), 80, inline=True)
     assert out.endswith("word [truncated]") and len(out) <= 80
     assert sanitise("short", 80, inline=True) == "short"
+
+
+def test_a_review_cut_short_says_so_above_the_counts():
+    """The sentence is the runner's, not the model's, and it must survive the
+    body cap: above the count line, where truncation never reaches."""
+    note = "This review ran out of time after 3600 s: 12 of 25 files were reviewed; the rest are listed under Not reviewed."
+    body = render_review([], model="m", skipped=[("late.py", "not reached before the review's time ran out")], cut_short=note).body
+    assert body.index(note) < body.index("No findings in 0 reviewed files")
+    assert "`late.py`: not reached before the review's time ran out" in body
+    assert "ran out of time" not in render_review([], model="m").body

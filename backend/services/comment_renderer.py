@@ -144,7 +144,9 @@ def _inline_body(sev: Severity, category: str, title: str, recommendation: str, 
 def render_review(results: Sequence[FileReviewResult], *, model: str, skipped: Sequence[Tuple[str, str]] = (),
                   is_fork: bool = False, fork_repo: Optional[str] = None, max_inline: int = 25,
                   redaction_total: int = 0, files_errored: int = 0, cross_model: Optional[str] = None,
-                  cross_added: int = 0, cross_refuted: int = 0) -> RenderedReview:
+                  cross_added: int = 0, cross_refuted: int = 0, cut_short: str = "") -> RenderedReview:
+    """cut_short is the runner's own sentence for a review that ran out of time;
+    it sits above the counts so the 6000-character cut cannot take it."""
     all_findings = []
     for r in results:
         for f in r.review.findings:
@@ -167,6 +169,8 @@ def render_review(results: Sequence[FileReviewResult], *, model: str, skipped: S
     lines = ["## ReviewBot review", ""]
     if files_errored:
         lines.append(f"Warning: the model did not return a usable review for {files_errored} file{'s' if files_errored != 1 else ''}; they are listed under Not reviewed.")
+    if cut_short:
+        lines.append(cut_short)
     if all_findings:
         parts = [f"{counts[s.value]} {s.value}" for s in Severity if counts.get(s.value)]
         lines.append(f"{len(all_findings)} finding{'s' if len(all_findings) != 1 else ''} across {len(results)} reviewed file{'s' if len(results) != 1 else ''} ({', '.join(parts)}).")
