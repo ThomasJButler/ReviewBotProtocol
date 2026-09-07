@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     OLLAMA_KEEP_ALIVE: str = "30m"
     OLLAMA_TIMEOUT_SECONDS: int = 600
 
-    REVIEW_TIMEOUT_SECONDS: int = 900
+    REVIEW_TIMEOUT_SECONDS: int = 3600  # a rewrite-sized diff costs the 9B about two minutes a file, twice with the cross-examiner
     REVIEW_DRAFTS: bool = False
     MAX_FILES_PER_REVIEW: int = 25
     MAX_PATCH_BYTES: int = 32_000

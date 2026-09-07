@@ -151,6 +151,7 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
     provider = InstallationTokenProvider(settings.GITHUB_APP_ID, settings.GITHUB_PRIVATE_KEY, job.installation_id,
                                          base_url=settings.GITHUB_API_BASE_URL, http=deps.http, repository=job.repo)
     client = GitHubClient(provider, base_url=settings.GITHUB_API_BASE_URL, http=deps.http)
+    where: Dict[str, Any] = {}  # the last progress report, so a review cut short says how far it got
     try:
         pr = await client.get_pull(job.repo, job.pr_number)
         head_sha = pr.get("head", {}).get("sha") or job.head_sha
@@ -166,6 +167,7 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
 
         async def _progress(phase: str, done: int, total: int, current: str) -> None:
             # one small write per file so the dashboard can show where the review is up to
+            where.update(phase=phase, done=done, total=total)
             async with deps.session_factory() as session:
                 await ReviewRepository(session).update(review_id, {
                     "progress_phase": phase, "progress_done": done, "progress_total": total,
@@ -229,6 +231,8 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
             reason = job.cancel_reason or "superseded"
             status = {"timeout": "timed_out", "shutdown": "interrupted"}.get(reason, "superseded")
             message = f"review {status.replace('_', ' ')} after {elapsed:.0f}s ({reason})"
+            if where.get("total"):
+                message += f" at {where['done']} of {where['total']} files in the {where['phase']} phase"
         elif isinstance(e, Superseded):
             status, message = "superseded", str(e)
         else:

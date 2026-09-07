@@ -3,6 +3,7 @@ model. respx intercepts httpx below the client, so nothing here can reach a
 socket; the socket-level guard is exercised by test_no_egress.py and the
 real-model proof is the REVIEWBOT_E2E test."""
 
+import asyncio
 import json
 
 import httpx
@@ -108,6 +109,36 @@ async def test_moved_head_supersedes_the_job_without_posting(db):
     async with db() as session:
         (latest,) = await ReviewRepository(session).list(limit=5)
         assert latest.status == "superseded"
+
+
+class SlowModel(RecordingChatModel):
+    """A model that never answers in time, for the cancellation path."""
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        await asyncio.sleep(30)
+        return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+
+@respx.mock
+async def test_a_review_cut_short_records_how_far_it_got(db):
+    """The first review of a rewrite-sized pull request hit the 900 s ceiling at
+    24 of 25 files and the row said only "timed out after 900s". The last
+    progress report now travels into the message, so the operator can see
+    whether to raise the ceiling or shrink the review."""
+    _routes()
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=settings, llm=SlowModel(response=MODEL_REPLY), session_factory=db, http=http)
+        job = ReviewJob("octocat/repo", 42, "c" * 40, 555, "")
+        task = asyncio.create_task(run_review(job, deps))
+        await asyncio.sleep(0.5)
+        job.state["cancel_reason"] = "timeout"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    async with db() as session:
+        (latest,) = await ReviewRepository(session).list(limit=5)
+        assert latest.status == "timed_out"
+        assert "at 0 of 1 files in the review phase" in latest.error_message, latest.error_message
 
 
 @respx.mock

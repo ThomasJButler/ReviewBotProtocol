@@ -90,7 +90,7 @@ Measured again on 2026-09-06 (docs/benchmarks/2026-09-06-round-three.md), two re
 
 ## Limits
 
-`MAX_FILES_PER_REVIEW` (25), `MAX_PATCH_BYTES` (32 000, which must fit `OLLAMA_NUM_CTX`), `MAX_WEBHOOK_BODY_BYTES` (2 MiB), `MAX_INLINE_COMMENTS` (25), `REVIEW_TIMEOUT_SECONDS` (900; about 1200 with `CROSS_EXAMINE_SEQUENTIAL`), `MIN_FINDING_CONFIDENCE` (0.5). Draft PRs are skipped unless `REVIEW_DRAFTS=true`. Reference machine: a 2021 M1 Max with 32 GB runs `qwen3.5:9b` at about 13 seconds per file and, with `gemma4:12b` cross-examining, about 34 seconds per file, one model resident at a time.
+`MAX_FILES_PER_REVIEW` (25), `MAX_PATCH_BYTES` (32 000, which must fit `OLLAMA_NUM_CTX`), `MAX_WEBHOOK_BODY_BYTES` (2 MiB), `MAX_INLINE_COMMENTS` (25), `REVIEW_TIMEOUT_SECONDS` (3600: a rewrite-sized diff costs about two minutes a file, twice with the cross-examiner, and a review that hits the ceiling posts nothing, so the ceiling is generous; the error names how far it got), `MIN_FINDING_CONFIDENCE` (0.5). Draft PRs are skipped unless `REVIEW_DRAFTS=true`. Reference machine: a 2021 M1 Max with 32 GB runs `qwen3.5:9b` at about 13 seconds per file and, with `gemma4:12b` cross-examining, about 34 seconds per file, one model resident at a time.
 
 ## API for the dashboard
 

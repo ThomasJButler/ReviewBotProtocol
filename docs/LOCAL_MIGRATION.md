@@ -129,7 +129,7 @@ Post-processing per finding: drop it if line is outside any hunk of the new file
 | OLLAMA_MODEL                                             | qwen3.5:9b                        | qwen3-coder:30b once pulled                                 |
 | OLLAMA_NUM_CTX                                           | 16384                             | fixed per model to avoid reloads                            |
 | OLLAMA_NUM_PREDICT                                       | 2000                              |                                                             |
-| REVIEW_TIMEOUT_SECONDS                                   | 900                               | whole review                                                |
+| REVIEW_TIMEOUT_SECONDS                                   | 3600                              | whole review                                                |
 | MAX_FILES_PER_REVIEW                                     | 25                                |                                                             |
 | MAX_PATCH_BYTES                                          | 32000                             | roughly 11k tokens; must fit OLLAMA_NUM_CTX                 |
 | MAX_WEBHOOK_BODY_BYTES                                   | 2097152                           | GitHub payloads are far smaller                             |
