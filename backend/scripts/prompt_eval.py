@@ -74,7 +74,7 @@ from langchain_core.prompts import ChatPromptTemplate  # noqa: E402
 
 from config.settings import Settings  # noqa: E402
 from services import prompts as P  # noqa: E402
-from services.ai_reviewer import FileReviewer, parse_file_review  # noqa: E402
+from services.ai_reviewer import drop_rule, FileReviewer, parse_file_review  # noqa: E402
 from services.diff import locate_evidence, parse_patch  # noqa: E402
 from services.llm import build_chat_model, ollama_health  # noqa: E402
 from services.redaction import redact_text  # noqa: E402
@@ -242,21 +242,23 @@ def _settings(model: Optional[str], allow_cloud: bool = False) -> Settings:
     return Settings(_env_file=None, **env)
 
 
-def _classify_raw(raw_text: str, patch: str, min_confidence: float) -> Tuple[int, int, int, List[Dict[str, Any]]]:
-    """How many findings the model produced and why the postprocess dropped any."""
+def _classify_raw(raw_text: str, patch: str, min_confidence: float) -> Tuple[int, Dict[str, int], List[Dict[str, Any]]]:
+    """How many findings the model produced and why the postprocess dropped any,
+    by the postprocess's own rules (drop_rule), then the locator."""
     review, _ = parse_file_review(raw_text)
     parsed = parse_patch(patch)
-    low = unlocatable = 0
+    drops = {"confidence": 0, "tag_title": 0, "praise": 0, "unlocatable": 0}
     raw_rows = []
     for f in review.findings:
         located = locate_evidence(parsed, f.line, f.evidence)
-        if f.confidence < min_confidence:
-            low += 1
+        rule = drop_rule(f, min_confidence)
+        if rule:
+            drops[rule] += 1
         elif located is None:
-            unlocatable += 1
+            drops["unlocatable"] += 1
         raw_rows.append({"line": f.line, "located": located, "severity": f.severity.value,
                          "category": f.category.value, "confidence": f.confidence, "title": f.title})
-    return len(review.findings), low, unlocatable, raw_rows
+    return len(review.findings), drops, raw_rows
 
 
 async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_confidence: float,
@@ -270,7 +272,7 @@ async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_c
     patch_seen = redact_text(case.patch)
     result = await reviewer.review_file(case.filename, case.language, case.status, case.patch)
     raw_text = recorder.texts[before] if len(recorder.texts) > before else ""
-    raw_count, low, unlocatable, raw_rows = _classify_raw(raw_text, patch_seen, min_confidence)
+    raw_count, drops, raw_rows = _classify_raw(raw_text, patch_seen, min_confidence)
     kept = result.review.findings
     hit_kept = [f for f in kept if f.line in case.expect]
     hit_raw = [r for r in raw_rows if (r["located"] or r["line"]) in case.expect]
@@ -284,7 +286,8 @@ async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_c
         f.line in case.expect and getattr(f, "source_model", "") != cross_model for f in kept) and result.cross_refuted > 0
     row = {
         "case": case.key, "clean": case.clean, "error": result.error,
-        "raw": raw_count, "kept": len(kept), "dropped_low_confidence": low, "dropped_unlocatable": unlocatable,
+        "raw": raw_count, "kept": len(kept), "dropped_low_confidence": drops["confidence"], "dropped_unlocatable": drops["unlocatable"],
+        "dropped_tag_title": drops["tag_title"], "dropped_praise": drops["praise"],
         "refuted": result.refuted, "verify_calls": result.verify_calls,
         "cross_calls": result.cross_calls, "cross_refuted": result.cross_refuted, "cross_added": result.cross_added,
         "hit_by_cross_only": hit_by_cross_only, "cross_refuted_true": cross_refuted_true,

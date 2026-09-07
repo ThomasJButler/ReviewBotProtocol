@@ -6,6 +6,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 
 - A review cut short by the time ceiling posts the files that finished and lists the rest under Not reviewed; each review also gets its own budget of `REVIEW_SECONDS_PER_FILE` (300) times its file count, under the ceiling; a review that fails before posting leaves one line on the pull request.
 - A forged data-block delimiter inside a diff is rewritten to `[forged-data-marker]`. It was `[data-marker]`, which the verifier read as the pipeline's own framing before standing down on a planted instruction (`docs/benchmarks/2026-09-06-round-three.md`). Naming the token in the prompts is a separate change and waits on a measured round.
+- A finding whose recommendation praises the line and asks for nothing is dropped, from either model, and every finding the postprocess drops is logged with its rule; measured by replay, the reviewer alone goes from 0.918 to 0.929 on the corpus with recall unchanged.
 
 ## 1.1.0 (2026-09-07)
 
