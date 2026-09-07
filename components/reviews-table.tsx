@@ -15,17 +15,16 @@ import {
 import { formatDuration, formatWhen, pullRequestUrl } from '@/lib/utils'
 import type { Review, Severity } from '@/lib/api'
 
-/** The owner muted, the name in full: every row here shares the owner, and the
- * long form was the widest thing on the page. */
+/** The owner muted, the name in full. */
 function RepositoryName({ repository }: { repository: string }) {
   const slash = repository.indexOf('/')
   if (slash === -1) return <>{repository}</>
   return (
     <>
-      <span className="text-xs font-normal text-muted-foreground">
-        {repository.slice(0, slash + 1)}
+      <span className="opacity-70">{repository.slice(0, slash + 1)}</span>
+      <span className="font-medium text-foreground/80">
+        {repository.slice(slash + 1)}
       </span>
-      {repository.slice(slash + 1)}
     </>
   )
 }
@@ -81,9 +80,12 @@ function SeverityBreakdown({
 export function ReviewsTable({
   reviews,
   total,
+  showRepository = false,
 }: {
   reviews: Review[]
   total: number
+  /** With no repository filter on, each row names its repository under the title. */
+  showRepository?: boolean
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
@@ -94,7 +96,6 @@ export function ReviewsTable({
         </TableCaption>
         <TableHeader>
           <TableRow>
-            <TableHead scope="col">Repository</TableHead>
             <TableHead scope="col" className="min-w-[18rem]">
               Pull request
             </TableHead>
@@ -113,18 +114,11 @@ export function ReviewsTable({
         <TableBody>
           {reviews.map(review => (
             <TableRow key={review.id} className="relative">
-              <TableCell className="font-medium">
-                {/* The stretched link makes the whole row clickable while
-                    keeping one tab stop per row. */}
-                <Link
-                  href={`/reviews/${review.id}`}
-                  className="rounded-sm after:absolute after:inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                >
-                  <RepositoryName repository={review.repository} />
-                </Link>
-              </TableCell>
               {/* The shared cell never wraps. The title gets a bounded column, two
-                  lines at most, and the whole of it on hover and on the review page. */}
+                  lines at most, and the whole of it on hover and on the review page.
+                  The stretched link on the title makes the whole row open the
+                  review while keeping one tab stop per row; the number is a
+                  separate link to GitHub, raised above it. */}
               <TableCell className="max-w-[26rem] min-w-[18rem] whitespace-normal">
                 <span
                   className="line-clamp-2 break-words"
@@ -138,10 +132,26 @@ export function ReviewsTable({
                   >
                     #{review.pr_number}
                   </a>{' '}
-                  <span className="text-muted-foreground">
-                    {review.pr_title ?? ''}
-                  </span>
+                  <Link
+                    href={`/reviews/${review.id}`}
+                    className="rounded-sm text-muted-foreground after:absolute after:inset-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  >
+                    {review.pr_title ?? (
+                      <>
+                        review
+                        <span className="sr-only">
+                          {' '}
+                          of pull request {review.pr_number}
+                        </span>
+                      </>
+                    )}
+                  </Link>
                 </span>
+                {showRepository ? (
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    <RepositoryName repository={review.repository} />
+                  </span>
+                ) : null}
               </TableCell>
               <TableCell className="whitespace-nowrap text-muted-foreground">
                 <time dateTime={review.created_at ?? undefined} title="UTC">

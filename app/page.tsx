@@ -104,6 +104,7 @@ export default async function ReviewsPage({
             <ReviewsTable
               reviews={reviews.data.items}
               total={reviews.data.total}
+              showRepository={!repository}
             />
           )}
         </>
