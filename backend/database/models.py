@@ -8,7 +8,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.types import TypeDecorator
@@ -103,6 +103,11 @@ class Finding(Base):
 
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
+    # The replay check reads the hash and then inserts; the unique index makes the
+    # race between those two a constraint, and record() already turns the
+    # IntegrityError into "duplicate". An existing database gets it from
+    # add_missing_indexes at startup.
+    __table_args__ = (Index("ix_webhook_deliveries_body_sha256_unique", "body_sha256", unique=True),)
 
     delivery_id = Column(String(100), primary_key=True)
     event = Column(String(50), nullable=False)
@@ -110,7 +115,7 @@ class WebhookDelivery(Base):
     repository = Column(String(255), nullable=True, index=True)
     pr_number = Column(Integer, nullable=True)
     head_sha = Column(String(40), nullable=True)
-    body_sha256 = Column(String(64), nullable=True, index=True)  # what the signature actually covers
+    body_sha256 = Column(String(64), nullable=True)  # what the signature actually covers; unique, see __table_args__
     received_at = Column(DateTime(timezone=True), default=_now, nullable=False, index=True)
     status = Column(String(20), nullable=False, default="received")  # received, queued, running, completed, failed
     review_id = Column(String(36), nullable=True)

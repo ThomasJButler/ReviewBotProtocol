@@ -20,7 +20,9 @@ class WebhookRepository:
         attempt failed or was interrupted, in which case GitHub's redelivery is
         accepted and the row reused. The delivery id is idempotency for GitHub's
         own redelivery; the body hash is what the signature actually covers, so
-        a captured body replayed under a fresh id is still a replay."""
+        a captured body replayed under a fresh id is still a replay. The read
+        then the insert is a race on paper; the unique index on the hash
+        makes the loser's insert an IntegrityError, answered as a replay."""
         existing = await self.session.get(WebhookDelivery, delivery_id)
         if existing is None and body_sha256:
             stmt = select(WebhookDelivery).where(WebhookDelivery.body_sha256 == body_sha256).limit(1)

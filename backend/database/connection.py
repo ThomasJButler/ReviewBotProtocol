@@ -58,8 +58,11 @@ async def init_db(database_url: Optional[str] = None) -> async_sessionmaker:
         from . import models  # noqa: F401  registers tables
         await conn.run_sync(Base.metadata.create_all)
         added = await conn.run_sync(add_missing_columns)
+        indexed = await conn.run_sync(add_missing_indexes)
     if added:
         logger.info("database columns added", columns=added)
+    if indexed:
+        logger.info("database indexes added", indexes=indexed)
     logger.info("database ready", url=url.split("@")[-1])
     return AsyncSessionLocal
 
@@ -90,6 +93,44 @@ def add_missing_columns(sync_conn) -> List[str]:
             sync_conn.execute(text(ddl))
             added.append(f"{table.name}.{column.name}")
     return added
+
+
+def add_missing_indexes(sync_conn) -> List[str]:
+    """Indexes the models declare that an existing table lacks are created in
+    place; create_all only builds them with a new table. A unique index is
+    skipped, with a warning naming the count, when the table already holds
+    duplicate values, so a strange database still boots."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(sync_conn)
+    quote = sync_conn.dialect.identifier_preparer.quote
+    created: List[str] = []
+    for table in Base.metadata.sorted_tables:
+        if table.name not in inspector.get_table_names():
+            continue
+        present = {ix["name"] for ix in inspector.get_indexes(table.name)}
+        have = {c["name"] for c in inspector.get_columns(table.name)}
+        for index in table.indexes:
+            if index.name in present:
+                continue
+            columns = [c.name for c in index.columns]
+            if not set(columns) <= have:
+                continue  # add_missing_columns runs first; a column still missing has no index yet
+            if index.unique:
+                cols = ", ".join(quote(c) for c in columns)
+                not_null = " AND ".join(f"{quote(c)} IS NOT NULL" for c in columns)
+                dupes = sync_conn.execute(text(
+                    f"SELECT COUNT(*) FROM (SELECT {cols} FROM {quote(table.name)} WHERE {not_null} "
+                    f"GROUP BY {cols} HAVING COUNT(*) > 1)")).scalar_one()
+                if dupes:
+                    logger.warning("unique index skipped: the table holds duplicate values", table=table.name,
+                                   index=index.name, duplicate_groups=dupes)
+                    continue
+            ddl = (f"CREATE {'UNIQUE ' if index.unique else ''}INDEX IF NOT EXISTS {quote(index.name)} "
+                   f"ON {quote(table.name)} ({', '.join(quote(c) for c in columns)})")
+            sync_conn.execute(text(ddl))
+            created.append(index.name)
+    return created
 
 
 async def close_db() -> None:

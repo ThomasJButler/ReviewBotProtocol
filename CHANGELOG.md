@@ -8,6 +8,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 - A forged data-block delimiter inside a diff is rewritten to `[forged-data-marker]`. It was `[data-marker]`, which the verifier read as the pipeline's own framing before standing down on a planted instruction (`docs/benchmarks/2026-09-06-round-three.md`). Naming the token in the prompts is a separate change and waits on a measured round.
 - A finding whose recommendation praises the line and asks for nothing is dropped, from either model, and every finding the postprocess drops is logged with its rule; measured by replay, the reviewer alone goes from 0.918 to 0.929 on the corpus, one clean-diff false positive fewer, with recall unchanged.
 - Pull requests opened by a bot (dependabot, renovate) are skipped unless `REVIEW_BOT_PULL_REQUESTS=true`; a skipped delivery is recorded as `skipped_bot`, and the Status page shows this setting beside the draft one.
+- The replay check's body hash is a unique index, so the read-then-insert race is a constraint; an existing database gets the index at startup, or a warning if it holds duplicates.
 
 ## 1.1.0 (2026-09-07)
 
