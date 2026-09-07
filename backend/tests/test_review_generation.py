@@ -207,6 +207,16 @@ def test_praise_filed_as_a_finding_is_dropped(recommendation):
 
 
 @pytest.mark.parametrize("recommendation", [
+    # the shapes the pre-merge review of this rule found it eating: an imperative
+    # wearing the praise word, and praise that turns a corner into a real defect
+    "Correctly validate user input before use.",
+    "Properly escape the HTML output.",
+    "Correctly sanitize the filename before opening it.",
+    "This is correct in the common case, but fails when the input is empty.",
+    "The check is correct for HTTP, but breaks for HTTPS URLs.",
+    "The implementation looks good but leaks memory on error.",
+    "This is correct. However, it silently ignores the error.",
+    "Looks fine until the list is empty, when it raises IndexError.",
     "No change is needed here, but add a null check on the caller.",
     "Correctly implements the region; consider announcing errors too.",
     "Use a parameterised query.",

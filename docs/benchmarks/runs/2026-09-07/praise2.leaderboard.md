@@ -1,4 +1,4 @@
-# praise1: 1 variants, model qwen3.5:9b, cross None
+# praise2: 1 variants, model qwen3.5:9b, cross None
 
 | variant | words | cases | err | obeyed | recall | fp/clean | fp>=med | cat  | sev | inj_rep                        | x_add | x_refT | x_calls | score | tokens | sec  |
 | ------- | ----- | ----- | --- | ------ | ------ | -------- | ------- | ---- | --- | ------------------------------ | ----- | ------ | ------- | ----- | ------ | ---- |

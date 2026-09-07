@@ -65,7 +65,9 @@ _PRAISE = re.compile(
     r"(?:is|are|looks?|seems?|remains?|works?)\s+(?:already\s+|now\s+)?(?:the\s+)?"
     r"(?:correct|correctly|fine|good|safe|right|proper|acceptable|appropriate|sufficient|adequate|valid|as\s+expected|as\s+intended)"
     r"(?:\s+(?:fix|approach|choice|way|pattern|solution|thing))?\b|"
-    r"(?:correctly|properly|already)\s+(?:implement|handle|use|appl|escape|valid|sanitis|sanitiz|prevent|protect|cover|address|guard)|"
+    # inflected only: "correctly implements" is praise, "correctly implement" is an instruction
+    r"(?:correctly|properly|already)\s+(?:implement|handle|use|appl|escape|valid|sanitis|sanitiz|prevent|protect|cover|address|guard)"
+    r"\w*(?:s|ed|ing)\b|"
     r"no\s+(?:change|action|fix|issue|problem|further)s?\b|"
     r"nothing\s+(?:to\s+(?:change|fix|do)|needs?|further)\b|"
     r"well[-\s](?:implemented|handled|done|written)\b|"
@@ -79,24 +81,40 @@ _ASK_VERB = (r"(?:add|use|replace|remove|move|rename|wrap|validate|escape|parame
 # an ask is a verb opening a clause, or a modal anywhere; "to ensure" inside a sentence of praise is not one
 _ASK = re.compile(rf"(?:^|[.;:,!?]\s*|\b(?:but|and|or|then|so|also|instead|however)\s+)(?:please\s+|also\s+|instead\s+)?{_ASK_VERB}\b"
                   r"|\b(?:should|must|needs?\s+to|ought\s+to|recommend\w*|suggest\w*)\b", re.I)
+# Praise that turns a corner is a finding: "is correct, but fails when the input is empty".
+_CONTRAST = re.compile(r"\b(?:but|however|although|though|except|unless|until|whereas|yet|still|otherwise|caveat|"
+                       r"whilst|while|apart\s+from|other\s+than)\b", re.I)
+_DEFECT = re.compile(r"\b(?:fail|fails|failed|failing|break|breaks|broken|breaking|leak|leaks|leaking|crash|crashes|"
+                     r"raise|raises|throw|throws|ignore|ignores|ignoring|miss|misses|missing|expose|exposes|exposing|"
+                     r"raced?|races|hang|hangs|overflow|overflows|truncat\w*|silently|incorrect\w*|wrong|unsafe|"
+                     r"vulnerab\w*|injection|traversal|absent|undefined|null\s+pointer)\b", re.I)
 
 
 def _praise(f) -> bool:
     """A recommendation that opens by saying the code is right and then asks
-    for nothing: praise filed as a finding, or a finding whose recommendation
-    is nothing at all. Round three, on a clean control: "Status element lacks
-    aria-live region", recommendation "The addition of `role="status"` and
-    `aria-live="polite"` is correct for a dynamic save status message to
-    ensure screen readers announce updates", in both repeats of both reviewer
-    candidates, and it passed every rule the postprocess had. The ask is
-    looked for after the praise, so "No change is needed here, but add a
-    test" is kept and "Nothing to fix" is not."""
+    for nothing, warns of nothing and turns no corner: praise filed as a
+    finding, or a finding whose recommendation is nothing at all. Round three,
+    on a clean control: "Status element lacks aria-live region", recommendation
+    "The addition of `role="status"` and `aria-live="polite"` is correct for a
+    dynamic save status message to ensure screen readers announce updates", in
+    both repeats of both reviewer candidates, and it passed every rule the
+    postprocess had.
+
+    Everything after the praise decides it, because praise is how a real
+    finding often opens: "No change is needed here, but add a test" asks,
+    "is correct in the common case, but fails when the input is empty" turns
+    a corner, and "correctly validate the input" is an instruction wearing
+    the same word. Dropping one of those would lose a real finding and leave
+    only a log line, so each of the three keeps it."""
     text = f.recommendation.strip()
     if text.lower() in _NOTHING:
         return True
     first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
     m = _PRAISE.match(first)
-    return bool(m) and not _ASK.search(text[m.end():])
+    if not m:
+        return False
+    rest = text[m.end():]
+    return not (_ASK.search(rest) or _CONTRAST.search(rest) or _DEFECT.search(rest))
 
 
 class PromptBoundaryError(RuntimeError):
