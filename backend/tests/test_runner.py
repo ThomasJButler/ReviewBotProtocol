@@ -34,10 +34,10 @@ MODEL_REPLY = json.dumps({"findings": [
 PR_TITLE = "Add <b>feature</b> @everyone SECRET-TITLE-TOKEN"
 
 
-def _routes(head="c" * 40):
+def _routes(head="c" * 40, extra=()):
     respx.post(f"{BASE}/app/installations/555/access_tokens").mock(return_value=httpx.Response(201, json={"token": "ghs_t", "expires_at": "2099-01-01T00:00:00Z"}))
     respx.get(f"{BASE}/repos/octocat/repo/pulls/42").mock(return_value=httpx.Response(200, json={"number": 42, "title": PR_TITLE, "body": "SECRET-BODY-TOKEN", "head": {"sha": head}}))
-    respx.get(f"{BASE}/repos/octocat/repo/pulls/42/files").mock(return_value=httpx.Response(200, json=[
+    respx.get(f"{BASE}/repos/octocat/repo/pulls/42/files").mock(return_value=httpx.Response(200, json=[*extra,
         {"filename": "db.py", "status": "modified", "additions": 2, "deletions": 0, "patch": SECRET_DIFF},
         {"filename": ".env", "status": "added", "additions": 1, "deletions": 0, "patch": "+SECRET=abcdefghijklmnop"},
         {"filename": "README.md", "status": "modified", "additions": 1, "deletions": 0, "patch": "+hello"},
@@ -119,13 +119,79 @@ class SlowModel(RecordingChatModel):
         return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
+class SlowAfter(RecordingChatModel):
+    """Answers the first file at once and never answers the next: a review
+    that runs out of time part way through. `started` counts calls as they
+    begin, since `calls` only sees one once it has been answered."""
+    answers: int = 1
+    started: int = 0
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        self.started += 1
+        if self.started > self.answers:
+            await asyncio.sleep(30)
+        return await super()._agenerate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+
+LATE = {"filename": "late.py", "status": "modified", "additions": 1, "deletions": 0, "patch": "@@ -1 +1,2 @@\n x = 1\n+y = 2\n"}
+
+
+async def _cancel_after_first_file(db, model, reason):
+    """Start a two-file review, wait for the first file to land, cancel it the way the queue does."""
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=settings, llm=model, session_factory=db, http=http)
+        job = ReviewJob("octocat/repo", 42, "c" * 40, 555, "")
+        task = asyncio.create_task(run_review(job, deps))
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if model.started >= 2:
+                break
+        if reason:
+            job.state["cancel_reason"] = reason
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    async with db() as session:
+        (latest,) = await ReviewRepository(session).list(limit=5)
+        latest = await ReviewRepository(session).get(latest.id)  # list() leaves the findings unloaded
+        return latest, [f.line for f in latest.findings]
+
+
 @respx.mock
-async def test_a_review_cut_short_records_how_far_it_got(db):
-    """The first review of a rewrite-sized pull request hit the 900 s ceiling at
-    24 of 25 files and the row said only "timed out after 900s". The last
-    progress report now travels into the message, so the operator can see
-    whether to raise the ceiling or shrink the review."""
-    _routes()
+async def test_a_review_cut_short_posts_the_files_that_finished(db):
+    """The first review of a rewrite-sized pull request hit the ceiling at 24
+    of 25 files and posted nothing. Now the files that finished are posted,
+    the rest are listed under Not reviewed, and the row carries the findings,
+    the URL and how far it got."""
+    reviews_route = _routes(extra=[LATE])
+    latest, lines = await _cancel_after_first_file(db, SlowAfter(response=MODEL_REPLY), "timeout")
+    assert len(reviews_route.calls) == 1
+    posted = json.loads(reviews_route.calls[0].request.content)
+    assert "1 of 2 files were reviewed; the rest are listed under Not reviewed" in posted["body"], posted["body"]
+    assert "`late.py`: not reached before the review's time ran out" in posted["body"]
+    assert [c["path"] for c in posted["comments"]] == ["db.py"]
+    assert latest.status == "timed_out" and latest.files_reviewed == 1 and latest.files_skipped == 6
+    assert latest.comment_url.startswith("https://github.com/") and lines == [3]
+    assert "at 1 of 2 files in the review phase" in latest.error_message, latest.error_message
+    assert latest.summary and "ran out of time" in latest.summary
+
+
+@respx.mock
+@pytest.mark.parametrize("reason, status", [("", "superseded"), ("shutdown", "interrupted")])
+async def test_a_review_stopped_for_a_newer_push_or_a_shutdown_posts_nothing(db, reason, status):
+    """Only the ceiling earns a partial post. A newer push gets its own review
+    and a shutdown has no time to spend on GitHub."""
+    reviews_route = _routes(extra=[LATE])
+    latest, lines = await _cancel_after_first_file(db, SlowAfter(response=MODEL_REPLY), reason)
+    assert not reviews_route.called
+    assert latest.status == status and latest.comment_url is None and lines == []
+
+
+@respx.mock
+async def test_a_review_cut_short_before_any_file_finished_says_so(db):
+    """Nothing reviewed is still worth one line on the pull request: silence
+    reads as approval."""
+    reviews_route = _routes()
     async with httpx.AsyncClient() as http:
         deps = RunnerDeps(settings=settings, llm=SlowModel(response=MODEL_REPLY), session_factory=db, http=http)
         job = ReviewJob("octocat/repo", 42, "c" * 40, 555, "")
@@ -135,10 +201,40 @@ async def test_a_review_cut_short_records_how_far_it_got(db):
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+    posted = json.loads(reviews_route.calls[0].request.content)
+    assert "ran out of time" in posted["body"] and "before finishing a file" in posted["body"]
+    assert "`db.py`: not reached before the review's time ran out" in posted["body"] and posted.get("comments", []) == []
     async with db() as session:
         (latest,) = await ReviewRepository(session).list(limit=5)
-        assert latest.status == "timed_out"
+        assert latest.status == "timed_out" and latest.files_reviewed == 0
         assert "at 0 of 1 files in the review phase" in latest.error_message, latest.error_message
+
+
+@respx.mock
+async def test_a_review_cut_short_after_the_head_moved_is_recorded_but_not_posted(db):
+    """A post to a stale commit would 422 anyway; the newer push gets its own review."""
+    _routes(extra=[LATE])
+    reviews_route = respx.post(f"{BASE}/repos/octocat/repo/pulls/42/reviews")
+    model = SlowAfter(response=MODEL_REPLY)
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=settings, llm=model, session_factory=db, http=http)
+        job = ReviewJob("octocat/repo", 42, "c" * 40, 555, "")
+        task = asyncio.create_task(run_review(job, deps))
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if model.started >= 2:
+                break
+        respx.get(f"{BASE}/repos/octocat/repo/pulls/42").mock(return_value=httpx.Response(200, json={"number": 42, "title": PR_TITLE, "head": {"sha": "d" * 40}}))
+        job.state["cancel_reason"] = "timeout"
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert not reviews_route.called
+    async with db() as session:
+        (latest,) = await ReviewRepository(session).list(limit=5)
+        latest = await ReviewRepository(session).get(latest.id)
+        assert latest.status == "timed_out" and latest.files_reviewed == 1 and latest.comment_url is None
+        assert [f.line for f in latest.findings] == [3], "the findings that were made are kept for the dashboard"
 
 
 @respx.mock
