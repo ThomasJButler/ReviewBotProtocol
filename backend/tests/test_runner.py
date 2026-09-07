@@ -14,7 +14,8 @@ from config.settings import settings
 from database.repositories.review_repository import ReviewRepository
 from database.repositories.webhook_repository import WebhookRepository
 from services.review_queue import ReviewJob
-from services.review_runner import RunnerDeps, Superseded, run_review, select_files
+import services.review_runner as review_runner
+from services.review_runner import ReviewCutShort, RunnerDeps, Superseded, review_budget, run_review, select_files
 from tests.fakes import RecordingChatModel
 
 # Every whole-review test runs under the socket guard: respx answers GitHub in-process,
@@ -185,6 +186,38 @@ async def test_a_review_stopped_for_a_newer_push_or_a_shutdown_posts_nothing(db,
     latest, lines = await _cancel_after_first_file(db, SlowAfter(response=MODEL_REPLY), reason)
     assert not reviews_route.called
     assert latest.status == status and latest.comment_url is None and lines == []
+
+
+@respx.mock
+async def test_a_review_cut_short_by_its_own_budget_posts_and_raises_review_cut_short(db, monkeypatch):
+    """The queue's ceiling is one number for every review. The runner's own
+    deadline is the file count times REVIEW_SECONDS_PER_FILE, so a two-file
+    pull request stops holding the queue for an hour, and it ends the same
+    way the ceiling does: what finished is posted, the row is written once."""
+    monkeypatch.setattr(review_runner, "TIMEOUT_MARGIN_SECONDS", 0)
+    reviews_route = _routes(extra=[LATE])
+    tight = settings.model_copy(update={"REVIEW_SECONDS_PER_FILE": 1})
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=tight, llm=SlowAfter(response=MODEL_REPLY), session_factory=db, http=http)
+        with pytest.raises(ReviewCutShort) as raised:
+            await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
+    assert raised.value.recorded and "budget of 2s" in str(raised.value) and "at 1 of 2 files" in str(raised.value)
+    assert len(reviews_route.calls) == 1
+    posted = json.loads(reviews_route.calls[0].request.content)
+    assert "1 of 2 files were reviewed" in posted["body"] and [c["path"] for c in posted["comments"]] == ["db.py"]
+    async with db() as session:
+        (latest,) = await ReviewRepository(session).list(limit=5)
+        latest = await ReviewRepository(session).get(latest.id)
+        assert latest.status == "timed_out" and latest.files_reviewed == 1 and latest.comment_url
+        assert [f.line for f in latest.findings] == [3] and "budget" in latest.error_message
+
+
+def test_the_budget_is_files_times_the_per_file_setting_under_the_ceiling():
+    s = settings.model_copy(update={"REVIEW_TIMEOUT_SECONDS": 3600, "REVIEW_SECONDS_PER_FILE": 300})
+    assert review_budget(s, 2, elapsed=10) == 600 - 10 - review_runner.TIMEOUT_MARGIN_SECONDS
+    assert review_budget(s, 25, elapsed=10) == 3600 - 10 - review_runner.TIMEOUT_MARGIN_SECONDS, "the product is over the ceiling, so the ceiling holds"
+    assert review_budget(s.model_copy(update={"REVIEW_SECONDS_PER_FILE": 0}), 2, elapsed=10) == 3600 - 10 - review_runner.TIMEOUT_MARGIN_SECONDS
+    assert review_budget(s, 1, elapsed=10_000) == 1.0, "setup that already overran leaves a second, never a negative timeout"
 
 
 @respx.mock

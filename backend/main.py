@@ -30,6 +30,8 @@ def _on_result(job: ReviewJob, ok: bool, err) -> None:
         logger.info("review finished", repo=job.repo, pr=job.pr_number)
     elif type(err).__name__ in ("Superseded", "SupersededError"):
         logger.info("review superseded", repo=job.repo, pr=job.pr_number, reason=str(err))
+    elif type(err).__name__ == "ReviewCutShort":
+        logger.warning("review cut short by its budget", repo=job.repo, pr=job.pr_number, reason=str(err))
     else:
         logger.warning("review did not complete", repo=job.repo, pr=job.pr_number,
                        reason=type(err).__name__ if err else "unknown", cancel_reason=job.cancel_reason)

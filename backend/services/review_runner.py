@@ -35,11 +35,39 @@ PROMPT_OVERHEAD_TOKENS = 1400  # system prompt, schema and framing: measured up 
 CLEANUP_SECONDS = 15
 PARTIAL_HEAD_CHECK_SECONDS = 5   # a review cut short checks the head once more, briefly,
 PARTIAL_POST_SECONDS = 20        # and posts what it has inside the queue's grace period
+TIMEOUT_MARGIN_SECONDS = 60      # the runner's own deadline sits this far inside the queue's ceiling
 
 
 class Superseded(Exception):
     """The PR head moved while this job was running, or this head was already
     reviewed; nothing is posted and the job ends as 'superseded'."""
+
+
+class ReviewCutShort(Exception):
+    """The review ran out of its own time budget. What finished was posted and
+    the row written before this is raised (recorded says whether that write
+    happened), so the queue reports the job as not completed without anything
+    being written twice."""
+
+    def __init__(self, message: str, recorded: bool):
+        super().__init__(message)
+        self.recorded = recorded
+
+
+def review_budget(settings: Settings, files: int, elapsed: float) -> float:
+    """Seconds the workflow may take: the file count times REVIEW_SECONDS_PER_FILE,
+    never more than REVIEW_TIMEOUT_SECONDS, less what setup already spent and a
+    margin so this deadline fires before the queue's ceiling does. A two-file
+    pull request stops holding the queue for an hour; a twenty-five-file one
+    keeps the ceiling, since the product exceeds it."""
+    ceiling = float(settings.REVIEW_TIMEOUT_SECONDS)
+    per_file = settings.REVIEW_SECONDS_PER_FILE
+    total = min(ceiling, per_file * files) if per_file > 0 and files > 0 else ceiling
+    return max(1.0, total - elapsed - TIMEOUT_MARGIN_SECONDS)
+
+
+def _how_far(where: Dict[str, Any]) -> str:
+    return f" at {where['done']} of {where['total']} files in the {where['phase']} phase" if where.get("total") else ""
 
 
 @dataclass
@@ -298,7 +326,16 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
 
         workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm), on_progress=_progress,
                                   on_result=lambda result: done.__setitem__(result.filename, result))
-        state = await workflow.run(job.repo, job.pr_number, head_sha, files)
+        budget = review_budget(settings, len(files), time.perf_counter() - started)
+        try:
+            state = await asyncio.wait_for(workflow.run(job.repo, job.pr_number, head_sha, files), timeout=budget)
+        except asyncio.TimeoutError:
+            # wait_for has cancelled the workflow and waited for it, so `done` is settled
+            message = f"review timed out after {time.perf_counter() - started:.0f}s (budget of {budget:.0f}s){_how_far(where)}"
+            recorded = await _post_cut_short(deps, client, job, review_id, head_sha=head_sha, done=done, files=files,
+                                             skipped=skipped, redaction_total=redaction_total, pr=pr, raw_files=raw_files,
+                                             started=started, where=where, message=message)
+            raise ReviewCutShort(message, recorded)
         results = state.get("results", [])
         totals = state.get("totals", {})
         succeeded = [r for r in results if r.parse_ok and not r.error]
@@ -323,12 +360,12 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
     except BaseException as e:
         elapsed = time.perf_counter() - started
         recorded = False
-        if isinstance(e, asyncio.CancelledError):
+        if isinstance(e, ReviewCutShort):
+            status, message, recorded = "timed_out", str(e), e.recorded
+        elif isinstance(e, asyncio.CancelledError):
             reason = job.cancel_reason or "superseded"
             status = {"timeout": "timed_out", "shutdown": "interrupted"}.get(reason, "superseded")
-            message = f"review {status.replace('_', ' ')} after {elapsed:.0f}s ({reason})"
-            if where.get("total"):
-                message += f" at {where['done']} of {where['total']} files in the {where['phase']} phase"
+            message = f"review {status.replace('_', ' ')} after {elapsed:.0f}s ({reason}){_how_far(where)}"
             if reason == "timeout" and files:
                 # the ceiling, not a newer push or a shutdown: what finished is worth posting
                 recorded = await _post_cut_short(deps, client, job, review_id, head_sha=head_sha, done=done, files=files,

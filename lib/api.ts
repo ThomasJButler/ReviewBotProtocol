@@ -118,6 +118,7 @@ export interface Status {
     max_files_per_review: number
     max_patch_bytes: number
     review_timeout_seconds: number
+    review_seconds_per_file: number
     num_ctx: number
   }
 }

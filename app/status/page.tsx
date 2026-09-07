@@ -269,6 +269,14 @@ export default async function StatusPage() {
                   value={`${status.data.limits.review_timeout_seconds} s`}
                 />
                 <Row
+                  label="Budget per file"
+                  value={
+                    status.data.limits.review_seconds_per_file > 0
+                      ? `${status.data.limits.review_seconds_per_file} s`
+                      : 'off'
+                  }
+                />
+                <Row
                   label="Context window"
                   value={status.data.limits.num_ctx.toLocaleString('en-GB')}
                 />
