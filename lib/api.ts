@@ -122,6 +122,7 @@ export interface Status {
     num_ctx: number
     review_drafts: boolean
     review_bot_pull_requests: boolean
+    review_retention_days: number
   }
 }
 

@@ -136,5 +136,6 @@ async def status(request: Request):
         "limits": {"max_files_per_review": settings.MAX_FILES_PER_REVIEW, "max_patch_bytes": settings.MAX_PATCH_BYTES,
                    "review_timeout_seconds": settings.REVIEW_TIMEOUT_SECONDS,
                    "review_seconds_per_file": settings.REVIEW_SECONDS_PER_FILE, "num_ctx": settings.OLLAMA_NUM_CTX,
-                   "review_drafts": settings.REVIEW_DRAFTS, "review_bot_pull_requests": settings.REVIEW_BOT_PULL_REQUESTS},
+                   "review_drafts": settings.REVIEW_DRAFTS, "review_bot_pull_requests": settings.REVIEW_BOT_PULL_REQUESTS,
+                   "review_retention_days": settings.REVIEW_RETENTION_DAYS},
     }

@@ -287,6 +287,14 @@ export default async function StatusPage() {
                   }
                 />
                 <Row
+                  label="Retention"
+                  value={
+                    status.data.limits.review_retention_days > 0
+                      ? `${status.data.limits.review_retention_days} days`
+                      : 'forever'
+                  }
+                />
+                <Row
                   label="Bot pull requests"
                   value={
                     status.data.limits.review_bot_pull_requests

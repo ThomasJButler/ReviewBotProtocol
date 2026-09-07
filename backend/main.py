@@ -1,6 +1,7 @@
 """ReviewBot Protocol backend. Two public routes (the webhook, and a health check that says only status and version), a token-gated
 dashboard API, a single-worker review queue, and a local model."""
 
+import asyncio
 import fcntl
 import os
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from handlers.review import api_router
 from handlers.webhook import webhook_router
 from services.llm import build_chat_model, build_cross_model
 from services.review_queue import ReviewJob, ReviewQueue
+from services.retention import run_nightly
 from services.review_runner import RunnerDeps, run_review
 
 logger = get_logger(__name__)
@@ -68,6 +70,7 @@ async def lifespan(app: FastAPI):
         fixed += await WebhookRepository(session).mark_interrupted()
     if fixed:
         logger.warning("marked rows left running by a previous run as interrupted", rows=fixed)
+    retention = asyncio.create_task(run_nightly(session_factory, settings), name="retention")
     if set(settings.allowed_hosts_list) <= {"localhost", "127.0.0.1", "::1"}:
         logger.warning("ALLOWED_HOSTS is loopback only; add the public webhook hostname before pointing GitHub at this backend")
     deps = RunnerDeps(settings=settings, llm=build_chat_model(settings), session_factory=session_factory,
@@ -80,11 +83,17 @@ async def lifespan(app: FastAPI):
     await queue.start()
     app.state.deps = deps
     app.state.queue = queue
+    app.state.retention = retention
     try:
         yield
     finally:
         pending = queue.pending_jobs
         await queue.stop()
+        retention.cancel()  # before the engine goes, or a sweep in flight hits a disposed pool
+        try:
+            await retention
+        except (asyncio.CancelledError, Exception):
+            pass
         if pending:
             async with session_factory() as session:
                 for job in pending:
