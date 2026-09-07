@@ -351,10 +351,12 @@ class FileReviewer:
             key = (f.line, f.title.strip().lower())
             if key in seen or _null_addition(f) or (f.line, f.category) in confirmed:
                 continue
-            if f.line in refuted_at:
-                # "false positive" followed by the second model's own finding on the same line is a
-                # correction of severity or wording, not a refutation: the first reviewer's finding
-                # stands with its provenance, at the lowest severity anyone gave it
+            if f.line in refuted_at and refuted_at[f.line][0].category == f.category:
+                # "false positive" followed by the second model's own finding on the same line, in
+                # the same category, is a correction of severity or wording, not a refutation: the
+                # first reviewer's finding stands with its provenance, at the lowest severity anyone
+                # gave it. A finding of another category on that line is a different problem and
+                # stands on its own, and the refutation stands too.
                 original, v = refuted_at.pop(f.line)
                 lowest = max((original.severity, v.severity, f.severity), key=lambda s: SEVERITY_ORDER[s])  # most severe sorts first
                 kept.append(original.model_copy(update={"severity": lowest, "cross_verdict": "real",

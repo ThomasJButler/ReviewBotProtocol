@@ -258,6 +258,22 @@ async def test_a_finding_titled_with_the_tag_alone_is_slot_filling_and_is_droppe
     assert [f.line for f in result.review.findings] == [3], "the reviewer's own bare tag is dropped before the cross pass"
 
 
+async def test_an_addition_of_another_category_on_a_refuted_line_is_not_a_correction():
+    """The correction rule matched by line alone: a refuted security finding and an
+    unrelated quality note on the same line counted as the second model changing
+    its mind, and the refuted finding came back labelled real with the note's
+    reason on it. A correction is the same problem in the same category."""
+    other = _cross(
+        [{"index": 1, "verdict": "false_positive", "severity": "low", "reason": "a fixture value", "confidence": 0.9}],
+        [{"category": "quality", "severity": "low", "title": "shrink: a constant, not a variable", "line": 3,
+          "evidence": "password = 'hunter2hunter2'", "recommendation": "PASSWORD = ...", "confidence": 0.8}])
+    reviewer, cross = _pair(other)
+    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    on_three = [f for f in result.review.findings if f.line == 3]
+    assert [f.category.value for f in on_three] == ["quality"], "the refutation stands and the note stands on its own"
+    assert on_three[0].source_model == "gemma-fake" and result.cross_refuted == 1 and result.cross_added == 1
+
+
 async def test_a_refutation_with_an_addition_elsewhere_is_still_a_refutation():
     elsewhere = _cross(
         [{"index": 1, "verdict": "false_positive", "severity": "low", "reason": "fixture value", "confidence": 0.9}],
