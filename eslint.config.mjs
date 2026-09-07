@@ -8,7 +8,13 @@ const compat = new FlatCompat({
 
 const config = [
   {
-    ignores: ['.next/**', 'node_modules/**', 'next-env.d.ts', 'backend/**'],
+    ignores: [
+      '.next/**',
+      'node_modules/**',
+      'next-env.d.ts',
+      'backend/**',
+      '.claude/**', // agent worktrees live here and carry their own next-env.d.ts
+    ],
   },
   ...compat.extends('next/core-web-vitals', 'next/typescript', 'prettier'),
 ]
