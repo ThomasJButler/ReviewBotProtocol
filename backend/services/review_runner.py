@@ -3,6 +3,7 @@
 import asyncio
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -206,6 +207,14 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                                          base_url=settings.GITHUB_API_BASE_URL, http=deps.http, repository=job.repo)
     client = GitHubClient(provider, base_url=settings.GITHUB_API_BASE_URL, http=deps.http)
     where: Dict[str, Any] = {}  # the last progress report, so a review cut short says how far it got
+    done: "OrderedDict[str, FileReviewResult]" = OrderedDict()  # every file result so far, keyed by file, cross-examined ones overwriting
+    # Bound before the try so the handler at the end can see them whenever the cancel lands.
+    head_sha = job.head_sha
+    pr: Dict[str, Any] = {}
+    raw_files: List[Dict[str, Any]] = []
+    files: List[Dict[str, Any]] = []
+    skipped: List[Tuple[str, str]] = []
+    redaction_total = 0
     try:
         pr = await client.get_pull(job.repo, job.pr_number)
         head_sha = pr.get("head", {}).get("sha") or job.head_sha
@@ -227,7 +236,8 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                     "progress_phase": phase, "progress_done": done, "progress_total": total,
                     "progress_file": current[:512] or None})
 
-        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm), on_progress=_progress)
+        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm), on_progress=_progress,
+                                  on_result=lambda result: done.__setitem__(result.filename, result))
         state = await workflow.run(job.repo, job.pr_number, head_sha, files)
         results = state.get("results", [])
         totals = state.get("totals", {})
