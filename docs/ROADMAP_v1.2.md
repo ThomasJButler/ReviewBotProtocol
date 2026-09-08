@@ -34,6 +34,7 @@ What happened, 2026-09-07:
 - **Fork pull requests** were never tested live (S6 needs a second GitHub account). The code path exists and has unit tests; one real fork PR would close it.
 - **Retention for `reviews.db`.** Done in v1.2: `REVIEW_RETENTION_DAYS` (365, 0 keeps all), a sweep at startup and nightly that never touches a running row, and `scripts/export_reviews.py` for anything worth keeping longer.
 - **Surface a failed or cut-short review on the PR.** A timeout posts nothing at all today; a one-line comment saying the review did not complete and why would stop the silence looking like approval.
+- **Review a diff with no network.** A command that takes a `git diff` or a branch range, runs the same pipeline and prints the findings. `FileReviewer` is already independent of GitHub and `backend/scripts/prompt_eval.py` proves it by driving the pipeline over local files. It cuts the loop for a pipeline change from a push and an hour of the machine to minutes, and it is the only way to show the privacy claim with the wifi off. The reasoning is item 7 of `docs/REVIEW_QUALITY.md`.
 - **Bigger context on a bigger machine.** `OLLAMA_NUM_CTX` at 16384 means a 32 KB patch is the most a file can be; on a server with both models resident, 32768 and a 64 KB cap are one setting each, and worth measuring.
 
 ## 3. The next prompt round (from the raw replies of round three)
