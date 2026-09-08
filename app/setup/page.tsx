@@ -34,7 +34,9 @@ export default function SetupPage() {
         <li>
           <Card>
             <CardHeader>
-              <CardTitle>1. Install Ollama and pull the model</CardTitle>
+              <CardTitle as="h2">
+                1. Install Ollama and pull the model
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p>
@@ -59,7 +61,7 @@ export default function SetupPage() {
         <li>
           <Card>
             <CardHeader>
-              <CardTitle>2. Create the GitHub App</CardTitle>
+              <CardTitle as="h2">2. Create the GitHub App</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <p>
@@ -124,7 +126,7 @@ export default function SetupPage() {
         <li>
           <Card>
             <CardHeader>
-              <CardTitle>3. Fill in the backend environment</CardTitle>
+              <CardTitle as="h2">3. Fill in the backend environment</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p>
@@ -163,7 +165,7 @@ LOCAL_API_TOKEN=`}
         <li>
           <Card>
             <CardHeader>
-              <CardTitle>4. Let GitHub reach the webhook</CardTitle>
+              <CardTitle as="h2">4. Let GitHub reach the webhook</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p>
@@ -193,7 +195,7 @@ LOCAL_API_TOKEN=`}
         <li>
           <Card>
             <CardHeader>
-              <CardTitle>5. Verify</CardTitle>
+              <CardTitle as="h2">5. Verify</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p>

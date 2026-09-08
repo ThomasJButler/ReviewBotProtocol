@@ -93,7 +93,7 @@ export default async function StatusPage() {
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle>Ollama</CardTitle>
+              <CardTitle as="h2">Ollama</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y divide-border">
@@ -186,7 +186,7 @@ export default async function StatusPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Queue</CardTitle>
+              <CardTitle as="h2">Queue</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y divide-border">
@@ -232,7 +232,7 @@ export default async function StatusPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Database</CardTitle>
+              <CardTitle as="h2">Database</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y divide-border">
@@ -252,7 +252,7 @@ export default async function StatusPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Limits</CardTitle>
+              <CardTitle as="h2">Limits</CardTitle>
             </CardHeader>
             <CardContent>
               <dl className="divide-y divide-border">

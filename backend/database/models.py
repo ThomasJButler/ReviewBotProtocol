@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from sqlalchemy.types import TypeDecorator
 
 from .connection import Base

@@ -33,9 +33,16 @@ function CardHeader({ className, ...props }: React.ComponentProps<'div'>) {
   )
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<'div'>) {
+/** `as` picks the element: a card that names a section of the page renders its
+ * title as a heading (`as="h2"`), so the page outline reads the way it looks;
+ * a card that is a labelled row keeps the div. */
+function CardTitle({
+  className,
+  as: Component = 'div',
+  ...props
+}: React.ComponentProps<'div'> & { as?: React.ElementType }) {
   return (
-    <div
+    <Component
       data-slot="card-title"
       className={cn(
         'font-heading text-base leading-snug font-medium group-data-[size=sm]/card:text-sm',
