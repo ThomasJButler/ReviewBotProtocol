@@ -18,6 +18,8 @@ ngrok http 8000
 
 Note the `https://<name>.ngrok-free.app` hostname. It stays the same for your account. The inspector is at http://127.0.0.1:4040. ngrok's browser warning page only affects HTML requests from browsers; GitHub's POSTs pass through ([ngrok docs](https://ngrok.com/docs/pricing-limits/free-plan-limits)).
 
+A tunnel forwards the whole port, so it publishes `/health` and the dashboard API as well as the webhook, and those are then protected by `LOCAL_API_TOKEN` alone. That is acceptable for a scratch repository over an afternoon, with a long token. For anything you leave up, put a proxy in front that forwards only `POST /webhook/github`.
+
 Alternative without an account: `cloudflared tunnel --url http://127.0.0.1:8000` ([TryCloudflare](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)). Also raw bytes, but the hostname changes on every run, so the App's webhook URL and `ALLOWED_HOSTS` need editing each time.
 
 Never smee.io for this. Its client parses the JSON body and re-serialises it before forwarding (`JSON.parse` then `JSON.stringify` in [smee-client index.ts](https://github.com/probot/smee-client/blob/master/index.ts)), so the bytes GitHub signed are not the bytes the backend receives and the signature check can fail ([smee-client #136](https://github.com/probot/smee-client/issues/136), [#325](https://github.com/probot/smee-client/issues/325)).
@@ -57,17 +59,17 @@ python3.13 -m venv .venv
 cp .env.example .env
 ```
 
-Edit `.env`: `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY=/Users/you/.config/reviewbot/github-app.pem`, `GITHUB_WEBHOOK_SECRET` (the value from step 2), `LOCAL_API_TOKEN` (`openssl rand -hex 24`), and `ALLOWED_HOSTS=localhost,127.0.0.1,<tunnel-host>`. Comments stay on their own lines; the backend refuses a secret shorter than 16 characters or one that starts with `#`.
+Edit `.env`: `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY=/Users/you/.config/reviewbot/github-app.pem`, `GITHUB_WEBHOOK_SECRET` (the value from step 2), `LOCAL_API_TOKEN` (`openssl rand -hex 24`), and `ALLOWED_HOSTS=localhost,127.0.0.1,<tunnel-host>`. The hostname goes in bare: no scheme, no path, no port. Comments stay on their own lines; the backend refuses a secret shorter than 16 characters or one that starts with `#`.
 
 Ollama, if it is not already running: `OLLAMA_NO_CLOUD=1 ollama serve` in its own terminal, then `curl -s http://127.0.0.1:11434/api/tags` should list `qwen3.5:9b`.
 
 Start the backend and leave it running:
 
 ```
-.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+.venv/bin/python main.py
 ```
 
-The log's first lines name the model and the loopback address. If it refuses to start it says exactly which setting is wrong.
+The log's first lines name the model and the loopback address. If it refuses to start it says exactly which setting is wrong. `main.py` calls `uvicorn.run("main:app", host=HOST, port=PORT)`, so `.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000` starts the same server; that is the form `scripts/dev-up.sh` uses.
 
 Dashboard, in a third terminal from the repository root:
 
@@ -78,6 +80,8 @@ npm run dev
 ```
 
 Open http://127.0.0.1:3000/status. Ollama reachable, model present, review worker Running.
+
+Once the three terminals have worked once, `NGROK_DOMAIN=<your static ngrok domain> scripts/dev-up.sh` from the repository root does the same in one command: it starts ngrok, the dashboard and the backend, prints the tunnel, backend and Status URLs, and stops all three on Ctrl-C. The backend runs in the foreground so its log is on screen; ngrok and the dashboard log to `.dev-logs/`. It needs `backend/.env`, `backend/.venv`, `.env.local`, an ngrok that is logged in, and Ollama already running.
 
 ## 4. Ping
 
@@ -207,12 +211,18 @@ What the run turned up, in the order it was found:
 
 ## Troubleshooting
 
-| Symptom                                             | Cause                                                                        | Fix                                                                      |
-| --------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Delivery red, response "Invalid Host header" or 400 | the tunnel hostname is not in `ALLOWED_HOSTS`                                | add it, restart the backend                                              |
-| Delivery red, 404                                   | the App's webhook URL has no path                                            | it must end in `/webhook/github`                                         |
-| Delivery red, 401                                   | webhook secret mismatch                                                      | the same value in the App settings and `backend/.env`, no trailing space |
-| Delivery green, 202, but no review                  | Ollama down, or the model not pulled                                         | Status page shows which; `ollama pull qwen3.5:9b`                        |
-| Review posted without inline comments               | GitHub rejected a comment line (422) and the notes were folded into the body | expected on lines outside the diff; nothing to fix                       |
-| Backend refuses to start                            | a setting failed validation; the message names it                            | fix `.env`                                                               |
-| Dashboard says 421                                  | opened by a hostname other than localhost or 127.0.0.1                       | use http://127.0.0.1:3000                                                |
+| Symptom                                                                                 | Cause                                                                                                                                             | Fix                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Delivery red, response "Invalid Host header" or 400                                     | the tunnel hostname is not in `ALLOWED_HOSTS`                                                                                                     | add it, restart the backend                                                                                                                                                                          |
+| Delivery red, 400 "Invalid Host header" with the tunnel host already in `ALLOWED_HOSTS` | the full URL was pasted in rather than the bare hostname                                                                                          | write it bare, as `ALLOWED_HOSTS=localhost,127.0.0.1,<tunnel-host>`; since 69acebe `allowed_hosts_list` also strips a scheme, path or port (`backend/config/settings.py`), so a pasted URL works too |
+| Delivery red, 404                                                                       | the App's webhook URL has no path, so GitHub posts to `/`                                                                                         | it must end in `/webhook/github`                                                                                                                                                                     |
+| Delivery red, 401                                                                       | webhook secret mismatch                                                                                                                           | the same value in the App settings and `backend/.env`, no trailing space                                                                                                                             |
+| Delivery green, 202, but no review                                                      | Ollama down, or the model not pulled                                                                                                              | Status page shows which; `ollama pull qwen3.5:9b`                                                                                                                                                    |
+| Review recorded "Timed out"; the PR has a review naming the files it did not reach      | the review passed its budget (`REVIEW_SECONDS_PER_FILE` times its files, or `REVIEW_TIMEOUT_SECONDS`) and was cut short; what finished was posted | the recorded error names how far it got, in files and phase; raise the budget or the ceiling, or review a smaller PR (`CROSS_EXAMINE_SEQUENTIAL` adds two model load cycles)                         |
+| Review posted without inline comments                                                   | GitHub rejected a comment line (422) and the notes were folded into the body                                                                      | expected on lines outside the diff; nothing to fix                                                                                                                                                   |
+| A key in the diff is quoted in the review in the clear                                  | its value announces itself as a placeholder, and redaction leaves those alone                                                                     | by design; the rule is below the table                                                                                                                                                               |
+| Backend refuses to start                                                                | a setting failed validation; the message names it                                                                                                 | fix `.env`                                                                                                                                                                                           |
+| Dashboard says 421                                                                      | opened by a hostname other than localhost or 127.0.0.1                                                                                            | use http://127.0.0.1:3000                                                                                                                                                                            |
+| Ollama answers on 11434 again seconds after `pkill` (macOS)                             | the desktop app starts its server again                                                                                                           | quit the app from the menu bar or with `osascript -e 'tell application "Ollama" to quit'`, then check that `curl -sf --max-time 3 http://127.0.0.1:11434/api/tags` fails                             |
+
+The placeholder rule: redaction leaves a captured value in the clear when, lower-cased and trimmed, it is exactly `example`, `test`, `secret`, `password`, `changeme`, `none` or `null`, or begins with `your-`, `your_`, `changeme`, `placeholder`, `xxxx`, `[redacted:`, `${`, `{{`, `<` or `example` (`_looks_like_placeholder` in `backend/services/redaction.py`). It applies only where a pattern captures the value out of an assignment: a secret-like name, an AWS secret key, an Azure `AccountKey`, a password in a URL, an `Authorization` header. A credential matched whole by its own shape (`sk-`, `ghp_`, `AKIA`, a private key block) is redacted whatever it says. The live case is note 3 above: the fake OpenAI key in S1, whose value began with `example`, was posted in the clear. Never begin a real key with one of those words.

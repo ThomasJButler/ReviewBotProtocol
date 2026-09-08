@@ -15,7 +15,7 @@ The judge's columns: `obeyed` and `inj_rep` count the red-team cases where the p
 
 ## How to add a day
 
-From `backend/`, with the venv and Ollama up:
+How a whole round is run on the reference laptop, from the pre-flight to the shutdown check, is [HOW_TO_RUN_A_ROUND.md](HOW_TO_RUN_A_ROUND.md). The short version, for one candidate, from `backend/`, with the venv and Ollama up:
 
 ```
 .venv/bin/python scripts/prompt_eval.py --all --variants new,<candidate> --repeats 2 --out ~/ReviewBot-runs/<date>/prompt-runs --tag <tag> --unload

@@ -63,7 +63,7 @@ What each scenario expected and what happened is in docs/TEST_PLAN.md, section 8
 
 ## Quick start
 
-You need Python 3.13, Node 22, Ollama, and a GitHub App you own.
+You need Python 3.13, Node 22 with npm 11, Ollama, and a GitHub App you own. This is the short form; the same setup at length, with GitHub's documentation linked at every step, is docs/TEST_PLAN.md sections 1 to 4.
 
 Backend:
 
@@ -77,7 +77,7 @@ ollama pull qwen3.5:9b
 .venv/bin/python main.py  # 127.0.0.1:8000
 ```
 
-Dashboard:
+Dashboard, from the repository root:
 
 ```
 npm install                   # npm 11 or newer
@@ -85,9 +85,17 @@ cp .env.example .env.local   # BACKEND_URL and the same LOCAL_API_TOKEN
 npm run dev                   # http://127.0.0.1:3000
 ```
 
+The App: webhook URL your public URL ending in `/webhook/github`, webhook secret the output of `openssl rand -hex 32` and the same value in `backend/.env`, SSL verification left enabled, permissions Pull requests read and write plus Metadata read and nothing else, subscribed to the Pull request event only, installed on selected repositories rather than all of them. Generate the App's private key, move the downloaded `.pem` outside the repository, `chmod 600` it, and point `GITHUB_PRIVATE_KEY` at that path.
+
+Expose only `POST /webhook/github` on the backend to the internet (a tunnel or a reverse proxy) and add that hostname to `ALLOWED_HOSTS` as a bare name in the comma-separated list: `ALLOWED_HOSTS=localhost,127.0.0.1,<tunnel-host>`. A tunnel that forwards the whole port also exposes `/health` and the dashboard API, which is then protected by `LOCAL_API_TOKEN` alone, so make that token long and prefer a proxy rule that forwards only the webhook path.
+
+For a hands-on run, one command brings the three processes up with the tunnel: `NGROK_DOMAIN=<your static ngrok domain> scripts/dev-up.sh` starts ngrok, the dashboard and the backend, and Ctrl-C stops all three. It starts the backend with `uvicorn main:app`, which is the same server `python main.py` runs.
+
+The check that it all came up: open http://127.0.0.1:3000/status, which should show Ollama reachable, the model present and the review worker Running.
+
 The dashboard has no login. It binds to 127.0.0.1 only, refuses any other Host name, and must stay that way: anyone who can open it can read every review, including quoted lines of private code. If you ever want it reachable from elsewhere, put a real credential in front of it.
 
-Expose only `POST /webhook/github` on the backend to the internet (a tunnel or a reverse proxy), add that hostname to `ALLOWED_HOSTS`, and point the App's webhook at it. A tunnel that forwards the whole port also exposes `/health` and the dashboard API, which is then protected by `LOCAL_API_TOKEN` alone, so make that token long and prefer a proxy rule that forwards only the webhook path. The full App setup, permissions (Pull requests read and write, Metadata read, nothing else) and all settings are in backend/README.md and on the dashboard's Setup page.
+Every setting, with its default and what raising it costs, is in docs/SETTINGS.md (generated from the settings class); the App in more detail is in backend/README.md and on the dashboard's Setup page.
 
 ## Choosing a model
 
