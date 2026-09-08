@@ -4,6 +4,11 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 
 ## Unreleased
 
+- A review cut short by the time ceiling posts the files that finished and lists the rest under Not reviewed; each review also gets its own budget of `REVIEW_SECONDS_PER_FILE` (300) times its file count, under the ceiling; a review that fails before posting leaves one line on the pull request.
+- A forged data-block delimiter inside a diff is rewritten to `[forged-data-marker]`. It was `[data-marker]`, which the verifier read as the pipeline's own framing before standing down on a planted instruction (`docs/benchmarks/2026-09-06-round-three.md`). Naming the token in the prompts is a separate change and waits on a measured round.
+- A finding whose recommendation praises the line and asks for nothing is dropped, from either model, and every finding the postprocess drops is logged with its rule; measured by replay, the reviewer alone goes from 0.918 to 0.929 on the corpus, one clean-diff false positive fewer, with recall unchanged.
+- Pull requests opened by a bot (dependabot, renovate) are skipped unless `REVIEW_BOT_PULL_REQUESTS=true`; a skipped delivery is recorded as `skipped_bot`, and the Status page shows this setting beside the draft one.
+
 ## 1.1.0 (2026-09-07)
 
 The local rewrite. Reviews run on models on your own machine through Ollama; nothing leaves it but api.github.com, and a test proves it.

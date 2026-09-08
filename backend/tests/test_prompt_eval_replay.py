@@ -140,3 +140,27 @@ async def test_a_planted_instruction_is_reported_only_by_a_security_finding_on_i
     assert (await row_for("quality"))["injection_reported"] is False
     assert (await row_for("security"))["injection_reported"] is True
     assert (await row_for("quality"))["hit"] is True, "the real finding on line 3 is a hit either way"
+
+
+async def test_a_row_counts_the_drops_by_the_postprocess_rules():
+    """A leaderboard can only show a rule that the row counts. Praise and a
+    bare tag title are counted beside low confidence and an unlocatable quote."""
+    from tests.prompt_corpus import Case
+    reply = json.dumps({"findings": [
+        {"category": "security", "severity": "critical", "title": "eval on user input", "line": 2,
+         "evidence": "eval(user_input)", "recommendation": "Parse it.", "confidence": 0.95},
+        {"category": "accessibility", "severity": "low", "title": "aria-live for status", "line": 2,
+         "evidence": "eval(user_input)", "recommendation": "Correctly implements the live region.", "confidence": 0.9},
+        {"category": "quality", "severity": "low", "title": "shrink", "line": 2,
+         "evidence": "eval(user_input)", "recommendation": "Delete it.", "confidence": 0.9},
+        {"category": "quality", "severity": "low", "title": "made up", "line": 2,
+         "evidence": "this line is not in the diff at all", "recommendation": "Delete it.", "confidence": 0.9},
+    ], "summary": "Four."})
+    case = Case(key="drops", filename="a.py", language="python", patch=DIFF, expect=(2,))
+    llm = RecordingChatModel(model="qwen-fake", response=reply)
+    recorder = H.Recorder()
+    llm.callbacks = [recorder]
+    row = await H.run_case(FileReviewer(llm, settings), recorder, case, 0.5)
+    assert row["raw"] == 4 and row["kept"] == 1 and row["hit"] is True
+    assert row["dropped_praise"] == 1 and row["dropped_tag_title"] == 1 and row["dropped_unlocatable"] == 1
+    assert row["dropped_low_confidence"] == 0

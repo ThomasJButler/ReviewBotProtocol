@@ -36,7 +36,7 @@ class _Ordered(RecordingChatModel):
         return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
-def _setup(sequential=True, cross=True, **updates):
+def _setup(sequential=True, cross=True, on_result=None, **updates):
     log: List[str] = []
     local = settings.model_copy(update={"CROSS_EXAMINE_SEQUENTIAL": sequential, **updates})
     reviewer_llm = _Ordered(model="qwen-fake", response=FIND, log=log)
@@ -46,7 +46,7 @@ def _setup(sequential=True, cross=True, **updates):
         log.append(f"unload:{model}")
         return True
 
-    workflow = ReviewWorkflow(FileReviewer(reviewer_llm, local, cross_llm=cross_llm), unload=unload)
+    workflow = ReviewWorkflow(FileReviewer(reviewer_llm, local, cross_llm=cross_llm), unload=unload, on_result=on_result)
     return workflow, log
 
 
@@ -119,3 +119,14 @@ async def test_review_file_still_cross_examines_in_one_shot_for_direct_callers()
     assert reviewer.cross_inline and reviewer.cross_enabled
     result = await reviewer.review_file("a.py", "python", "modified", DIFF)
     assert log == ["qwen-fake", "gemma-fake"] and result.cross_calls == 1 and result.patch, "the redacted patch rides on the result"
+
+
+async def test_on_result_hands_out_each_file_when_reviewed_and_again_when_cross_examined():
+    """Six calls for three files: each once from the first phase and once from
+    the second, the second carrying the cross-examiner's call. Keyed by file
+    name that is an overwrite, so a review cut short in the cross phase keeps
+    the plain review of every file the second model never reached."""
+    seen = []
+    workflow, _ = _setup(on_result=lambda r: seen.append((r.filename, r.cross_calls)))
+    await workflow.run("o/r", 1, "sha", FILES)
+    assert seen == [("a.py", 0), ("b.py", 0), ("c.py", 0), ("a.py", 1), ("b.py", 1), ("c.py", 1)]

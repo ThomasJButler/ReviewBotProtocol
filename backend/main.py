@@ -30,6 +30,8 @@ def _on_result(job: ReviewJob, ok: bool, err) -> None:
         logger.info("review finished", repo=job.repo, pr=job.pr_number)
     elif type(err).__name__ in ("Superseded", "SupersededError"):
         logger.info("review superseded", repo=job.repo, pr=job.pr_number, reason=str(err))
+    elif type(err).__name__ == "ReviewCutShort":
+        logger.warning("review cut short by its budget", repo=job.repo, pr=job.pr_number, reason=str(err))
     else:
         logger.warning("review did not complete", repo=job.repo, pr=job.pr_number,
                        reason=type(err).__name__ if err else "unknown", cancel_reason=job.cancel_reason)
@@ -70,8 +72,11 @@ async def lifespan(app: FastAPI):
         logger.warning("ALLOWED_HOSTS is loopback only; add the public webhook hostname before pointing GitHub at this backend")
     deps = RunnerDeps(settings=settings, llm=build_chat_model(settings), session_factory=session_factory,
                       cross_llm=build_cross_model(settings))
+    # A review cut short by the ceiling posts what it has inside the grace period: a head check (5 s),
+    # the post (20 s) and two row writes (15 s each) is 55 s at worst against this 60 s grace, and the
+    # writes are local SQLite, where 15 s is a backstop rather than a wait (services/review_runner.py).
     queue = ReviewQueue(worker=lambda job: run_review(job, deps), timeout_seconds=settings.REVIEW_TIMEOUT_SECONDS,
-                        on_result=_on_result)
+                        on_result=_on_result, grace_seconds=60)
     await queue.start()
     app.state.deps = deps
     app.state.queue = queue

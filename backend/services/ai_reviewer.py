@@ -59,6 +59,64 @@ def _null_addition(f) -> bool:
     return f.title.strip().lower() in _NOTHING or f.recommendation.strip().lower() in _NOTHING
 
 
+_SUBJECT = r"(?:(?:the|this|that|these|those|it|which|your|current)\s+(?:[^.;:!?]{1,80}?\s+)?)?"
+_PRAISE = re.compile(
+    rf"^{_SUBJECT}(?:"
+    r"(?:is|are|looks?|seems?|remains?|works?)\s+(?:already\s+|now\s+)?(?:the\s+)?"
+    r"(?:correct|correctly|fine|good|safe|right|proper|acceptable|appropriate|sufficient|adequate|valid|as\s+expected|as\s+intended)"
+    r"(?:\s+(?:fix|approach|choice|way|pattern|solution|thing))?\b|"
+    # inflected only: "correctly implements" is praise, "correctly implement" is an instruction
+    r"(?:correctly|properly|already)\s+(?:implement|handle|use|appl|escape|valid|sanitis|sanitiz|prevent|protect|cover|address|guard)"
+    r"\w*(?:s|ed|ing)\b|"
+    r"no\s+(?:change|action|fix|issue|problem|further)s?\b|"
+    r"nothing\s+(?:to\s+(?:change|fix|do)|needs?|further)\b|"
+    r"well[-\s](?:implemented|handled|done|written)\b|"
+    r"(?:is\s+)?(?:a\s+)?good\s+practice\b|"
+    r"keep\s+(?:it\s+|this\s+)?as\s+is\b|"
+    r"as\s+(?:is|expected|intended)\b)", re.I)
+_ASK_VERB = (r"(?:add|use|replace|remove|move|rename|wrap|validate|escape|parameteri[sz]e|sanitis|sanitiz|check|guard|catch|close|lock|"
+             r"encrypt|hash|set|call|avoid|prefer|consider|ensure|make|change|fix|update|handle|return|raise|throw|log|limit|restrict|"
+             r"restore|re-add|switch|convert|introduce|extract|define|declare|store|drop|delete|rewrite|split|apply|enable|disable|"
+             r"verify|test|document)\w*")
+# an ask is a verb opening a clause, or a modal anywhere; "to ensure" inside a sentence of praise is not one
+_ASK = re.compile(rf"(?:^|[.;:,!?]\s*|\b(?:but|and|or|then|so|also|instead|however)\s+)(?:please\s+|also\s+|instead\s+)?{_ASK_VERB}\b"
+                  r"|\b(?:should|must|needs?\s+to|ought\s+to|recommend\w*|suggest\w*)\b", re.I)
+# Praise that turns a corner is a finding: "is correct, but fails when the input is empty".
+_CONTRAST = re.compile(r"\b(?:but|however|although|though|except|unless|until|whereas|yet|still|otherwise|caveat|"
+                       r"whilst|while|apart\s+from|other\s+than)\b", re.I)
+_DEFECT = re.compile(r"\b(?:fail|fails|failed|failing|break|breaks|broken|breaking|leak|leaks|leaking|crash|crashes|"
+                     r"raise|raises|throw|throws|ignore|ignores|ignoring|miss|misses|missing|expose|exposes|exposing|"
+                     r"raced?|races|hang|hangs|overflow|overflows|truncat\w*|silently|incorrect\w*|wrong|unsafe|"
+                     r"vulnerab\w*|injection|traversal|absent|undefined|null\s+pointer)\b", re.I)
+
+
+def _praise(f) -> bool:
+    """A recommendation that opens by saying the code is right and then asks
+    for nothing, warns of nothing and turns no corner: praise filed as a
+    finding, or a finding whose recommendation is nothing at all. Round three,
+    on a clean control: "Status element lacks aria-live region", recommendation
+    "The addition of `role="status"` and `aria-live="polite"` is correct for a
+    dynamic save status message to ensure screen readers announce updates", in
+    both repeats of both reviewer candidates, and it passed every rule the
+    postprocess had.
+
+    Everything after the praise decides it, because praise is how a real
+    finding often opens: "No change is needed here, but add a test" asks,
+    "is correct in the common case, but fails when the input is empty" turns
+    a corner, and "correctly validate the input" is an instruction wearing
+    the same word. Dropping one of those would lose a real finding and leave
+    only a log line, so each of the three keeps it."""
+    text = f.recommendation.strip()
+    if text.lower() in _NOTHING:
+        return True
+    first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+    m = _PRAISE.match(first)
+    if not m:
+        return False
+    rest = text[m.end():]
+    return not (_ASK.search(rest) or _CONTRAST.search(rest) or _DEFECT.search(rest))
+
+
 class PromptBoundaryError(RuntimeError):
     """The rendered prompt did not contain exactly one begin and one end delimiter."""
 
@@ -66,9 +124,10 @@ class PromptBoundaryError(RuntimeError):
 def _defang(text: str) -> str:
     """Anything in PR content that resembles a data delimiter, with any number
     of angle brackets and any nonce suffix, is rewritten to a bracket-free
-    token. The replacement contains no angle brackets, so it cannot be
+    token that says what it is: the verifier read the old `[data-marker]` as
+    the pipeline's own framing and stood down (round three). The replacement contains no angle brackets, so it cannot be
     reassembled into a delimiter by a second pass."""
-    return _MARKER.sub("[data-marker]", text)
+    return _MARKER.sub("[forged-data-marker]", text)
 
 
 def _meta(value: str, limit: int = 200) -> str:
@@ -224,18 +283,40 @@ def annotate(review: FileReview, source_model: str) -> AnnotatedFileReview:
                                summary=review.summary)
 
 
-def postprocess(review: FileReview, patch: Optional[str], min_confidence: float) -> Tuple[FileReview, int]:
+def drop_rule(f: Finding, min_confidence: float) -> Optional[str]:
+    """Why a finding is dropped before it is located, or None to go on. The
+    harness applies the same rules to a raw reply so a leaderboard can count them."""
+    if f.confidence < min_confidence:
+        return "confidence"
+    if _tag_only_title(f.title):
+        return "tag_title"
+    if _praise(f):
+        return "praise"
+    return None
+
+
+def postprocess(review: FileReview, patch: Optional[str], min_confidence: float, *,
+                filename: str = "") -> Tuple[FileReview, int]:
     parsed = parse_patch(patch)
     kept: List[Finding] = []
     seen = set()
+
+    def dropped(f: Finding, rule: str) -> None:
+        # the title was redacted at parse time; the log is how a dropped finding is seen at all
+        logger.info("finding dropped", rule=rule, filename=_meta(filename), line=f.line, title=f.title[:120])
+
     for f in review.findings:
-        if f.confidence < min_confidence or _tag_only_title(f.title):
+        rule = drop_rule(f, min_confidence)
+        if rule:
+            dropped(f, rule)
             continue
         located, part = locate_evidence_part(parsed, f.line, f.evidence)
         if located is None:
+            dropped(f, "unlocated")
             continue
         key = (located, f.title.strip().lower())
         if key in seen:
+            dropped(f, "duplicate")
             continue
         seen.add(key)
         if part != f.evidence:
@@ -341,7 +422,7 @@ class FileReviewer:
             severity = f.severity if SEVERITY_ORDER[f.severity] >= SEVERITY_ORDER[v.severity] else v.severity
             kept.append(f.model_copy(update={"severity": severity, "cross_verdict": v.verdict.value,
                                              "cross_reason": v.reason, "cross_severity": v.severity}))
-        additions, _ = postprocess(FileReview(findings=ce.additions, summary=""), patch, floor)
+        additions, _ = postprocess(FileReview(findings=ce.additions, summary=""), patch, floor, filename=filename)
         seen = {(f.line, f.title.strip().lower()) for f in kept}
         # a line where the second model has just confirmed the first reviewer's finding: an addition
         # of the same category there is the same problem under a shorter title, not a new one
@@ -460,7 +541,7 @@ class FileReviewer:
         if self.settings.LOG_PROMPTS:
             logger.info("model output", filename=filename, output=redact_text(text)[:4000])
         first, ok = parse_file_review(text)
-        first, dropped = postprocess(first, patch, self.settings.MIN_FINDING_CONFIDENCE)
+        first, dropped = postprocess(first, patch, self.settings.MIN_FINDING_CONFIDENCE, filename=filename)
         review = annotate(first, self.model_name)
         usage = getattr(message, "usage_metadata", None) or {}
         result = FileReviewResult(

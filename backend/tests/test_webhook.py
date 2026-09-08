@@ -5,7 +5,7 @@ import json
 import pytest
 import structlog
 
-from tests.conftest import StubQueue, webhook_headers
+from tests.conftest import TEST_LOCAL_TOKEN, StubQueue, webhook_headers
 
 URL = "/webhook/github"
 
@@ -137,6 +137,27 @@ def test_draft_pr_is_skipped(client, stub_queue, pr_payload):
     r = client.post(URL, content=body, headers=webhook_headers(body))
     assert r.status_code == 200 and r.json()["status"] == "skipped_draft"
     assert stub_queue.submissions == []
+
+
+def test_a_pull_request_opened_by_a_bot_is_skipped_and_recorded(client, stub_queue, pr_payload):
+    """Dependabot opened nine pull requests in one afternoon; each would have
+    queued an hour of the machine. GitHub marks such authors type Bot."""
+    pr_payload["pull_request"]["user"] = {"id": 49699333, "login": "dependabot[bot]", "type": "Bot"}
+    body = _body(pr_payload)
+    r = client.post(URL, content=body, headers=webhook_headers(body))
+    assert r.status_code == 200 and r.json()["status"] == "skipped_bot"
+    assert stub_queue.submissions == []
+    d = client.get("/api/deliveries", headers={"Authorization": f"Bearer {TEST_LOCAL_TOKEN}"}).json()["items"][0]
+    assert d["status"] == "skipped_bot"
+
+
+def test_a_bot_pull_request_is_reviewed_when_asked(client, stub_queue, pr_payload, monkeypatch):
+    from config.settings import settings
+    monkeypatch.setattr(settings, "REVIEW_BOT_PULL_REQUESTS", True)
+    pr_payload["pull_request"]["user"] = {"id": 49699333, "login": "dependabot[bot]", "type": "Bot"}
+    body = _body(pr_payload)
+    r = client.post(URL, content=body, headers=webhook_headers(body))
+    assert r.status_code == 202 and len(stub_queue.submissions) == 1
 
 
 def test_signed_payload_without_installation_is_400_not_200(client, pr_payload):

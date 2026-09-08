@@ -53,7 +53,9 @@ class Settings(BaseSettings):
     OLLAMA_TIMEOUT_SECONDS: int = 600
 
     REVIEW_TIMEOUT_SECONDS: int = 3600  # a rewrite-sized diff costs the 9B about two minutes a file, twice with the cross-examiner
+    REVIEW_SECONDS_PER_FILE: int = 300  # the review's own budget, files times this, under the ceiling; 0 leaves only the ceiling
     REVIEW_DRAFTS: bool = False
+    REVIEW_BOT_PULL_REQUESTS: bool = False  # dependabot and friends; each review costs the machine an hour
     MAX_FILES_PER_REVIEW: int = 25
     MAX_PATCH_BYTES: int = 32_000
     MAX_WEBHOOK_BODY_BYTES: int = 2 * 1024 * 1024
@@ -126,7 +128,7 @@ class Settings(BaseSettings):
                 pass
         return v.replace("\\n", "\n")
 
-    @field_validator("DEBUG", "REVIEW_DRAFTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", "CROSS_EXAMINE_SEQUENTIAL",
+    @field_validator("DEBUG", "REVIEW_DRAFTS", "REVIEW_BOT_PULL_REQUESTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", "CROSS_EXAMINE_SEQUENTIAL",
                      "CROSS_EXAMINE_NOTE_FIRST", mode="before")
     @classmethod
     def parse_bool(cls, v):

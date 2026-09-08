@@ -3,6 +3,7 @@
 import asyncio
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,13 +15,13 @@ from config.logging import get_logger
 from config.settings import Settings
 from database.repositories.review_repository import ReviewRepository
 from database.repositories.webhook_repository import WebhookRepository
-from services.ai_reviewer import FileReviewer
+from services.ai_reviewer import FileReviewer, FileReviewResult
 from services.comment_renderer import render_review, sanitise
 from services.github_app_auth import InstallationTokenProvider
 from services.github_client import GitHubClient
 from services.redaction import is_excluded_path, redact
 from services.review_queue import ReviewJob
-from services.review_workflow import ReviewWorkflow, risk_score
+from services.review_workflow import ReviewWorkflow, risk_score, totals_for
 from utils.helpers import get_file_language, get_utc_timestamp
 
 logger = get_logger(__name__)
@@ -32,11 +33,57 @@ BYTES_PER_TOKEN = 2.8          # conservative for code
 PROMPT_OVERHEAD_TOKENS = 1400  # system prompt, schema and framing: measured up to 1206 on 2026-09-06
                                # for the 699-word prompt (scripts/prompt_overhead.py), with headroom
 CLEANUP_SECONDS = 15
+PARTIAL_HEAD_CHECK_SECONDS = 5   # a review cut short checks the head once more, briefly,
+PARTIAL_POST_SECONDS = 20        # and posts what it has inside the queue's grace period
+TIMEOUT_MARGIN_SECONDS = 60      # the runner's own deadline sits this far inside the queue's ceiling
 
 
 class Superseded(Exception):
     """The PR head moved while this job was running, or this head was already
     reviewed; nothing is posted and the job ends as 'superseded'."""
+
+
+class ReviewCutShort(Exception):
+    """The review ran out of its own time budget. What finished was posted and
+    the row written before this is raised (recorded says whether that write
+    happened), so the queue reports the job as not completed without anything
+    being written twice."""
+
+    def __init__(self, message: str, recorded: bool):
+        super().__init__(message)
+        self.recorded = recorded
+
+
+def review_budget(settings: Settings, files: int, elapsed: float) -> float:
+    """Seconds the workflow may take: the file count times REVIEW_SECONDS_PER_FILE,
+    never more than REVIEW_TIMEOUT_SECONDS, less what setup already spent and a
+    margin so this deadline fires before the queue's ceiling does. A two-file
+    pull request stops holding the queue for an hour; a twenty-five-file one
+    keeps the ceiling, since the product exceeds it."""
+    ceiling = float(settings.REVIEW_TIMEOUT_SECONDS)
+    per_file = settings.REVIEW_SECONDS_PER_FILE
+    total = min(ceiling, per_file * files) if per_file > 0 and files > 0 else ceiling
+    return max(1.0, total - elapsed - TIMEOUT_MARGIN_SECONDS)
+
+
+async def _post_failure_note(client: GitHubClient, job: ReviewJob, head_sha: str, elapsed: float, error_name: str) -> None:
+    """One line on the pull request when a review failed before anything was
+    posted, so silence cannot read as approval. Bounded, and a failure to post
+    it is logged and swallowed: it is the last thing tried, not a second
+    reason to fail. The exception's name is all it carries; the message stays
+    in the dashboard."""
+    body = ("## ReviewBot review\n\n"
+            f"ReviewBot could not complete this review ({error_name} after {elapsed:.0f} s). "
+            "Nothing was reviewed; the dashboard's review page has the reason.")
+    try:
+        await asyncio.wait_for(asyncio.shield(client.create_pull_review(job.repo, job.pr_number, head_sha, body, [])),
+                               timeout=PARTIAL_POST_SECONDS)
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
+        logger.warning("could not leave a note about the failed review", repo=job.repo, pr=job.pr_number, error=type(e).__name__)
+
+
+def _how_far(where: Dict[str, Any]) -> str:
+    return f" at {where['done']} of {where['total']} files in the {where['phase']} phase" if where.get("total") else ""
 
 
 @dataclass
@@ -130,6 +177,123 @@ async def _finish(deps: RunnerDeps, review_id: str, delivery_id: str, review_upd
         await session.commit()
 
 
+@dataclass
+class Posted:
+    comment_url: Optional[str]
+    findings_total: int
+
+
+def _finding_rows(succeeded: List[FileReviewResult]) -> List[Dict[str, Any]]:
+    return [
+        {"path": r.filename, "line": f.line, "category": f.category.value, "severity": f.severity.value,
+         "source_model": getattr(f, "source_model", None) or None, "cross_verdict": getattr(f, "cross_verdict", None),
+         "cross_reason": getattr(f, "cross_reason", "") or None,
+         "title": f.title, "evidence": f.evidence, "recommendation": f.recommendation, "confidence": f.confidence}
+        for r in succeeded for f in r.review.findings
+    ]
+
+
+async def _post_and_record(deps: RunnerDeps, client: GitHubClient, job: ReviewJob, review_id: str, *, head_sha: str,
+                           succeeded: List[FileReviewResult], errored: List[FileReviewResult],
+                           skipped: List[Tuple[str, str]], redaction_total: int, totals: Dict[str, int],
+                           pr_title: str, files_total: int, started: float, status: str,
+                           error_message: Optional[str], cut_short: str = "", post: bool = True,
+                           post_seconds: Optional[float] = None, cross_examined: bool = True) -> Posted:
+    """Render what was reviewed, post it, and write the review row, its
+    findings and the delivery row: the one path a finished review ends on,
+    whatever its status. A review cut short passes post_seconds, since it
+    runs inside a cancel with the queue's grace period as its whole budget,
+    and post=False when the head has moved, so the row still gets its findings
+    but nothing goes to a stale commit. cross_examined is false when a review
+    was cut short before the second model saw anything: naming it then would
+    tell the author the findings were checked when they were not."""
+    settings = deps.settings
+    rendered = render_review(succeeded, model=settings.OLLAMA_MODEL, skipped=skipped, is_fork=job.is_fork,
+                             fork_repo=job.fork_repo, max_inline=settings.MAX_INLINE_COMMENTS,
+                             redaction_total=redaction_total, files_errored=len(errored),
+                             cross_model=(settings.CROSS_EXAMINE_MODEL or None) if cross_examined else None,
+                             cross_added=totals.get("cross_added", 0), cross_refuted=totals.get("cross_refuted", 0),
+                             cut_short=cut_short)
+    comment_url = None
+    if post:
+        # No shield on the post itself: a shielded request that outlives its deadline would
+        # go on to land a review nobody recorded, and the next delivery would post a second
+        # one. Cancelling it is the lesser risk. The writes below are shielded, because by
+        # then the review is on GitHub and the row has to say so.
+        call = client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
+        posted = await call if post_seconds is None else await asyncio.wait_for(call, timeout=post_seconds)
+        comment_url = posted.get("html_url")
+        async def _record_url() -> None:
+            async with deps.session_factory() as session:
+                await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
+        await asyncio.wait_for(asyncio.shield(_record_url()), timeout=CLEANUP_SECONDS)
+    duration = time.perf_counter() - started
+    await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
+        "status": status, "head_sha": head_sha, "pr_title": pr_title,
+        "files_total": files_total, "files_reviewed": len(succeeded), "files_skipped": len(skipped),
+        "skipped": [{"path": p, "reason": r} for p, r in skipped],
+        "findings_count": rendered.findings_total, "severity_counts": rendered.counts_by_severity,
+        "findings_dropped": totals.get("dropped", 0), "redactions": redaction_total,
+        "cross_added": totals.get("cross_added", 0), "cross_refuted": totals.get("cross_refuted", 0),
+        "prompt_tokens": totals.get("prompt_tokens", 0), "output_tokens": totals.get("output_tokens", 0),
+        "duration_seconds": duration, "comment_url": comment_url, "completed_at": get_utc_timestamp(),
+        "summary": rendered.body[:6000] if comment_url else None, "error_message": error_message,
+    }, status, findings=_finding_rows(succeeded))), timeout=CLEANUP_SECONDS)
+    return Posted(comment_url, rendered.findings_total)
+
+
+async def _post_cut_short(deps: RunnerDeps, client: GitHubClient, job: ReviewJob, review_id: str, *, head_sha: str,
+                          done: "OrderedDict[str, FileReviewResult]", files: List[Dict[str, Any]],
+                          skipped: List[Tuple[str, str]], redaction_total: int, pr: Dict[str, Any],
+                          raw_files: List[Dict[str, Any]], started: float, where: Dict[str, Any], message: str) -> bool:
+    """A review the queue's ceiling stopped: post the files that finished,
+    list the rest under Not reviewed, and record the row with its findings.
+    Every wait is bounded; the whole thing has the queue's grace period.
+    True when the row was written. False sends the caller to the plain
+    status-and-message record, which is what happened before this existed."""
+    results = list(done.values())
+    succeeded = [r for r in results if r.parse_ok and not r.error]
+    errored = [r for r in results if not (r.parse_ok and not r.error)]
+    skipped = list(skipped)
+    for r in errored:
+        skipped.append((r.filename, f"the model did not return a usable review ({r.error or 'unreadable reply'})"))
+    for f in files:
+        if f["filename"] not in done:
+            skipped.append((f["filename"], "not reached before the review's time ran out"))
+    elapsed = time.perf_counter() - started
+    if where.get("phase") == "cross-examine" and totals_for(results)["cross_calls"]:
+        cut_short = (f"All {len(files)} files were reviewed; the cross-examiner reached {where.get('done', 0)} of them "
+                     f"before time ran out after {elapsed:.0f} s.")
+    elif results:
+        cut_short = (f"This review ran out of time after {elapsed:.0f} s: {len(results)} of {len(files)} files were "
+                     f"reviewed; the rest are listed under Not reviewed.")
+    else:
+        cut_short = f"This review ran out of time after {elapsed:.0f} s before finishing a file."
+    try:
+        latest = await asyncio.wait_for(client.get_pull(job.repo, job.pr_number), timeout=PARTIAL_HEAD_CHECK_SECONDS)
+        current = (latest.get("head", {}).get("sha") or head_sha) == head_sha
+        if not current:
+            logger.info("head moved while the review was being cut short; recording it without posting", repo=job.repo, pr=job.pr_number)
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
+        logger.warning("could not check the head before posting a review cut short; recording it without posting",
+                       repo=job.repo, pr=job.pr_number, error=type(e).__name__)
+        current = False
+    totals = totals_for(results)
+    try:
+        posted = await _post_and_record(deps, client, job, review_id, head_sha=head_sha, succeeded=succeeded, errored=errored,
+                                        skipped=skipped, redaction_total=redaction_total, totals=totals,
+                                        pr_title=sanitise(redact(pr.get("title") or "")[0], 200), files_total=len(raw_files),
+                                        started=started, status="timed_out", error_message=message, cut_short=cut_short,
+                                        post=current, post_seconds=PARTIAL_POST_SECONDS,
+                                        cross_examined=totals["cross_calls"] > 0)
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
+        logger.warning("could not post or record the review cut short", repo=job.repo, pr=job.pr_number, error=type(e).__name__)
+        return False
+    logger.info("review cut short posted", repo=job.repo, pr=job.pr_number, files=len(succeeded), of=len(files),
+                findings=posted.findings_total, seconds=round(elapsed, 1), url=posted.comment_url)
+    return True
+
+
 async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
     settings = deps.settings
     review_id = str(uuid.uuid4())
@@ -152,6 +316,15 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                                          base_url=settings.GITHUB_API_BASE_URL, http=deps.http, repository=job.repo)
     client = GitHubClient(provider, base_url=settings.GITHUB_API_BASE_URL, http=deps.http)
     where: Dict[str, Any] = {}  # the last progress report, so a review cut short says how far it got
+    done: "OrderedDict[str, FileReviewResult]" = OrderedDict()  # every file result so far, keyed by file, cross-examined ones overwriting
+    # Bound before the try so the handler at the end can see them whenever the cancel lands.
+    head_sha = job.head_sha
+    pr: Dict[str, Any] = {}
+    raw_files: List[Dict[str, Any]] = []
+    files: List[Dict[str, Any]] = []
+    skipped: List[Tuple[str, str]] = []
+    redaction_total = 0
+    attempted_post = False  # once a review may be on GitHub, a failure gets no second post
     try:
         pr = await client.get_pull(job.repo, job.pr_number)
         head_sha = pr.get("head", {}).get("sha") or job.head_sha
@@ -173,8 +346,18 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                     "progress_phase": phase, "progress_done": done, "progress_total": total,
                     "progress_file": current[:512] or None})
 
-        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm), on_progress=_progress)
-        state = await workflow.run(job.repo, job.pr_number, head_sha, files)
+        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm), on_progress=_progress,
+                                  on_result=lambda result: done.__setitem__(result.filename, result))
+        budget = review_budget(settings, len(files), time.perf_counter() - started)
+        try:
+            state = await asyncio.wait_for(workflow.run(job.repo, job.pr_number, head_sha, files), timeout=budget)
+        except asyncio.TimeoutError:
+            # wait_for has cancelled the workflow and waited for it, so `done` is settled
+            message = f"review timed out after {time.perf_counter() - started:.0f}s (budget of {budget:.0f}s){_how_far(where)}"
+            recorded = await _post_cut_short(deps, client, job, review_id, head_sha=head_sha, done=done, files=files,
+                                             skipped=skipped, redaction_total=redaction_total, pr=pr, raw_files=raw_files,
+                                             started=started, where=where, message=message)
+            raise ReviewCutShort(message, recorded)
         results = state.get("results", [])
         totals = state.get("totals", {})
         succeeded = [r for r in results if r.parse_ok and not r.error]
@@ -186,59 +369,39 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         if (latest.get("head", {}).get("sha") or head_sha) != head_sha:
             raise Superseded("head moved while the review was running; the newer push will be reviewed")
 
-        rendered = render_review(succeeded, model=settings.OLLAMA_MODEL, skipped=skipped, is_fork=job.is_fork,
-                                 fork_repo=job.fork_repo, max_inline=settings.MAX_INLINE_COMMENTS,
-                                 redaction_total=redaction_total, files_errored=len(errored),
-                                 cross_model=settings.CROSS_EXAMINE_MODEL or None,
-                                 cross_added=totals.get("cross_added", 0), cross_refuted=totals.get("cross_refuted", 0))
-        posted = await client.create_pull_review(job.repo, job.pr_number, head_sha, rendered.body, rendered.comments)
-        comment_url = posted.get("html_url")
-        # The review is live on GitHub now: record its URL before anything else can
-        # interrupt us, and shield the writes so a cancel arriving here cannot leave
-        # a posted review recorded as anything but completed.
-        async def _record_url() -> None:
-            async with deps.session_factory() as session:
-                await ReviewRepository(session).update(review_id, {"comment_url": comment_url})
-        await asyncio.wait_for(asyncio.shield(_record_url()), timeout=CLEANUP_SECONDS)
-        duration = time.perf_counter() - started
         all_failed = bool(results) and not succeeded
-
-        await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
-            "status": "failed" if all_failed else "completed", "head_sha": head_sha,
-            "pr_title": sanitise(redact(pr.get("title") or "")[0], 200),
-            "files_total": len(raw_files), "files_reviewed": len(succeeded), "files_skipped": len(skipped),
-            "skipped": [{"path": p, "reason": r} for p, r in skipped],
-            "findings_count": rendered.findings_total, "severity_counts": rendered.counts_by_severity,
-            "findings_dropped": totals.get("dropped", 0), "redactions": redaction_total,
-            "cross_added": totals.get("cross_added", 0), "cross_refuted": totals.get("cross_refuted", 0),
-            "prompt_tokens": totals.get("prompt_tokens", 0), "output_tokens": totals.get("output_tokens", 0),
-            "duration_seconds": duration, "comment_url": comment_url, "completed_at": get_utc_timestamp(),
-            "summary": rendered.body[:6000],
-            "error_message": "the model failed on every file" if all_failed else None,
-        }, "failed" if all_failed else "completed", findings=[
-            {"path": r.filename, "line": f.line, "category": f.category.value, "severity": f.severity.value,
-             "source_model": getattr(f, "source_model", None) or None, "cross_verdict": getattr(f, "cross_verdict", None),
-             "cross_reason": getattr(f, "cross_reason", "") or None,
-             "title": f.title, "evidence": f.evidence, "recommendation": f.recommendation, "confidence": f.confidence}
-            for r in succeeded for f in r.review.findings
-        ])), timeout=CLEANUP_SECONDS)
-        logger.info("review posted", repo=job.repo, pr=job.pr_number, findings=rendered.findings_total,
-                    files=len(succeeded), errored=len(errored), seconds=round(duration, 1), url=comment_url)
-        return ReviewOutcome(review_id, rendered.findings_total, len(succeeded), len(skipped), comment_url)
+        attempted_post = True
+        posted = await _post_and_record(deps, client, job, review_id, head_sha=head_sha, succeeded=succeeded,
+                                        errored=errored, skipped=skipped, redaction_total=redaction_total, totals=totals,
+                                        pr_title=sanitise(redact(pr.get("title") or "")[0], 200), files_total=len(raw_files),
+                                        started=started, status="failed" if all_failed else "completed",
+                                        error_message="the model failed on every file" if all_failed else None)
+        logger.info("review posted", repo=job.repo, pr=job.pr_number, findings=posted.findings_total,
+                    files=len(succeeded), errored=len(errored), seconds=round(time.perf_counter() - started, 1),
+                    url=posted.comment_url)
+        return ReviewOutcome(review_id, posted.findings_total, len(succeeded), len(skipped), posted.comment_url)
     except BaseException as e:
         elapsed = time.perf_counter() - started
-        if isinstance(e, asyncio.CancelledError):
+        recorded = False
+        if isinstance(e, ReviewCutShort):
+            status, message, recorded = "timed_out", str(e), e.recorded
+        elif isinstance(e, asyncio.CancelledError):
             reason = job.cancel_reason or "superseded"
             status = {"timeout": "timed_out", "shutdown": "interrupted"}.get(reason, "superseded")
-            message = f"review {status.replace('_', ' ')} after {elapsed:.0f}s ({reason})"
-            if where.get("total"):
-                message += f" at {where['done']} of {where['total']} files in the {where['phase']} phase"
+            message = f"review {status.replace('_', ' ')} after {elapsed:.0f}s ({reason}){_how_far(where)}"
+            if reason == "timeout" and files:
+                # the ceiling, not a newer push or a shutdown: what finished is worth posting
+                recorded = await _post_cut_short(deps, client, job, review_id, head_sha=head_sha, done=done, files=files,
+                                                 skipped=skipped, redaction_total=redaction_total, pr=pr, raw_files=raw_files,
+                                                 started=started, where=where, message=message)
         elif isinstance(e, Superseded):
             status, message = "superseded", str(e)
         else:
             status = "failed"
             message = sanitise(redact(f"{type(e).__name__}: {e}")[0], 500)
-        if not (isinstance(e, Superseded) and "already reviewed" in str(e)):
+            if not attempted_post:
+                await _post_failure_note(client, job, head_sha, elapsed, type(e).__name__)
+        if not recorded and not (isinstance(e, Superseded) and "already reviewed" in str(e)):
             try:
                 await asyncio.wait_for(asyncio.shield(_finish(deps, review_id, job.delivery_id, {
                     "status": status, "error_message": message, "duration_seconds": elapsed,

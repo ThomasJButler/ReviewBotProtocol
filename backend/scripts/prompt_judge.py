@@ -229,6 +229,7 @@ def failures(variants: List[Dict[str, Any]]) -> str:
             for r in rs:
                 kept = "; ".join(f"line {l} {sev} {cat}: {t}" for l, sev, cat, t in r["kept_lines"]) or "nothing kept"
                 drop = (f" raw={r['raw']} lowconf={r['dropped_low_confidence']} unlocatable={r['dropped_unlocatable']}"
+                        f" tag={r.get('dropped_tag_title', 0)} praise={r.get('dropped_praise', 0)}"
                         f" cross_refuted={r.get('cross_refuted', 0)}")
                 out.append(f"- {r['case']}:{drop}. kept: {kept}. summary: {r['summary']}")
     return "\n".join(out)

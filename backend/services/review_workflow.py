@@ -43,11 +43,34 @@ def risk_score(filename: str, additions: int) -> int:
     return (100 if any(k in name for k in _RISKY) else 0) + min(int(additions or 0), 99)
 
 
+def totals_for(results: List[FileReviewResult]) -> Dict[str, int]:
+    """The review's counts, summed over whichever file results there are: every
+    file at the end of a run, or the files that finished when it was cut short."""
+    totals: Dict[str, int] = {"files": len(results), "findings": 0, "dropped": 0,
+                              "prompt_tokens": 0, "output_tokens": 0, "refuted": 0, "verify_calls": 0,
+                              "cross_calls": 0, "cross_refuted": 0, "cross_added": 0}
+    for r in results:
+        totals["findings"] += len(r.review.findings)
+        totals["dropped"] += r.dropped
+        totals["prompt_tokens"] += r.prompt_tokens
+        totals["output_tokens"] += r.output_tokens
+        totals["refuted"] += r.refuted
+        totals["verify_calls"] += r.verify_calls
+        totals["cross_calls"] += r.cross_calls
+        totals["cross_refuted"] += r.cross_refuted
+        totals["cross_added"] += r.cross_added
+    return totals
+
+
 class ReviewWorkflow:
     def __init__(self, reviewer: FileReviewer, unload: Optional[Callable[[str], Awaitable[bool]]] = None,
-                 on_progress: Optional[Progress] = None):
+                 on_progress: Optional[Progress] = None, on_result: Optional[Callable[[FileReviewResult], None]] = None):
         self.reviewer = reviewer
         self._on_progress = on_progress
+        # Called with every finished file result, and again with the cross-examined one. The graph
+        # state is unreachable from outside while the graph runs, so this is how a review cut short
+        # still has the files that finished.
+        self._on_result = on_result
         settings = reviewer.settings
         self.two_phase = (reviewer.cross_enabled and settings.CROSS_EXAMINE_SEQUENTIAL
                           and reviewer.cross_model_name != reviewer.model_name)
@@ -101,6 +124,8 @@ class ReviewWorkflow:
         await self._progress("review", i, len(state["files"]), f["filename"])
         result = await self.reviewer.review_file(f["filename"], f.get("language", "unknown"), f.get("status", "modified"), f["patch"])
         result.redactions = f.get("redactions", {})
+        if self._on_result is not None:
+            self._on_result(result)
         return {"results": list(state.get("results", [])) + [result], "index": i + 1}
 
     async def _cross_file(self, state: ReviewState) -> Dict[str, Any]:
@@ -110,6 +135,8 @@ class ReviewWorkflow:
                     filename=results[i].filename, position=f"{i + 1}/{len(results)}")
         await self._progress("cross-examine", i, len(results), results[i].filename)
         results[i] = await self.reviewer.cross_examine_file(results[i])
+        if self._on_result is not None:
+            self._on_result(results[i])
         return {"results": results, "cross_index": i + 1}
 
     async def _drop(self, model: str) -> None:
@@ -129,20 +156,7 @@ class ReviewWorkflow:
 
     async def _synthesise(self, state: ReviewState) -> Dict[str, Any]:
         await self._progress("done", len(state.get("results", [])), len(state.get("results", [])), "")
-        totals: Dict[str, int] = {"files": len(state.get("results", [])), "findings": 0, "dropped": 0,
-                                  "prompt_tokens": 0, "output_tokens": 0, "refuted": 0, "verify_calls": 0,
-                                  "cross_calls": 0, "cross_refuted": 0, "cross_added": 0}
-        for r in state.get("results", []):
-            totals["findings"] += len(r.review.findings)
-            totals["dropped"] += r.dropped
-            totals["prompt_tokens"] += r.prompt_tokens
-            totals["output_tokens"] += r.output_tokens
-            totals["refuted"] += r.refuted
-            totals["verify_calls"] += r.verify_calls
-            totals["cross_calls"] += r.cross_calls
-            totals["cross_refuted"] += r.cross_refuted
-            totals["cross_added"] += r.cross_added
-        return {"totals": totals}
+        return {"totals": totals_for(state.get("results", []))}
 
     async def run(self, repo: str, pr_number: int, head_sha: str, files: List[Dict[str, Any]]) -> ReviewState:
         initial: ReviewState = {"repo": repo, "pr_number": pr_number, "head_sha": head_sha, "files": files,

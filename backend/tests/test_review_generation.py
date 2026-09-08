@@ -176,6 +176,80 @@ def test_postprocess_dedupes_same_line_and_title():
     assert len(kept.findings) == 1 and dropped == 1
 
 
+def _finding(recommendation, title="aria-live for status", line=2, confidence=0.9, evidence="eval(user_input)"):
+    return {"category": "accessibility", "severity": "low", "title": title, "line": line,
+            "evidence": evidence, "recommendation": recommendation, "confidence": confidence}
+
+
+@pytest.mark.parametrize("recommendation", [
+    "Correctly implements the live region.",
+    "The code correctly handles the empty case.",
+    "This is already correct.",
+    "No change needed.",
+    "No changes are required here; the pattern is standard.",
+    "Nothing to fix.",
+    "Looks good.",
+    "Good practice, keep as is.",
+    "Keep as is.",
+    "Well implemented.",
+    "N/A",
+    "",
+    # the two shapes round three produced on the clean status-region control, in every repeat
+    "The addition of `role=\"status\"` and `aria-live=\"polite\"` is correct for a dynamic save status message to ensure screen readers announce updates without interrupting the user flow. This aligns with WCAG 2.2 Success Criterion 4.1.3.",
+    "The addition of `aria-live=\"polite\"` and `role=\"status\"` is the correct fix for a status message that updates without user interaction. No further action needed; this line resolves the accessibility gap.",
+])
+def test_praise_filed_as_a_finding_is_dropped(recommendation):
+    """Round three: "aria-live for status" with the recommendation "correctly
+    implements" passed every rule the postprocess had. A recommendation that
+    says the code is right and asks for nothing is not a finding."""
+    kept, dropped = postprocess(FileReview(findings=[_finding(recommendation)], summary=""), DIFF, 0.5)
+    assert kept.findings == [] and dropped == 1
+
+
+@pytest.mark.parametrize("recommendation", [
+    # the shapes the pre-merge review of this rule found it eating: an imperative
+    # wearing the praise word, and praise that turns a corner into a real defect
+    "Correctly validate user input before use.",
+    "Properly escape the HTML output.",
+    "Correctly sanitize the filename before opening it.",
+    "This is correct in the common case, but fails when the input is empty.",
+    "The check is correct for HTTP, but breaks for HTTPS URLs.",
+    "The implementation looks good but leaks memory on error.",
+    "This is correct. However, it silently ignores the error.",
+    "Looks fine until the list is empty, when it raises IndexError.",
+    "No change is needed here, but add a null check on the caller.",
+    "Correctly implements the region; consider announcing errors too.",
+    "Use a parameterised query.",
+    "This is fine for now. Replace the f-string before the next release.",
+    "Looks good, but it should also escape the title.",
+    "The check is correct only for ASCII; validate the byte length.",
+    "The current implementation is correct. However, the fallback path leaks the token; remove the print.",
+    "Ensure these status strings are used within properly labelled ARIA roles or live regions when displayed.",
+])
+def test_a_recommendation_that_asks_for_something_is_kept(recommendation):
+    kept, dropped = postprocess(FileReview(findings=[_finding(recommendation)], summary=""), DIFF, 0.5)
+    assert len(kept.findings) == 1 and dropped == 0
+
+
+def test_every_drop_is_logged_with_its_rule():
+    """A dropped finding was a number and nothing else; now each one is a log
+    line with the rule that took it, the file and the title."""
+    from structlog.testing import capture_logs
+    review = FileReview(findings=[
+        _finding("Correctly implements it."),
+        _finding("Fix it.", confidence=0.2),
+        _finding("Fix it.", title="shrink"),
+        _finding("Fix it.", line=40, evidence="a line that is not in the diff"),
+        _finding("Fix it.", title="Dup"), _finding("Fix it.", title="dup"),
+    ], summary="")
+    with capture_logs() as logs:
+        kept, dropped = postprocess(review, DIFF, 0.5, filename="a.py")
+    assert len(kept.findings) == 1 and dropped == 5
+    drops = [e for e in logs if e["event"] == "finding dropped"]
+    assert sorted(e["rule"] for e in drops) == ["confidence", "duplicate", "praise", "tag_title", "unlocated"]
+    assert all(e["filename"] == "a.py" and e["title"] for e in drops)
+
+
 class TestRendering:
     def test_html_offsite_links_and_mentions_are_neutralised(self):
         evil = ('Fix this <img src=x onerror=alert(1)> see [docs](https://evil.example/phish) and https://evil.example/x '
@@ -246,3 +320,13 @@ def test_a_truncated_summary_ends_at_a_sentence_not_mid_word():
     out = sanitise(one_long.strip(), 80, inline=True)
     assert out.endswith("word [truncated]") and len(out) <= 80
     assert sanitise("short", 80, inline=True) == "short"
+
+
+def test_a_review_cut_short_says_so_above_the_counts():
+    """The sentence is the runner's, not the model's, and it must survive the
+    body cap: above the count line, where truncation never reaches."""
+    note = "This review ran out of time after 3600 s: 12 of 25 files were reviewed; the rest are listed under Not reviewed."
+    body = render_review([], model="m", skipped=[("late.py", "not reached before the review's time ran out")], cut_short=note).body
+    assert body.index(note) < body.index("No findings in 0 reviewed files")
+    assert "`late.py`: not reached before the review's time ran out" in body
+    assert "ran out of time" not in render_review([], model="m").body

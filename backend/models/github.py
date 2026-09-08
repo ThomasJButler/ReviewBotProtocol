@@ -41,6 +41,7 @@ class _Loose(BaseModel):
 class GitHubUser(_Loose):
     id: int
     login: str
+    type: str = ""  # "User", "Bot" or "Organization"; defaulted, older fixtures do not carry it
 
 
 class GitHubRepository(_Loose):

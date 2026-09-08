@@ -43,3 +43,15 @@ async def test_totals_carry_the_verify_pass_counts():
     state = await ReviewWorkflow(FileReviewer(fake, settings, verify=True)).run("octocat/repo", 1, "a" * 40, [_file("a.py")])
     assert state["totals"]["refuted"] == 1 and state["totals"]["verify_calls"] == 1
     assert state["totals"]["findings"] == 0 and len(fake.calls) == 2
+
+
+async def test_every_finished_file_is_handed_to_on_result_in_review_order():
+    """The graph state cannot be read from outside while the graph runs, so a
+    review cut short would lose the files that finished. on_result hands each
+    result out as it lands, and the runner keeps them for exactly that case."""
+    seen = []
+    fake = RecordingChatModel()
+    wf = ReviewWorkflow(FileReviewer(fake, settings), on_result=seen.append)
+    state = await wf.run("octocat/repo", 1, "a" * 40, [_file("utils.py", 5), _file("auth/login.py", 1)])
+    assert [r.filename for r in seen] == ["auth/login.py", "utils.py"]
+    assert seen == state["results"]
