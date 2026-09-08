@@ -86,7 +86,11 @@ def _null_addition(f) -> bool:
     return f.title.strip().lower() in _NOTHING or f.recommendation.strip().lower() in _NOTHING
 
 
-_SUBJECT = r"(?:(?:the|this|that|these|those|it|which|your|current)\s+(?:[^.;:!?]{1,80}?\s+)?)?"
+# Each subject word is whitespace-free and eats its own trailing space, so the parts cannot
+# overlap. The earlier form allowed the middle to match spaces between two \s+ quantifiers,
+# which made a long run of them cost quadratic backtracking on the event loop: 2.8 s for one
+# 600-character recommendation, measured 2026-09-08 (CLAUDE-SECURITY-20260908-004806, F2).
+_SUBJECT = r"(?:(?:the|this|that|these|those|it|which|your|current)\s+(?:[^\s.;:!?]{1,40}\s+){0,12})?"
 _PRAISE = re.compile(
     rf"^{_SUBJECT}(?:"
     r"(?:is|are|looks?|seems?|remains?|works?)\s+(?:already\s+|now\s+)?(?:the\s+)?"
@@ -136,7 +140,7 @@ def _praise(f) -> bool:
     text = f.recommendation.strip()
     if text.lower() in _NOTHING:
         return True
-    first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
+    first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0][:200]  # a praise clause is never longer
     m = _PRAISE.match(first)
     if not m:
         return False

@@ -280,6 +280,31 @@ def test_the_prompts_own_sentence_as_a_title_is_replaced_not_dropped(title):
     assert [f.title for f in kept.findings] == ["Replace the factory class with a direct function call."]
 
 
+def test_the_praise_rule_cannot_be_made_to_backtrack(caplog):
+    """The praise pattern ran on model text derived from the diff, so a planted
+    instruction to pad the recommendation with whitespace could stall the event
+    loop that also serves the webhook: 2.8 s for one 600-character field, 84 s
+    for thirty of them, before the subject stopped overlapping its own spaces
+    (CLAUDE-SECURITY-20260908-004806, F2)."""
+    import time
+    worst = "the" + " " * 596 + "x"
+    started = time.perf_counter()
+    for _ in range(30):
+        _praise_probe(worst)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 1.0, f"thirty worst-case recommendations took {elapsed:.1f}s"
+
+
+def _praise_probe(recommendation):
+    from services.ai_reviewer import _praise
+    return _praise(_Rec(recommendation))
+
+
+class _Rec:
+    def __init__(self, recommendation):
+        self.recommendation = recommendation
+
+
 def test_a_retitled_finding_keeps_everything_else():
     rec = "Replace the factory class with a direct function call."
     f = _finding(rec, title="yagni, delete, stdlib, native or shrink, then what to remove")
