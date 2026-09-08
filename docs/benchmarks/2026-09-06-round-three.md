@@ -207,6 +207,23 @@ The rule's first version, before the narrowing described below, gave identical n
 
 The rule takes one row (`wcag_clean_status_region`, the harness's new `dropped_praise` counter names it) and nothing else: the false-positive rate falls from 0.25 to 0.22 per clean diff, which is that row leaving, while recall, the category and severity agreement and every injection report are unchanged. The reviewer alone now scores what the pair scored. The pair is unchanged to three decimals because the cross-examiner had already refuted that finding on its rows. The a11y-r4 run holds the same finding and was not re-judged; the candidate lost on other rows.
 
+## Addendum, 2026-09-08: the tag title, found by running the bot on its own pull requests
+
+The ten v1.2 pull requests were reviewed by the live App on 2026-09-07 night: 22 findings across ten reviews, every one a false positive under two independent judges. Six of the 22 were titled with the simplicity tag rather than the problem, which is the shape round three's brief already named, and it showed that the rule shipped for it was too narrow. It matched a single bare word (`shrink`), while the model writes three shapes: the bare tag, the whole tag list ("yagni, delete, shrink"), and the prompt's own sentence copied into the slot ("yagni, delete, stdlib, native or shrink, then what to remove, never the tag alone"). Round three's raw replies hold 138 of the first and 42 of the third.
+
+Dropping all three was the obvious rule and the harness refused it: recall fell from 0.98 to 0.967 and the score from 0.929 to 0.918, because on `practice_single_caller_abstraction` the sentence-titled finding is the one that finds the planted factory class, quotes its line and says what to replace it with. The title is slot-filling; the finding under it is right.
+
+So the tag list is dropped and the sentence is retitled from the recommendation's first clause, which is where the model put the substance ("Replace the factory class with a direct function call."). Measured on the same two replays, no model loaded (`runs/2026-09-07/tags2.leaderboard.md`, `tagsx2.leaderboard.md`):
+
+| run                                                         | recall | fp/clean | fp>=med | inj_rep | score |
+| ----------------------------------------------------------- | ------ | -------- | ------- | ------- | ----- |
+| reviewer alone, before (praise2)                            | 0.98   | 0.22     | 0.16    | 16/32   | 0.929 |
+| reviewer alone, drop all three (tags1)                      | 0.967  | 0.22     | 0.16    | 16/32   | 0.918 |
+| reviewer alone, drop the list, retitle the sentence (tags2) | 0.98   | 0.22     | 0.16    | 16/32   | 0.929 |
+| the pair, same rule (tagsx2)                                | 0.953  | 0.09     | 0.06    | 18/32   | 0.929 |
+
+Nothing moves, which is the point: the corpus cannot see a title, so the change is free there and removes six of the 22 titles a reader had to wade through live. The prompt sentence that stops the model writing them at all is still a round-four candidate.
+
 ## What shipped, and what the day changed
 
 - `VERIFY_SYSTEM_PROMPT`: verify-strict-r2, off by default (7ee1baf). `SYSTEM_PROMPT` stays a11y-r3 and `CROSS_SYSTEM_PROMPT` stays gap-hunter-a-r2; `CROSS_EXAMINE_NOTE_FIRST` keeps its default of off, settled like for like the next morning (the addendum above): the order's apparent gain was the bare tag title, now dropped by the pipeline. `PROMPT_OVERHEAD_TOKENS` is untouched because the reviewer prompt is. `NOT_YET_CLEARED` in the floor test is untouched: the incumbent cleared six of its seven in both of tonight's repeats, but the floor's documented standard is four repeats, so promotion waits for a second two-repeat run.

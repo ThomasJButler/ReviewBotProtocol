@@ -38,14 +38,41 @@ _MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END})[A-Za-z0-9_]{{0
 
 
 TAG_WORDS = {"yagni", "delete", "stdlib", "native", "shrink"}
+# the words a bare tag list is strung together with, and the words of the instruction itself
+_TAG_GLUE = {"and", "or", "then", "the", "a", "to", "what", "remove", "never", "tag", "alone", "use"}
+_PROMPT_ECHO = re.compile(r"never the tag alone|then what to remove", re.I)
+_TITLE_WORDS = re.compile(r"[^a-z]+")
 
 
 def _tag_only_title(title: str) -> bool:
-    """A simplicity finding titled with the tag alone ("shrink"), which both prompts
-    forbid ("then what to remove, never the tag alone"): the model filling the slot
-    rather than naming a problem. Round three's like-for-like key-order pair showed
-    22 of these on one side and 11 on the other, all on diffs with nothing wrong."""
-    return title.strip().lower().rstrip(".:") in TAG_WORDS
+    """A simplicity finding titled with the tag rather than the problem, which both
+    prompts forbid ("then what to remove, never the tag alone"): the model filling
+    the slot. Three shapes, all seen live: the tag alone ("shrink"), the tag list
+    ("yagni, delete, shrink"), and the prompt's own sentence copied out ("yagni,
+    delete, stdlib, native or shrink, then what to remove, never the tag alone",
+    42 of those in round three's raw replies). A tag word in front of something
+    real ("yagni, delete unused import") is the form the prompt asks for and stays."""
+    t = title.strip().lower().rstrip(".:")
+    if t in TAG_WORDS:
+        return True
+    words = [w for w in _TITLE_WORDS.split(t) if w]
+    return bool(words) and any(w in TAG_WORDS for w in words) and all(w in TAG_WORDS or w in _TAG_GLUE for w in words) \
+        and not _PROMPT_ECHO.search(t)
+
+
+def _instruction_title(title: str) -> bool:
+    """The prompt's own sentence copied into the title slot. The finding under it is
+    often right (round three: "yagni, delete, stdlib, native or shrink, then what to
+    remove" on the factory class it was meant to find), so the title is replaced from
+    the recommendation rather than the finding dropped."""
+    return bool(_PROMPT_ECHO.search(title.strip().lower()))
+
+
+def _title_from(recommendation: str) -> str:
+    """A title for a finding whose own title says nothing: the recommendation's first
+    sentence, which is where the model put the substance."""
+    first = re.split(r"(?<=[.!?])\s", recommendation.strip(), maxsplit=1)[0].strip()
+    return (first[:117].rstrip() + "...") if len(first) > 120 else first
 
 
 _NOTHING = {"", "none", "n/a", "na", "no finding", "no findings", "nothing", "-"}
@@ -310,6 +337,9 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float,
         if rule:
             dropped(f, rule)
             continue
+        if _instruction_title(f.title) and _title_from(f.recommendation):
+            logger.info("finding retitled", rule="instruction_title", filename=_meta(filename), line=f.line, title=f.title[:120])
+            f = f.model_copy(update={"title": _title_from(f.recommendation)})
         located, part = locate_evidence_part(parsed, f.line, f.evidence)
         if located is None:
             dropped(f, "unlocated")
