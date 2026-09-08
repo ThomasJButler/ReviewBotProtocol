@@ -250,6 +250,82 @@ def test_every_drop_is_logged_with_its_rule():
     assert all(e["filename"] == "a.py" and e["title"] for e in drops)
 
 
+@pytest.mark.parametrize("title", [
+    "shrink",
+    "Delete.",
+    "yagni, delete, shrink",
+    "yagni, delete, stdlib, native or shrink",
+])
+def test_a_title_that_is_only_the_tag_list_is_slot_filling(title):
+    """Live on this repository's own pull requests the 9B titled findings with the
+    whole tag list, which names no problem, and the rule only caught a single bare
+    tag. Round three's raw replies hold 138 of the bare tag."""
+    kept, dropped = postprocess(FileReview(findings=[_finding("Delete it.", title=title)], summary=""), DIFF, 0.5)
+    assert kept.findings == [] and dropped == 1
+
+
+@pytest.mark.parametrize("title", [
+    "yagni, delete, stdlib, native or shrink, then what to remove",
+    "yagni, delete, stdlib, native or shrink, then what to remove, never the tag alone",
+])
+def test_the_prompts_own_sentence_as_a_title_is_replaced_not_dropped(title):
+    """The model copies the instruction into the title slot, 42 times in round
+    three's raw replies, and the finding under it is often right: on
+    practice_single_caller_abstraction it quoted the factory line it was meant to
+    find and said exactly what to replace it with. Dropping that loses the catch,
+    so the title comes from the recommendation instead."""
+    rec = "Replace the factory class with a direct function call. The original one-liner is simpler."
+    kept, dropped = postprocess(FileReview(findings=[_finding(rec, title=title)], summary=""), DIFF, 0.5)
+    assert dropped == 0
+    assert [f.title for f in kept.findings] == ["Replace the factory class with a direct function call."]
+
+
+def test_the_praise_rule_cannot_be_made_to_backtrack(caplog):
+    """The praise pattern ran on model text derived from the diff, so a planted
+    instruction to pad the recommendation with whitespace could stall the event
+    loop that also serves the webhook: 2.8 s for one 600-character field, 84 s
+    for thirty of them, before the subject stopped overlapping its own spaces
+    (CLAUDE-SECURITY-20260908-004806, F2)."""
+    import time
+    worst = "the" + " " * 596 + "x"
+    started = time.perf_counter()
+    for _ in range(30):
+        _praise_probe(worst)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 1.0, f"thirty worst-case recommendations took {elapsed:.1f}s"
+
+
+def _praise_probe(recommendation):
+    from services.ai_reviewer import _praise
+    return _praise(_Rec(recommendation))
+
+
+class _Rec:
+    def __init__(self, recommendation):
+        self.recommendation = recommendation
+
+
+def test_a_retitled_finding_keeps_everything_else():
+    rec = "Replace the factory class with a direct function call."
+    f = _finding(rec, title="yagni, delete, stdlib, native or shrink, then what to remove")
+    kept, _ = postprocess(FileReview(findings=[f], summary=""), DIFF, 0.5)
+    one = kept.findings[0]
+    assert one.line == 2 and one.evidence == "eval(user_input)" and one.recommendation == rec
+    assert one.category.value == "accessibility" and one.confidence == 0.9
+
+
+@pytest.mark.parametrize("title", [
+    "yagni, delete unused import",
+    "yagni, delete nested ifs, shrink to early returns",
+    "yagni: Remove unused React import",
+    "Use native button",
+    "yagni remove redundant comment explaining unique constraint location",
+])
+def test_a_tag_in_front_of_a_real_title_is_the_form_the_prompt_asks_for(title):
+    kept, dropped = postprocess(FileReview(findings=[_finding("Delete it.", title=title)], summary=""), DIFF, 0.5)
+    assert [f.title for f in kept.findings] == [title] and dropped == 0
+
+
 class TestRendering:
     def test_html_offsite_links_and_mentions_are_neutralised(self):
         evil = ('Fix this <img src=x onerror=alert(1)> see [docs](https://evil.example/phish) and https://evil.example/x '
