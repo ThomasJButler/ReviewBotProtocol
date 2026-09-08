@@ -1,5 +1,7 @@
 # v1.2: what is left, and what was never built
 
+Superseded on 2026-09-08: v1.2.0 shipped and the work that follows it is in `docs/ROADMAP_v1.3.md`. This file stays as the record of what v1.2 set out to do and what each item became, and sections 3 to 8 still hold the detail the next roadmap points at rather than repeats.
+
 Written on 2026-09-07 at the end of the v1.1 work, from the next-round briefs in `docs/benchmarks/`, the test-plan run in `docs/TEST_PLAN.md`, and the design notes that stayed notes. Each item says where it comes from and roughly what it costs. Nothing here is promised; it is the list to pick from.
 
 ## 0. If the time is short: the order
