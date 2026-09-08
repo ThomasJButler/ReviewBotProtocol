@@ -15,9 +15,15 @@ import {
 
 export function ThemeToggle() {
   const { theme, setTheme, resolvedTheme } = useTheme()
-  const [mounted, setMounted] = React.useState(false)
-
-  React.useEffect(() => setMounted(true), [])
+  // False while rendering on the server and during hydration, true after: the
+  // subscription never fires, so this is React's own way of asking "am I
+  // hydrated yet" without a setState in an effect, which Next 16's hooks rules
+  // reject for the cascading render it causes.
+  const mounted = React.useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  )
 
   // Before hydration the chosen theme is unknown, so show a neutral icon
   // rather than guessing and flipping.

@@ -4,6 +4,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 
 ## Unreleased
 
+- Next 16 and eslint-config-next 16. The eslint config drops the eslintrc compatibility layer, since Next 16 ships flat config itself, and the theme toggle asks React whether it has hydrated instead of setting state in an effect, which Next 16's hooks rules reject. eslint 10 is held back: the latest `eslint-plugin-react` supports eslint 9.7 at most and Next's config depends on it.
 - `docs/REVIEW_QUALITY.md`: the first measurement of what the reviewer's findings are worth on real pull requests, and which of its weaknesses a better model would fix and which are the harness.
 - A review cut short by the time ceiling posts the files that finished and lists the rest under Not reviewed; each review also gets its own budget of `REVIEW_SECONDS_PER_FILE` (300) times its file count, under the ceiling; a review that fails before posting leaves one line on the pull request.
 - A forged data-block delimiter inside a diff is rewritten to `[forged-data-marker]`. It was `[data-marker]`, which the verifier read as the pipeline's own framing before standing down on a planted instruction (`docs/benchmarks/2026-09-06-round-three.md`). Naming the token in the prompts is a separate change and waits on a measured round.
