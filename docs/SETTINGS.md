@@ -6,7 +6,7 @@ Generated from `backend/config/settings.py` by `backend/scripts/settings_referen
 | Setting | Type | Default | What it does, what it costs |
 | --- | --- | --- | --- |
 | `APP_NAME` | str | `ReviewBot Protocol` | The name in the startup log and the API's OpenAPI title. Cosmetic. |
-| `APP_VERSION` | str | `1.1.0` | The version /health and /api/status report, matching the CHANGELOG entry. Bumped with a release. |
+| `APP_VERSION` | str | `1.2.0` | The version /health and /api/status report, matching the CHANGELOG entry. Bumped with a release. |
 | `DEBUG` | bool | `false` | Console-formatted logs instead of JSON lines, `/docs` and `/openapi.json` served, uvicorn reloading on a file change, and the exception's type name in the body of a 500. Off for anything GitHub can reach. |
 | `HOST` | str | `127.0.0.1` | The interface uvicorn binds. Loopback by default: GitHub reaches the webhook through a tunnel or a reverse proxy that forwards only that path, never through this port being public. |
 | `PORT` | int | `8000` | The port uvicorn binds when the backend is started with `python main.py`. The dashboard's BACKEND_URL must name the same one; `scripts/dev-up.sh` assumes the default and passes 8000 to uvicorn and to the tunnel. |
