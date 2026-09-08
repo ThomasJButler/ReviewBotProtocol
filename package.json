@@ -1,6 +1,6 @@
 {
   "name": "reviewbot-protocol",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev -H 127.0.0.1",

@@ -38,7 +38,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "ReviewBot Protocol"
     """The name in the startup log and the API's OpenAPI title. Cosmetic."""
-    APP_VERSION: str = "1.1.0"
+    APP_VERSION: str = "1.2.0"
     """The version /health and /api/status report, matching the CHANGELOG entry. Bumped with a release."""
     DEBUG: bool = False
     """Console-formatted logs instead of JSON lines, `/docs` and `/openapi.json` served, uvicorn reloading on a
