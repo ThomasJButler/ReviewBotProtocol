@@ -22,12 +22,14 @@ def test_webhook_to_completed_review_through_the_real_queue(app, fresh_db_url, p
     with TestClient(app, base_url="http://localhost") as c:
         queue = app.state.queue
         assert isinstance(queue, ReviewQueue) and queue.alive
+        assert not app.state.retention.done(), "the nightly retention sweep runs beside the queue"
         app.state.deps.llm = RecordingChatModel(response=MODEL_REPLY)
         body = json.dumps(pr_payload).encode()
         r = c.post("/webhook/github", content=body, headers=webhook_headers(body, delivery="live-1"))
         assert r.status_code == 202 and r.json()["outcome"] == "queued"
         c.portal.call(lambda: queue.drain(timeout=30))
         listing = c.get("/api/reviews", headers=AUTH).json()
+    assert app.state.retention.done(), "and is cancelled at shutdown, before the engine goes"
     assert reviews_route.called
     assert listing["total"] == 1 and listing["items"][0]["status"] == "completed" and listing["items"][0]["findings_count"] == 1
     assert listing["items"][0]["head_sha"] == "a" * 40

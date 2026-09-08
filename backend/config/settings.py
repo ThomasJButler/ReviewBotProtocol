@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     REVIEW_SECONDS_PER_FILE: int = 300  # the review's own budget, files times this, under the ceiling; 0 leaves only the ceiling
     REVIEW_DRAFTS: bool = False
     REVIEW_BOT_PULL_REQUESTS: bool = False  # dependabot and friends; each review costs the machine an hour
+    REVIEW_RETENTION_DAYS: int = 365  # reviews, their findings and deliveries older than this are deleted nightly; 0 keeps everything
     MAX_FILES_PER_REVIEW: int = 25
     MAX_PATCH_BYTES: int = 32_000
     MAX_WEBHOOK_BODY_BYTES: int = 2 * 1024 * 1024

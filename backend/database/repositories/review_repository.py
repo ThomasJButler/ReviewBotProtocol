@@ -1,8 +1,9 @@
 """Reviews and findings."""
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -81,6 +82,18 @@ class ReviewRepository:
             update(Review).where(Review.status == "running").values(status="interrupted", error_message="the backend stopped while this review was running"))
         await self.session.commit()
         return int(result.rowcount or 0)
+
+    async def delete_older_than(self, cutoff: datetime) -> Dict[str, int]:
+        """Reviews created before the cutoff, with their findings, unless still
+        running or queued. Keyed on created_at, which every row has; completed_at
+        is null on a row the process never finished, and such a row must not
+        live forever. The findings go first and explicitly: the ORM cascade does
+        not reach a bulk delete and SQLite's foreign keys are not enforced."""
+        old = select(Review.id).where(Review.created_at < cutoff, Review.status.notin_(("running", "queued")))
+        findings = await self.session.execute(delete(Finding).where(Finding.review_id.in_(old)))
+        reviews = await self.session.execute(delete(Review).where(Review.id.in_(old)))
+        await self.session.commit()
+        return {"reviews": int(reviews.rowcount or 0), "findings": int(findings.rowcount or 0)}
 
     async def repositories(self) -> List[str]:
         stmt = select(Review.repository).distinct().order_by(Review.repository)
