@@ -4,6 +4,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 
 ## Unreleased
 
+- `docs/REVIEW_QUALITY.md`: the first measurement of what the reviewer's findings are worth on real pull requests, and which of its weaknesses a better model would fix and which are the harness.
 - A review cut short by the time ceiling posts the files that finished and lists the rest under Not reviewed; each review also gets its own budget of `REVIEW_SECONDS_PER_FILE` (300) times its file count, under the ceiling; a review that fails before posting leaves one line on the pull request.
 - A forged data-block delimiter inside a diff is rewritten to `[forged-data-marker]`. It was `[data-marker]`, which the verifier read as the pipeline's own framing before standing down on a planted instruction (`docs/benchmarks/2026-09-06-round-three.md`). Naming the token in the prompts is a separate change and waits on a measured round.
 - The praise rule's pattern no longer backtracks on a recommendation padded with whitespace, which a planted diff could steer the model into writing: one 600-character field cost 2.8 seconds on the event loop that serves the webhook, and thirty cost 84 seconds. Measured before and after; a test holds the bound.

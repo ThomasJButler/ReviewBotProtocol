@@ -59,6 +59,8 @@ Verifier:
 
 ## 4. Corpus and harness
 
+The order to do these in, and which of them a better model would make unnecessary, is in `docs/REVIEW_QUALITY.md`, written from the first precision measurement on real pull requests (2026-09-08).
+
 - **Defensive code as clean controls.** On PR 13 the reviewer read the defences as the attacks: a critical on the line that sanitises the PR title, a critical on a test file's docstring that carries a hostile fixture, highs on the redaction patterns and on a prompt's own text. A hardened codebase is full of regexes that redact, sanitisers, and tests with planted hostile strings, and the corpus has none of that shape. Add a dozen clean diffs of that kind, and a rule in the prompt that a string handled by a sanitiser or a fixture inside a test is the defence, not the finding.
 - **A finding that names something not in the diff** ("delete unused MatrixSelect component" on a file with no such component) passes because its evidence line is real; the title's nouns could be checked against the diff text.
 - **A held-out planted set** the prompts are never tuned against, so a candidate's gain can be told from memorisation. Twenty cases in the shapes the fractal PRs suggested would do: unbounded parameters, a copied validator, an MD5 key called a traversal, a `div` as a button, a status shown by colour alone.
