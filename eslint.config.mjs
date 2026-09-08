@@ -1,11 +1,10 @@
-import { dirname } from 'path'
-import { fileURLToPath } from 'url'
-import { FlatCompat } from '@eslint/eslintrc'
+import nextCoreWebVitals from 'eslint-config-next/core-web-vitals'
+import nextTypescript from 'eslint-config-next/typescript'
+import prettier from 'eslint-config-prettier'
 
-const compat = new FlatCompat({
-  baseDirectory: dirname(fileURLToPath(import.meta.url)),
-})
-
+// eslint-config-next 16 ships flat config itself, so the eslintrc compatibility
+// layer this file used until Next 15 is gone: eslint 10 could not load the new
+// config through it at all ("Converting circular structure to JSON").
 const config = [
   {
     ignores: [
@@ -16,7 +15,9 @@ const config = [
       '.claude/**', // agent worktrees live here and carry their own next-env.d.ts
     ],
   },
-  ...compat.extends('next/core-web-vitals', 'next/typescript', 'prettier'),
+  ...nextCoreWebVitals,
+  ...nextTypescript,
+  prettier,
 ]
 
 export default config
