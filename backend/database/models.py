@@ -116,5 +116,7 @@ class WebhookDelivery(Base):
     head_sha = Column(String(40), nullable=True)
     body_sha256 = Column(String(64), nullable=True)  # what the signature actually covers; unique, see __table_args__
     received_at = Column(DateTime(timezone=True), default=_now, nullable=False, index=True)
-    status = Column(String(20), nullable=False, default="received")  # received, queued, running, completed, failed
+    # the status the handler and the runner last wrote (handlers/webhook.py, WebhookRepository); "expired" marks a
+    # tombstone kept past retention: id, body hash, event and received time, the rest cleared (expire_older_than)
+    status = Column(String(20), nullable=False, default="received")
     review_id = Column(String(36), nullable=True)

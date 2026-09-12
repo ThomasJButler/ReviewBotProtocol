@@ -4,6 +4,8 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 
 ## Unreleased
 
+- A webhook delivery older than `REVIEW_RETENTION_DAYS` is no longer deleted but stripped to a tombstone: its id, the SHA-256 of the signed body, the event and the time it arrived stay, with status `expired`, and the repository, pull request, head, action and review link go. GitHub's signature never expires, so deleting the hash made a year-old captured delivery acceptable again (the 2026-09-08 security scan's F1); a test now replays one after a sweep and expects `duplicate`. A tombstone is a couple of hundred bytes.
+
 ## 1.2.0 (2026-09-08)
 
 Robust enough for someone else to run. A review that runs out of time now posts what it has, the database stops growing forever, every setting says what it costs, and the reviewer's own noise was measured on real pull requests for the first time.
