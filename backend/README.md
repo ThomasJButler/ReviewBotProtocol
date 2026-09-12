@@ -72,6 +72,11 @@ Stored locally in `reviews.db`: repository, PR number and title, head SHA, model
 - `REVIEWBOT_E2E=1 .venv/bin/python -m pytest -m e2e` reviews one diff with the real Ollama and model under the same guard. Skipped by default.
 - Manual capture: run `lsof -i -P -a -p $(pgrep -f 'uvicorn main:app')` in a second terminal every second while a real PR is reviewed. The only peers you should ever see are `127.0.0.1:11434` (Ollama) and `api.github.com:443`.
 - `../scripts/prove-local.sh` builds a container holding the backend, Ollama and a small model, then runs one review with `docker run --network none`.
+- `.venv/bin/python scripts/review_diff.py` reviews a branch of any repository on this machine with the network off (next section). It needs no GitHub App and no Docker, so it is the proof a reader can run first.
+
+## Reviewing a diff with no network
+
+`scripts/review_diff.py` runs the pipeline the App runs, on a diff that never went near GitHub, and prints the findings instead of posting them. It takes a git range (`--range main...HEAD`, the pull request form, is the default, with `--repo` naming the repository; `--staged` reviews the index), a file of `git diff` output (`--file change.diff`; a plain `diff -u` has no `diff --git` sections and is refused) or stdin (`--file -`). The same file selection and size gate, the same redaction, reviewer, cross-examiner and verify pass, and the same post-filters run; `--format text` (the default) prints every finding with its evidence, recommendation and provenance for a terminal, `--format markdown` prints exactly what the App would post, the summary comment with the inline comment bodies under the line they attach to, and `--format json` is for scripts. Model settings come from `backend/.env` so a local review matches the App; `--model`, `--cross-model`, `--no-cross`, `--verify` and `--max-files` override one setting each, and `--env-file ''` reads none. No GitHub credential is needed, nothing is written to the database, the proxy variables are dropped from the process so a shell proxy cannot carry a model call, and `STRICT_LOCAL` is pinned on inside the command, so a cloud tag is refused whatever the env file says. With `CROSS_EXAMINE_SEQUENTIAL` on it unloads each model between its phases, as the App does, so do not run it while the App is mid-review on the same machine, or pass `--no-cross`. Two things it is for: trying a pipeline change against a real diff in minutes rather than a push, a webhook and an hour of the machine; and showing the privacy claim rather than arguing it, since the App needs GitHub to reach the machine and this does not (docs/TEST_PLAN.md section 6 has the procedure and the run of 2026-09-12).
 
 ## The cross-examiner: a second model from a different family
 
@@ -117,7 +122,8 @@ backend/
   config/settings.py      all settings and the local-only guard
   handlers/webhook.py     the public route
   handlers/review.py      the dashboard API
-  services/               redaction, diff parsing, prompt, schema, reviewer, renderer, queue, workflow, runner, GitHub client
+  services/               redaction, diff parsing, git diff splitting, prompt, schema, reviewer, renderer, queue, workflow, runner, GitHub client
   database/               SQLAlchemy models and repositories
+  scripts/                the harness (prompt_eval, prompt_judge), the offline review command (review_diff), exports
   tests/                  pytest suite
 ```
