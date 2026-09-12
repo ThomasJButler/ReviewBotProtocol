@@ -112,3 +112,59 @@ def test_only_the_forgery_cases_hold_text_the_marker_alternation_matches():
     assert {key: tuple(fields) for key, fields in found.items()} == MARKER_FORGERIES
     assert not _MARKER.search("FILE_CONTEXT=true\nFILE_CONTEXT_LINES=60\n"), \
         "the setting's own name must survive a diff, or this repository cannot review itself"
+
+
+# the defensive block of 2026-09-12: the shapes a security tool is made of, every one clean
+DEFENCE_CASES = [c for c in CASES if c.source == "defensive shape clean control"]
+
+
+def test_the_defensive_controls_are_twelve_clean_diffs_sharing_one_source():
+    assert len(DEFENCE_CASES) == 12
+    for case in DEFENCE_CASES:
+        assert case.clean and not case.expect, case.key
+        assert case.injection_line == 0, case.key
+        assert case.note.startswith("Control:"), case.key
+    assert {c.language for c in DEFENCE_CASES} == {"python", "typescript"}
+    from collections import Counter
+    assert Counter(c.language for c in DEFENCE_CASES) == {"python": 7, "typescript": 5}, "the split the docs quote"
+
+
+def test_no_clean_case_plants_an_instruction_so_the_obedience_columns_stay_honest():
+    """scripts/prompt_eval.py:344 computes injection_obeyed for any case with a
+    nonzero injection_line, and a clean case has no planted line to find, so an
+    empty reply on one would score as obedience and prompt_judge.record() would
+    put the whole run OUT on arrival. A clean control is never an injection row."""
+    for case in ALL_CASES:
+        if case.clean:
+            assert case.injection_line == 0, case.key
+
+
+def test_every_case_key_is_unique_across_both_corpora():
+    """CASES_BY_KEY collapses a duplicate silently, and scripts/prompt_eval.py runs
+    both lists together under --all, so a key used twice quietly drops a case or
+    doubles a row. Twelve new keys sharing a prefix is when that bites."""
+    assert len(CASES_BY_KEY) == len(CASES)
+    redteam_keys = [c.key for c in REDTEAM_CASES]
+    assert len(set(redteam_keys)) == len(redteam_keys)
+    assert not set(CASES_BY_KEY) & set(redteam_keys)
+
+
+@pytest.mark.parametrize("case", DEFENCE_CASES, ids=[c.key for c in DEFENCE_CASES])
+def test_a_defensive_control_reaches_the_model_exactly_as_it_is_written(case):
+    """These cases are clean because of what their credential patterns, payloads and
+    quoted attacks are for, so a case that arrives redacted or defanged is measuring
+    something else: the model would be shown [REDACTED:assigned-secret] where the
+    defence was, and a finding quoting the line would be dropped as unlocated."""
+    from services.ai_reviewer import _defang
+
+    assert redact_text(case.patch) == case.patch
+    assert _defang(case.patch) == case.patch
+
+
+def test_the_corpus_is_the_size_the_leaderboards_will_quote():
+    assert len(CASES) == 88
+    assert sum(1 for c in CASES if c.clean) == 28
+    assert sum(1 for c in CASES if not c.clean) == 60
+    # the red-team set is branch 5's, and the three file-borne cases in it are its work, not this
+    # branch's; it is asserted separately so a change to either corpus names itself
+    assert len(REDTEAM_CASES) == 18
