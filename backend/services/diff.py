@@ -99,48 +99,73 @@ def _near_copy(quoted: str, actual: str) -> bool:
     return len(common) >= NEAR_COPY_PREFIX and len(common) >= 0.6 * max(len(quoted), len(actual))
 
 
+def locate_evidence_kind(parsed: ParsedPatch, line: int, evidence: str) -> Tuple[Optional[int], str, str]:
+    """Where in the new file the quoted evidence really is, which part of the
+    quote sits there, and how the locator got there: "added", "context",
+    "removal", or "" when nothing located.
+
+    The kind comes from here rather than from a predicate asked afterwards,
+    because a rule about context lines must ask exactly the question the
+    locator answered. A quote can be a substring of an unrelated removal in
+    the same hunk while the locator placed it on the claimed context line; a
+    removal predicate asked unconditionally would answer "removal" there and
+    exempt a finding the locator never treated as one."""
+    if evidence and "\n" in evidence.strip():
+        for offset, part in enumerate(p for p in evidence.splitlines() if p.strip()):
+            located, kind = _locate_single_kind(parsed, line + offset, part)
+            if located is not None:
+                return located, part, kind
+        return None, evidence, ""
+    located, kind = _locate_single_kind(parsed, line, evidence)
+    return located, evidence, kind
+
+
 def locate_evidence_part(parsed: ParsedPatch, line: int, evidence: str) -> Tuple[Optional[int], str]:
     """Where in the new file the quoted evidence really is, and which part of
     the quote sits there. A model that quotes several lines is located by the
     first of them that is in the diff, and only that line is kept as the
     finding's evidence, so a fabricated line cannot ride along with a real
     one into the posted comment."""
-    if evidence and "\n" in evidence.strip():
-        for offset, part in enumerate(p for p in evidence.splitlines() if p.strip()):
-            located = _locate_single(parsed, line + offset, part)
-            if located is not None:
-                return located, part
-        return None, evidence
-    return _locate_single(parsed, line, evidence), evidence
+    return locate_evidence_kind(parsed, line, evidence)[:2]
 
 
 def locate_evidence(parsed: ParsedPatch, line: int, evidence: str) -> Optional[int]:
-    return locate_evidence_part(parsed, line, evidence)[0]
+    return locate_evidence_kind(parsed, line, evidence)[0]
 
 
-def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[int]:
-    """Return the line the evidence actually sits on: the claimed line if it
-    matches, otherwise the nearest line in the diff that contains the quote.
-    None if the quote is not in the diff at all (a hallucinated quote), or
-    too short to mean anything."""
+def _kind_at(parsed: ParsedPatch, line: Optional[int]) -> str:
+    """A located line is either one the change added or one it left alone."""
+    if line is None:
+        return ""
+    return "added" if line in parsed.added_lines else "context"
+
+
+def _locate_single_kind(parsed: ParsedPatch, line: int, evidence: str) -> Tuple[Optional[int], str]:
+    """Return the line the evidence actually sits on and how it was found: the
+    claimed line if it matches, otherwise the nearest line in the diff that
+    contains the quote. None if the quote is not in the diff at all (a
+    hallucinated quote), or too short to mean anything."""
     forms = _evidence_forms(evidence)
     claimed = _norm(parsed.new_lines[line]) if line in parsed.new_lines else None
     if claimed is not None and forms and any(f == claimed for f in forms):
-        return line  # the whole line, however short (`<html>`, `}`), quoted at the line it is on
+        return line, _kind_at(parsed, line)  # the whole line, however short (`<html>`, `}`), quoted at the line it is on
     if not forms or not any(_substantial(f) for f in forms):
-        return None
+        return None, ""
     forms = [f for f in forms if _substantial(f)]
     if claimed is not None and any(f in claimed for f in forms):
-        return line
+        return line, _kind_at(parsed, line)
     if claimed is not None and any(_near_copy(f, claimed) for f in forms):
-        return line  # a long literal copied with a slip near its end, at the line the model named
+        # a long literal copied with a slip near its end, at the line the model named
+        return line, _kind_at(parsed, line)
     candidates = [no for no, text in parsed.new_lines.items() if any(f in _norm(text) for f in forms)]
     if not candidates:
         # a quote of a line the change removed (an attribute, a check, a role) is a real line from the
         # diff and a finding about a removal; it lands on the line that took the removed line's place
         for at, texts in parsed.removed_lines.items():
             if any(f in _norm(t) or _near_copy(f, _norm(t)) for f in forms for t in texts):
-                return parsed.replacement_line(at)
+                at_line = parsed.replacement_line(at)
+                # the only path that answers "removal": the quote was nowhere in the new file
+                return at_line, ("removal" if at_line is not None else "")
         # a model that runs several diff lines together into one quote (`setInterval(() => { setIndex(...`)
         # has still quoted a real line whole: the line the quote begins with, or, when the quote
         # begins mid-way through a line (`const timer =` dropped from a callback's opening), a line
@@ -154,7 +179,39 @@ def _locate_single(parsed: ParsedPatch, line: int, evidence: str) -> Optional[in
                           if len(_TOKENS.findall(_norm(text))) >= INNER_LINE_TOKENS
                           and any(_norm(text) in f and 2 * len(_norm(text)) >= len(f) for f in forms)]
     if not candidates:
-        return None
+        return None, ""
     added = [no for no in candidates if no in parsed.added_lines]
     pool = added or candidates
-    return min(pool, key=lambda no: (abs(no - line), no))
+    at_line = min(pool, key=lambda no: (abs(no - line), no))
+    return at_line, _kind_at(parsed, at_line)
+
+
+def hunk_spans(patch: Optional[str]) -> List[Tuple[int, int]]:
+    """The first and last new-file line of every hunk, from the header numbers.
+    ParsedPatch counts hunks but keeps no ranges, and a window of the file
+    around a change needs the ranges."""
+    out: List[Tuple[int, int]] = []
+    for raw in (patch or "").replace("\r\n", "\n").split("\n"):
+        m = _HUNK.match(raw)
+        if not m:
+            continue
+        start = int(m.group(3))
+        count = int(m.group(4)) if m.group(4) is not None else 1
+        out.append((start, start + max(count, 1) - 1))
+    return out
+
+
+def quotes_text(text: str, evidence: str) -> bool:
+    """Whether the quoted evidence appears in a block of text, which is how a
+    finding that quotes the file context we sent is told from one that invented
+    a line. The same normalisation and the same substance floor as the locator,
+    so the two answers cannot disagree about what counts as a quote."""
+    if not text or not evidence:
+        return False
+    hay = _norm(text)
+    parts = [p for p in evidence.splitlines() if p.strip()] or [evidence]
+    for part in parts:
+        for form in _evidence_forms(part):
+            if _substantial(form) and form in hay:
+                return True
+    return False

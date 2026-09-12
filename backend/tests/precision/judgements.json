@@ -1,0 +1,621 @@
+{
+ "version": 1,
+ "judgements": [
+  {
+   "fingerprint": "33644cb7c1d8",
+   "pull_requests": [
+    24
+   ],
+   "path": "backend/config/settings.py",
+   "line": 56,
+   "category": "security",
+   "title": "LLM01: Prompt Injection",
+   "evidence": "REVIEW_SECONDS_PER_FILE: int = 300  # the review's own budget, files times this, under the ceiling; 0 leaves only the ceiling",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "The quoted line is a plain explanatory comment about a seconds-per-file budget; it contains no imperative or instruction to any model, so the claim that it holds text meant to steer an LLM is false.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "The quoted line is an ordinary configuration comment about a timeout budget; it contains no instruction addressed to a model, so there is nothing to remove as injection.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "4171e639441d",
+   "pull_requests": [
+    24
+   ],
+   "path": "backend/config/settings.py",
+   "line": 56,
+   "category": "quality",
+   "title": "yagni, delete redundant comment explaining budget logic already implied by variable name and type",
+   "evidence": "    REVIEW_SECONDS_PER_FILE: int = 300  # the review's own budget, files times this, under the ceiling; 0 leaves only the ceiling",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The comment carries what the name and int type cannot: that the budget is files times this value, capped by REVIEW_TIMEOUT_SECONDS, and that 0 disables it; deleting it loses documented behaviour.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The comment carries what the name cannot: the budget is files times this value, it is capped by REVIEW_TIMEOUT_SECONDS, and 0 disables it, so deleting it loses semantics, not verbosity.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "49fd01b14723",
+   "pull_requests": [
+    24
+   ],
+   "path": "backend/main.py",
+   "line": 75,
+   "category": "quality",
+   "title": "yagni, delete verbose inline comment explaining timing math that is already implied by the code logic and documentation",
+   "evidence": "# A review cut short by the ceiling posts what it has inside the grace period: a head check (5 s),",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The comment is the justification for the magic grace_seconds=60 added on the same line pair (5 + 20 + 15 + 15 = 55 s worst case); the arithmetic is right and nothing in the code states it.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The comment is the recorded arithmetic behind grace_seconds=60 on the next line (5+20+15+15 against 60); it is rationale a maintainer keeps, and the diff removes no defect by deleting it.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "17ad521485d9",
+   "pull_requests": [
+    24
+   ],
+   "path": "backend/services/comment_renderer.py",
+   "line": 173,
+   "category": "security",
+   "title": "Untrusted input rendered directly into user-facing text",
+   "evidence": "lines.append(cut_short)",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "cut_short is not untrusted input: review_runner.py:265-271 builds it from f-strings over internal counters (len(files), len(results), elapsed), and the runner is the only caller of render_review.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "cut_short is built in review_runner.py:265-271 from f-strings over internal ints and elapsed seconds, never from pull request content, so no untrusted input reaches lines.append(cut_short).",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "f8118c538612",
+   "pull_requests": [
+    26
+   ],
+   "path": "backend/services/ai_reviewer.py",
+   "line": 97,
+   "category": "security",
+   "title": "LLM01:2026 injection from repository content",
+   "evidence": "\"Status element lacks aria-live region\", recommendation",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "defence_as_attack",
+     "reason": "The quoted text is _praise's docstring quoting the round-three example recommendation the new filter exists to drop; a docstring recording the measurement that motivated the code is read as an injection payload.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "defence_as_attack",
+     "reason": "The quoted text is the _praise docstring quoting a past model reply as the measured reason the predicate exists; a docstring citing model output is not content steering this review.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "2960101b7911",
+   "pull_requests": [
+    26
+   ],
+   "path": "backend/services/ai_reviewer.py",
+   "line": 103,
+   "category": "quality",
+   "title": "yagni, delete, shrink",
+   "evidence": "\"Everything after the praise decides it, because praise is how a real",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The docstring records why each of the three escape hatches (_ASK, _CONTRAST, _DEFECT) exists with the example that would be lost without it; shrinking it deletes the reasoning behind the regexes directly below.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The docstring records why each of the three escape hatches (_ASK, _CONTRAST, _DEFECT at line 117) keeps a finding; shrinking it deletes the rationale for the regexes and fixes nothing.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "c3d4b9ed3d5e",
+   "pull_requests": [
+    26
+   ],
+   "path": "backend/tests/test_prompt_eval_replay.py",
+   "line": 142,
+   "category": "security",
+   "title": "prompt injection",
+   "evidence": "assert (await row_for(\"quality\"))[\"hit\"] is True, \"the real finding on line 3 is a hit either way\"",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "untouched_line",
+     "reason": "Line 142 is a context line: the hunk is @@ -140,3 +140,27 @@, so the pull request's additions start at 143 and this pre-existing assertion message was never touched (and it is a test message, not an instruction to a model).",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "untouched_line",
+     "reason": "Line 142 is a context line above the added hunk (the diff adds only lines 143 onward), and the quoted text is a pytest assertion message in a test about planted instructions, not an instruction to a model.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "dd262d5634be",
+   "pull_requests": [
+    26
+   ],
+   "path": "backend/tests/test_review_generation.py",
+   "line": 185,
+   "category": "quality",
+   "title": "yagni, delete, stdlib, native or shrink, then what to remove, never the tag alone",
+   "evidence": "\"Correctly implements the live region.\",",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "instruction_title",
+     "reason": "The title is the reviewer prompt's own sentence, services/prompts.py:28 'Open the title with yagni, delete, stdlib, native or shrink, then what to remove, never the tag alone', copied into the title slot instead of a problem.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "instruction_title",
+     "reason": "The title is the reviewer prompt's own sentence ('never the tag alone') in the title slot, and the quoted string is one parametrize case of praise that test_praise_filed_as_a_finding_is_dropped asserts is dropped.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "5dc0db774024",
+   "pull_requests": [
+    28
+   ],
+   "path": "backend/database/connection.py",
+   "line": 132,
+   "category": "security",
+   "title": "SQL Injection via f-string interpolation in dynamic DDL generation",
+   "evidence": "ddl = (f\"CREATE {'UNIQUE ' if index.unique else ''}INDEX IF NOT EXISTS {quote(index.name)} \"",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "Every identifier interpolated comes from Base.metadata (table.name, index.name, index.columns) or the inspector, each passed through dialect.identifier_preparer.quote; SQL identifiers cannot be bind parameters, so the suggested text() fix is impossible and there is no user-controlled input on this path.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "Every interpolated identifier comes from Base.metadata.sorted_tables and table.indexes and goes through dialect.identifier_preparer.quote; no request or user value reaches the DDL, and text() cannot bind identifiers anyway.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "337c55b4bcd9",
+   "pull_requests": [
+    28
+   ],
+   "path": "backend/database/models.py",
+   "line": 118,
+   "category": "quality",
+   "title": "yagni remove redundant comment explaining unique constraint location",
+   "evidence": "    body_sha256 = Column(String(64), nullable=True)  # what the signature actually covers; unique, see __table_args__",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The same diff removed index=True from this column and moved uniqueness into the new __table_args__ Index, so the cross-reference comment points a reader at where the constraint actually went.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The comment cross-references the Index in __table_args__ eight lines above and also says what body_sha256 covers; a true-but-cosmetic objection to a comment that helps.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "fec2314e119e",
+   "pull_requests": [
+    29
+   ],
+   "path": "backend/database/repositories/review_repository.py",
+   "line": 3,
+   "category": "quality",
+   "title": "yagni, delete unused import",
+   "evidence": "from datetime import datetime",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "datetime is used: the import is added for the new delete_older_than(self, cutoff: datetime) signature at line 86 of the same file, as the finding's own recommendation ends up admitting.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "datetime is used in the signature of delete_older_than(self, cutoff: datetime) at line 86, so the import is not unused, and the recommendation itself reverses into 'keep it'.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "1d13b5387f18",
+   "pull_requests": [
+    29
+   ],
+   "path": "backend/scripts/export_reviews.py",
+   "line": 66,
+   "category": "security",
+   "title": "Database URL passed directly to export without validation risks SSRF or connection hijacking",
+   "evidence": "count = asyncio.run(export(args.database, args.out, args.repository, args.older_than))",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "other",
+     "reason": "--database is a SQLAlchemy URL typed by the operator running the script locally (default: the app's own DATABASE_URL); it is a connection the operator chooses, not attacker-supplied input, so there is no SSRF surface to validate.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "other",
+     "reason": "--database is the operator's own command-line override of DATABASE_URL in a script they invoke from a shell; there is no remote input to the argument, so no SSRF or hijack path exists to close.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "012dc5bb31ae",
+   "pull_requests": [
+    29
+   ],
+   "path": "backend/scripts/export_reviews.py",
+   "line": 66,
+   "category": "security",
+   "title": "Unvalidated file path for output allows arbitrary file writes",
+   "evidence": "count = asyncio.run(export(args.database, args.out, args.repository, args.older_than))",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "other",
+     "reason": "export_reviews.py is an operator-run maintenance CLI whose whole purpose is writing to the --out path the operator names; there is no trust boundary to confine it to, and the caller already has the shell's filesystem rights.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "other",
+     "reason": "args.out comes from argparse in a local admin script run as `python scripts/export_reviews.py` by the operator; a path check would only stop the operator writing where they asked, with no trust boundary crossed.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "a85699191404",
+   "pull_requests": [
+    29
+   ],
+   "path": "backend/services/retention.py",
+   "line": 51,
+   "category": "security",
+   "title": "Broad exception handler masks critical errors in a long-running service",
+   "evidence": "except Exception as e:  # noqa: BLE001",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "The finding's own concrete ask is already in the code: 'except asyncio.CancelledError: raise' sits on lines 49-50 immediately above, and the remaining breadth is deliberate, marked # noqa: BLE001 and documented in the docstring as 'it never stops the loop'.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "Nothing is masked: asyncio.CancelledError is re-raised at lines 49-50, the rest is logged at error level, and the broad catch with `# noqa: BLE001` is what keeps the nightly loop alive, as the docstring states.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "9ca6811a87e8",
+   "pull_requests": [
+    29
+   ],
+   "path": "backend/services/retention.py",
+   "line": 52,
+   "category": "quality",
+   "title": "swallowed_exception_details",
+   "evidence": "logger.error(\"retention sweep failed\", error=type(e).__name__)",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "real",
+     "reason_category": "",
+     "reason": "The handler logs only type(e).__name__, so an unattended daily sweep loses both the exception message and the traceback; for the loop's only observability that is a one-word change to logger.exception a maintainer would take.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "error=type(e).__name__ is the house convention at some fifteen call sites and logger.exception appears nowhere; the one place the message is used it is redacted first (review_runner.py:401), matching the README rule that logs carry no code.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "09431cec2eb0",
+   "pull_requests": [
+    29
+   ],
+   "path": "backend/tests/test_retention.py",
+   "line": 20,
+   "category": "quality",
+   "title": "yagni, delete hardcoded test fixture object",
+   "evidence": "FINDING = {\"path\": \"a.py\", \"line\": 2, \"category\": \"security\", \"severity\": \"high\", \"title\": \"t\", \"evidence\": \"e\", \"recommendation\": \"r\", \"confidence\": 0.9}",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "other",
+     "reason": "A fixed FINDING dict is what makes the retention assertions deterministic; the recommendation to generate random titles, categories and severities would weaken the test rather than fix a defect.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "FINDING is a minimal literal fixture for a retention sweep that never inspects its fields; swapping it for randomised factory data would make the test nondeterministic, so the advice would be rejected.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "4d3f1049c9c7",
+   "pull_requests": [
+    30
+   ],
+   "path": "backend/scripts/settings_reference.py",
+   "line": 24,
+   "category": "security",
+   "title": "A05:2025 - Injection of secrets via environment variable manipulation",
+   "evidence": "_PLACEHOLDERS = {\"GITHUB_APP_ID\": \"0\", \"GITHUB_PRIVATE_KEY\": \"\", \"GITHUB_WEBHOOK_SECRET\": \"x\" * 32,",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "The placeholders exist so config.settings can be imported at all, and the module docstring plus render() show the table is read from the class, never an instance, with secrets rendered as 'required' (asserted by test_settings_reference.py); no placeholder can reach the output.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "defence_as_attack",
+     "reason": "The placeholders are the defence: the script seeds fake secrets and pops the fatal names so config.settings can be imported without any real secret, and render() reads cls.model_fields, never an instance's values.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "dbc7a93716bf",
+   "pull_requests": [
+    30
+   ],
+   "path": "backend/tests/test_settings_reference.py",
+   "line": 22,
+   "category": "quality",
+   "title": "YAGNI: Remove redundant assertion message text",
+   "evidence": "assert short == [], \"a description shorter than a sentence is a label, not a description\"",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The assertion message states the rule the test enforces (a sub-30-character description is a label, not a description), which is the information a failing CI line needs; removing it costs diagnosis and fixes nothing.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The assertion message states the rule being enforced (a description under 30 characters is a label); deleting a pytest message that explains a failing assertion is a preference and makes the failure harder to read.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "591812e9d9f5",
+   "pull_requests": [
+    30
+   ],
+   "path": "backend/tests/test_settings_reference.py",
+   "line": 29,
+   "category": "accessibility",
+   "title": "YAGNI: Remove redundant assertion message text",
+   "evidence": "assert REFERENCE.read_text(encoding=\"utf-8\") == rendered, (\"docs/SETTINGS.md is stale: cd backend && .venv/bin/python scripts/settings_reference.py > ../docs/SETTINGS.md\")",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The message is the regeneration command for a staleness check, the single most useful thing to print when docs/SETTINGS.md drifts; deleting it makes the failure harder to act on.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "The message is the regenerate command for a stale docs/SETTINGS.md, which is exactly what the reader of the failure needs; removing it costs the fix instruction and repairs no defect.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "3d2ef74987e0",
+   "pull_requests": [
+    30
+   ],
+   "path": "backend/tests/test_settings_reference.py",
+   "line": 10,
+   "category": "security",
+   "title": "YAGNI: Remove unnecessary path manipulation for local imports",
+   "evidence": "sys.path.insert(0, str(Path(__file__).resolve().parents[1] / \"scripts\"))",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "style_preference",
+     "reason": "Inserting backend/scripts on sys.path is the ordinary way to import a script that is not a package, and the suggested importlib.import_module('settings_reference', package='backend.scripts') would not resolve it; nothing is broken here.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "The sys.path insert is required, not unnecessary: backend/scripts has no __init__.py, so settings_reference is not importable as a module and the suggested importlib.import_module('settings_reference', package='backend.scripts') would fail.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "5126c784072c",
+   "pull_requests": [
+    31
+   ],
+   "path": "app/global-error.tsx",
+   "line": 43,
+   "category": "security",
+   "title": "Hardcoded backend URL exposes internal infrastructure details",
+   "evidence": "The terminal running the dashboard has the full trace. Reloading",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "BACKEND_URL is the name of the environment variable the dashboard reads (lib/api.ts:160), printed as a name in prose; no address is present, and the quoted evidence line does not even contain the token.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "There is no URL in the file: line 44 is prose containing the literal env-var name BACKEND_URL, no host or address, so nothing about the infrastructure is disclosed and the suggested 'YOUR_BACKEND_URL' is the same placeholder.",
+     "date": "2026-09-12"
+    }
+   ]
+  },
+  {
+   "fingerprint": "68d3431a9506",
+   "pull_requests": [
+    31
+   ],
+   "path": "app/global-error.tsx",
+   "line": 3,
+   "category": "quality",
+   "title": "yagni: Remove unused React import",
+   "evidence": "import * as React from 'react'",
+   "first_seen": "round0",
+   "judges": [
+    {
+     "judge": "claude-opus-5/judge-a",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "The import is used: React.useEffect is called at line 17 of the same file through this namespace import, which the finding's own recommendation concedes.",
+     "date": "2026-09-12"
+    },
+    {
+     "judge": "claude-opus-5/judge-b",
+     "verdict": "not_real",
+     "reason_category": "wrong_about_code",
+     "reason": "The namespace import is used at line 17, React.useEffect(() => { console.error(error) }, [error]), so it is not unused, and the recommendation itself ends by calling the finding weak.",
+     "date": "2026-09-12"
+    }
+   ]
+  }
+ ]
+}

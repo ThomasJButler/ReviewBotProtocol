@@ -224,6 +224,61 @@ So the tag list is dropped and the sentence is retitled from the recommendation'
 
 Nothing moves, which is the point: the corpus cannot see a title, so the change is free there and removes six of the 22 titles a reader had to wade through live. The prompt sentence that stops the model writing them at all is still a round-four candidate.
 
+## Addendum, 2026-09-12: a context line as weaker evidence, measured by replay
+
+The live night of 2026-09-07 filed 22 findings on ten of this repository's own pull requests and two independent judges found every one worthless; seven of their 44 votes said the finding was about a line the change never touched. One of those 22 is mechanically that shape: on pull request 26 a security finding of high severity and confidence 0.9, titled "prompt injection", quotes an unchanged `assert` in `backend/tests/test_prompt_eval_replay.py`. The pipeline accepted it because `postprocess` only ever asked whether a quote is somewhere in the diff, and a context line is in the diff. This addendum is a no-regression proof rather than a ranking: the corpus cannot tell these policies apart, because every planted line in all 91 cases is an added line (a test now holds that), so the decision is made on real code and the replays are here to show the rule costs nothing.
+
+The rule is in the pipeline, not the prompt. The locator now says how it located a quote, not only where: `added` when the line it settled on was added by the change, `context` when the change left that line alone, and `removal` when the quote was nowhere in the new file and turned out to be a line the change deleted (`services/diff.py`, `locate_evidence_kind`). A removal is exempt, always, under every policy, because the prompt asks for exactly that: "for something removed, the new-file line that now lacks it" (`services/prompts.py`). The kind has to come from the locator itself rather than from a predicate asked afterwards: a quote can be a substring of an unrelated removal in the same hunk while the locator placed it on the claimed context line, and an unconditional removal predicate would exempt a finding the locator never treated as a removal. A test pins that divergence.
+
+`CONTEXT_LINE_FINDINGS` chooses what happens to a `context` finding, from either model: `keep` (the old behaviour), `drop` (the default this addendum picks), `downgrade` one severity step (critical to high, info stays info, the severity-only-goes-down invariant the cross-examiner and the verifier already obey), or `confidence`, which keeps it only at or above `CONTEXT_LINE_MIN_CONFIDENCE` (0.9). A drop is logged as `rule="context_line"` and counted; a downgrade is logged as `finding downgraded` and counted separately.
+
+Measured with no model and no Ollama, eight replays of the two runs this day already holds, judged with `--corpus=full.json` (`runs/2026-09-12/`):
+
+```
+for p in keep drop downgrade confidence; do
+  CONTEXT_LINE_FINDINGS=$p CONTEXT_LINE_MIN_CONFIDENCE=0.9 prompt_eval.py --model qwen3.5:9b \
+    --cases-from-file full.json --replay praise2-a11y-r3.json --prompts-dir round3/reviewer \
+    --variants a11y-r3 --repeats 2 --tag ctx-$p
+  CONTEXT_LINE_FINDINGS=$p CONTEXT_LINE_MIN_CONFIDENCE=0.9 prompt_eval.py --model qwen3.5:9b \
+    --cases-from-file full.json --replay praisex2-cross_gap-hunter-a-r2.json \
+    --replay-cross praisex2-cross_gap-hunter-a-r2.json --cross-model gemma4:12b \
+    --cross-prompts-dir round3/cross --variants cross:gap-hunter-a-r2 --repeats 2 --tag ctxx-$p
+done
+```
+
+| run                                         | recall | fp/clean | fp>=med | inj_rep | score |
+| ------------------------------------------- | ------ | -------- | ------- | ------- | ----- |
+| reviewer alone, keep (ctx-keep)             | 0.98   | 0.22     | 0.16    | 16/32   | 0.929 |
+| reviewer alone, drop (ctx-drop)             | 0.98   | 0.22     | 0.16    | 16/32   | 0.929 |
+| reviewer alone, downgrade (ctx-downgrade)   | 0.98   | 0.22     | 0.16    | 16/32   | 0.929 |
+| reviewer alone, confidence (ctx-confidence) | 0.98   | 0.22     | 0.16    | 16/32   | 0.929 |
+| the pair, keep (ctxx-keep)                  | 0.953  | 0.09     | 0.06    | 18/32   | 0.929 |
+| the pair, drop (ctxx-drop)                  | 0.953  | 0.09     | 0.06    | 18/32   | 0.929 |
+| the pair, downgrade (ctxx-downgrade)        | 0.953  | 0.09     | 0.06    | 18/32   | 0.929 |
+| the pair, confidence (ctxx-confidence)      | 0.953  | 0.09     | 0.06    | 18/32   | 0.929 |
+
+`keep` is the before and the control on the locator refactor: it reproduces the 2026-09-07 figures to three decimals, and every scoring field of all 182 rows is identical to `praise2`'s, so the refactor moved nothing.
+
+In plain words: nothing moves, under any policy, and that is all the corpus can say. Five rows carry the rule at all, two of them through the exemption: `owasp_hardcoded_field_key` keeps a finding on line 2 in every run of both replays, quoting the deleted `import os`, and `wcag_colour_only_error` keeps its finding on the planted line through the same removed-line branch, so the exemption fires on real rows and not only in theory. On the reviewer alone the rule reaches two findings out of 223 kept: `owasp_llm_no_token_cap` line 5 at confidence 0.5 (`model: "qwen3-coder:30b",`) and `wcag_img_alt_missing` line 12 at 0.85 (`<h3>{product.name}</h3>`), each a second finding on a row whose planted line was already hit, so recall cannot move. On the pair the rule reaches one of 212, `owasp_ssrf_preview` line 9 at 0.9, a cross-examiner addition quoting the unchanged `resp = await client.get(url)` beside the reviewer's own critical finding on the added line 8 of the same row. Under `confidence` at 0.9 the reviewer replay behaves exactly like `drop` (0.5 and 0.85 both fall) and the pair keeps the same findings as `keep` (the addition is 0.9), which is the one distinction this corpus can draw between two policies at all.
+
+One instrument note, because the numbers in the leaderboards can mislead. `dropped_context_line` and `downgraded_context_line` are re-derived from the reviewer's own recorded reply, so on the pair they count what the rule would have done to the first pass and not what changed in the posted review: on `ctxx-drop` they read 2, yet both of those findings had already been removed by the cross-examiner. The field that sees both models is `kept_context_lines`, counted by re-locating the kept findings against the redacted patch, and it is where the pair's one real drop shows (1 under `keep`, 0 under `drop`). `--failures` now has an eighth group, "a context line as evidence", because these rows are hits with the right category and severity and would otherwise print nowhere. One more thing a replayed pair cannot hold fixed: the rule runs on the first pass before the cross-examination, and a replayed cross reply's verdicts are matched to findings by index, so a policy that removes a first-pass finding re-indexes the recorded verdicts against the findings that remain. This measurement is sound only because both first-pass findings the rule removes sort last on their rows; on `ctxx-drop` and `ctxx-confidence` the effect shows as `cross_refuted` one lower on two rows, since a finding that was dropped never reached the second model, with the kept findings identical to `keep`. A live pair run has no such artefact.
+
+### What the rule does to real findings
+
+Every finding stored for this repository under its pre-rename name was relocated read-only, which is 119 of them up to 2026-09-08 and not the 22 (the nine posted since under the new name, on pull requests 40 to 42, relocate as five added, one removal and three unlocatable, none a context line, so they change no count below): the reviews were read from `backend/reviews.db` with `mode=ro`, each pull request's diff rebuilt with `git diff --unified=3 <base>...<head_sha> -- <path>` (the three-dot form is the pull request form and what `scripts/precision.py` runs; every base here is an ancestor of its head, so the two forms give the same diff), the patch redacted the way `prepare_files` redacts it, and each stored `(line, evidence)` put through the pipeline's own `locate_evidence_kind`. Bases: the eleven v1.2 pull requests are a linear stack, so each base is the previous pull request's head, exactly as `backend/tests/precision/pull_requests.json` records them; pull request 13's base is `2c4682f`, the first parent of its merge commit `9020f31`.
+
+| Set                                    | Findings | Added | Context | Removal-relocated | Not reconstructable |
+| -------------------------------------- | -------- | ----- | ------- | ----------------- | ------------------- |
+| The judged 22 (pull requests 24 to 31) | 22       | 21    | 1       | 0                 | 0                   |
+| Earlier (pull requests 13 and 22)      | 97       | 87    | 3       | 6                 | 1                   |
+| All                                    | 119      | 108   | 4       | 6                 | 1                   |
+
+The four context-line findings are the judged one on pull request 26 above, and three on pull request 13: two yagni findings on `components/ui/card.tsx:95`, "delete specialized variants" at confidence 0.5 and "delete unused component exports" at 0.9, and "Redundant import statements" on `backend/database/models.py:7` at 0.8. All three are the untouched-code shape the judges named. The one that cannot be rebuilt is pull request 22's single finding on `package.json:37`: that pull request was never merged, its branch is gone, and its head commit is no longer in this clone, so no diff can be reconstructed for it here. The six removal-relocated findings are exempt under every policy.
+
+So `drop` removes 4 of the 119, every one of them a claim about a line the change never touched, one of them among the judged 22, and no judged true positive with it, because there were none among the 22. `confidence` at 0.9 removes 2 of the 4. `downgrade` removes none and only relabels, since the renderer posts every severity and only the ordering under `MAX_INLINE_COMMENTS` changes. The decision rule was fixed before the runs: any policy that moves recall, the score or an injection report on either replay is out, and among the rest the one removing most of the real context-line findings wins, with `keep` the incumbent on a tie. No policy moved anything, so `drop` wins on the count and ships as the default.
+
+Two caveats the numbers deserve. The roadmap's "seven of 44" is a count of votes and not of findings: the 44 judgements were unanimous on the verdict but not paired on the reason, the per-finding judge records no longer exist, and seven votes is at most three or four findings. So the mechanical rule reaching one of the judged 22 can be stated, and the remainder cannot be attributed to it; the rest of those votes are claims about untouched _code_ rather than untouched evidence lines, which is recommendation 2's territory and `v1.3-file-context`'s branch. And the 97 earlier findings predate v1.2's prompts and pipeline, so they are evidence about the shape of the noise rather than about today's reviewer.
+
 ## What shipped, and what the day changed
 
 - `VERIFY_SYSTEM_PROMPT`: verify-strict-r2, off by default (7ee1baf). `SYSTEM_PROMPT` stays a11y-r3 and `CROSS_SYSTEM_PROMPT` stays gap-hunter-a-r2; `CROSS_EXAMINE_NOTE_FIRST` keeps its default of off, settled like for like the next morning (the addendum above): the order's apparent gain was the bare tag title, now dropped by the pipeline. `PROMPT_OVERHEAD_TOKENS` is untouched because the reviewer prompt is. `NOT_YET_CLEARED` in the floor test is untouched: the incumbent cleared six of its seven in both of tonight's repeats, but the floor's documented standard is four repeats, so promotion waits for a second two-repeat run.

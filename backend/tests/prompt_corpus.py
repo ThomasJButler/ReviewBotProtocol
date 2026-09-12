@@ -36,6 +36,8 @@ class Case:
     source: str = ""  # the rule this case comes from: an OWASP id, a WCAG criterion, a Syteca heading
     attack: str = ""  # red-team cases: what the hostile text is trying to do
     expected_safe_behaviour: str = ""  # red-team cases: what a correct reviewer does
+    file_text: str = ""  # the whole file the hunk came from, for a run with FILE_CONTEXT on
+    file_injection: bool = False  # the hostile text sits in the file body, not the patch, so it is on no commentable line
 
 
 _AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE"
