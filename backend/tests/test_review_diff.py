@@ -109,6 +109,9 @@ def test_a_diff_file_is_reviewed_end_to_end_and_nothing_outside_loopback_is_dial
 
 def test_the_text_format_prints_the_path_line_severity_category_title_evidence_and_recommendation_of_every_finding(
         tmp_path, monkeypatch, capsys):
+    # the second finding quotes `import os`, a context line: this test measures the printing, so the
+    # context-line rule is off for it
+    monkeypatch.setenv("CONTEXT_LINE_FINDINGS", "keep")
     patch_seam(monkeypatch, reviewer=RecordingChatModel(model="qwen-fake", response=TWO_FINDINGS))
     code = R.main(["--file", write_diff(tmp_path, section("app.py", DIFF)), "--env-file", ""])
     out = capsys.readouterr().out

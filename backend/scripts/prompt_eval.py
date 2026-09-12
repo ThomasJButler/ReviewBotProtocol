@@ -74,8 +74,8 @@ from langchain_core.prompts import ChatPromptTemplate  # noqa: E402
 
 from config.settings import LocalOnlyViolation, Settings  # noqa: E402
 from services import prompts as P  # noqa: E402
-from services.ai_reviewer import drop_rule, FileReviewer, parse_file_review  # noqa: E402
-from services.diff import locate_evidence, parse_patch  # noqa: E402
+from services.ai_reviewer import FileReviewer, parse_file_review, postprocess  # noqa: E402
+from services.diff import locate_evidence_kind, parse_patch  # noqa: E402
 from services.llm import build_chat_model, ollama_health  # noqa: E402
 from services.redaction import redact_text  # noqa: E402
 from services.schemas import verdict_schema  # noqa: E402
@@ -246,20 +246,30 @@ def _settings(model: Optional[str], allow_cloud: bool = False, cross_model: Opti
     return Settings(_env_file=None, **env)
 
 
-def _classify_raw(raw_text: str, patch: str, min_confidence: float) -> Tuple[int, Dict[str, int], List[Dict[str, Any]]]:
+def _classify_raw(raw_text: str, patch: str, min_confidence: float, context_policy: str,
+                  context_min_confidence: float) -> Tuple[int, Dict[str, int], List[Dict[str, Any]]]:
     """How many findings the model produced and why the postprocess dropped any,
-    by the postprocess's own rules (drop_rule), then the locator."""
+    counted by the postprocess itself rather than by a copy of its loop: the copy
+    applied drop_rule and then the locator, so it never saw the duplicate key or
+    the instruction-title retitle that sits between them. The rows beside it are
+    the raw findings as the model wrote them, each with where the locator put it
+    and what kind of line that is, because run_case scores a hit off them."""
     review, _ = parse_file_review(raw_text)
     parsed = parse_patch(patch)
-    drops = {"confidence": 0, "tag_title": 0, "praise": 0, "unlocatable": 0}
+    drops = {
+        "confidence": 0,
+        "tag_title": 0,
+        "praise": 0,
+        "unlocated": 0,
+        "duplicate": 0,
+        "context_line": 0,
+        "context_line_downgraded": 0,
+    }
+    postprocess(review, patch, min_confidence, counts=drops, context_policy=context_policy,
+                context_min_confidence=context_min_confidence)
     raw_rows = []
     for f in review.findings:
-        located = locate_evidence(parsed, f.line, f.evidence)
-        rule = drop_rule(f, min_confidence)
-        if rule:
-            drops[rule] += 1
-        elif located is None:
-            drops["unlocatable"] += 1
+        located, _part, _kind = locate_evidence_kind(parsed, f.line, f.evidence)
         raw_rows.append({"line": f.line, "located": located, "severity": f.severity.value,
                          "category": f.category.value, "confidence": f.confidence, "title": f.title})
     return len(review.findings), drops, raw_rows
@@ -276,8 +286,14 @@ async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_c
     patch_seen = redact_text(case.patch)
     result = await reviewer.review_file(case.filename, case.language, case.status, case.patch)
     raw_text = recorder.texts[before] if len(recorder.texts) > before else ""
-    raw_count, drops, raw_rows = _classify_raw(raw_text, patch_seen, min_confidence)
+    raw_count, drops, raw_rows = _classify_raw(raw_text, patch_seen, min_confidence,
+                                               reviewer.settings.CONTEXT_LINE_FINDINGS,
+                                               reviewer.settings.CONTEXT_LINE_MIN_CONFIDENCE)
     kept = result.review.findings
+    # the drops above are read off the reviewer's own reply, so they are blind to a cross-examiner
+    # addition; this counts context lines in what both models left standing
+    parsed_seen = parse_patch(patch_seen)
+    kept_context = sum(1 for f in kept if locate_evidence_kind(parsed_seen, f.line, f.evidence)[2] == "context")
     hit_kept = [f for f in kept if f.line in case.expect]
     hit_raw = [r for r in raw_rows if (r["located"] or r["line"]) in case.expect]
     best = hit_kept[0] if hit_kept else None
@@ -290,8 +306,14 @@ async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_c
         f.line in case.expect and getattr(f, "source_model", "") != cross_model for f in kept) and result.cross_refuted > 0
     row = {
         "case": case.key, "clean": case.clean, "error": result.error,
-        "raw": raw_count, "kept": len(kept), "dropped_low_confidence": drops["confidence"], "dropped_unlocatable": drops["unlocatable"],
-        "dropped_tag_title": drops["tag_title"], "dropped_praise": drops["praise"],
+        "raw": raw_count, "kept": len(kept),
+        "dropped_low_confidence": drops["confidence"],
+        "dropped_unlocatable": drops["unlocated"],
+        "dropped_tag_title": drops["tag_title"],
+        "dropped_praise": drops["praise"],
+        "dropped_context_line": drops["context_line"],
+        "downgraded_context_line": drops["context_line_downgraded"],
+        "kept_context_lines": kept_context,
         "refuted": result.refuted, "verify_calls": result.verify_calls,
         "cross_calls": result.cross_calls, "cross_refuted": result.cross_refuted, "cross_added": result.cross_added,
         "hit_by_cross_only": hit_by_cross_only, "cross_refuted_true": cross_refuted_true,
@@ -347,11 +369,12 @@ def summarise(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _print_rows(variant: str, rows: List[Dict[str, Any]]) -> None:
     print(f"\n== {variant} ==")
-    print(f"{'case':<20} {'raw':>3} {'kept':>4} {'lowc':>4} {'noev':>4} {'refut':>5} {'hit':>4} {'sev':<8} {'fp':>3} {'inj':<9} {'tok':>6} {'sec':>5}")
+    print(f"{'case':<20} {'raw':>3} {'kept':>4} {'lowc':>4} {'noev':>4} {'ctx':>4} {'refut':>5} {'hit':>4} {'sev':<8} {'fp':>3} {'inj':<9} {'tok':>6} {'sec':>5}")
     for r in rows:
         inj = "" if r["injection_obeyed"] is None else ("OBEYED" if r["injection_obeyed"] else ("reported" if r["injection_reported"] else "ignored"))
         fp = "" if r["false_positives"] is None else str(r["false_positives"])
-        print(f"{r['case']:<20} {r['raw']:>3} {r['kept']:>4} {r['dropped_low_confidence']:>4} {r['dropped_unlocatable']:>4} {r['refuted']:>5} "
+        print(f"{r['case']:<20} {r['raw']:>3} {r['kept']:>4} {r['dropped_low_confidence']:>4} {r['dropped_unlocatable']:>4} "
+              f"{r.get('dropped_context_line', 0):>4} {r['refuted']:>5} "
               f"{('yes' if r['hit'] else ('raw' if r['hit_before_postprocess'] else 'no')) if not r['clean'] else '-':>4} "
               f"{(r['hit_severity'] or '-'):<8} {fp:>3} {inj:<9} {r['prompt_tokens'] + r['output_tokens']:>6} {r['seconds']:>5}"
               + (f"   ! {r['error']}" if r["error"] else ""))
@@ -535,6 +558,9 @@ async def main() -> int:
                 "model": replay_run["model"] if replay_run else settings.OLLAMA_MODEL,
                 "cross_model": args.cross_model if spec.get("cross") else None,
                 "variant": variant, "prompt_words": len(system_text.split()), "rows": rows, "summary": summaries[variant],
+                # which context-line policy produced these rows, so a leaderboard cannot be mislabelled
+                "context_line_findings": settings.CONTEXT_LINE_FINDINGS,
+                "context_line_min_confidence": settings.CONTEXT_LINE_MIN_CONFIDENCE,
             }
             if replay_run:
                 out["replayed_from"] = {"file": str(args.replay), "variant": replay_run["variant"],

@@ -40,6 +40,16 @@ def test_hunk_headers_add_up(case):
     assert all(l[:1] in (" ", "+", "-") for l in body), f"{case.key}: every body line starts with space, plus or minus"
 
 
+@pytest.mark.parametrize("case", ALL_CASES, ids=[c.key for c in ALL_CASES])
+def test_every_planted_line_is_an_added_line(case):
+    """The ground-truth check above asks only whether a line is commentable, which
+    context lines are, so a case planted on a line the diff never touched would
+    pass it and then score zero under the shipped context-line policy."""
+    parsed = parse_patch(case.patch)
+    for line in case.expect + ((case.injection_line,) if case.injection_line else ()):
+        assert line in parsed.added_lines, f"{case.key}: line {line} is in the diff but was not added by it"
+
+
 def test_key_case_is_redacted_before_the_model_sees_it():
     seen = redact_text(CASES_BY_KEY["hardcoded_key"].patch)
     assert "AKIA" not in seen and "[REDACTED:aws-access-key]" in seen

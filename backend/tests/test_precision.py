@@ -551,7 +551,8 @@ def test_a_record_counts_the_drops_by_the_postprocess_rules(tmp_path):
     record = _round(reply=reply)
     handler = record["files"][0]
     assert handler["raw"] == 6
-    assert handler["drops"] == {"confidence": 1, "tag_title": 1, "praise": 1, "unlocated": 1, "duplicate": 1}
+    assert handler["drops"] == {"confidence": 1, "tag_title": 1, "praise": 1, "unlocated": 1, "duplicate": 1,
+                                "context_line": 0, "context_line_downgraded": 0}
     assert len([f for f in record["findings"] if f["path"] == "app/handler.py"]) == 1
 
 

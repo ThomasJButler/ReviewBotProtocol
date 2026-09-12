@@ -100,7 +100,8 @@ VERDICTS = ("real", "not_real")
 JUDGEMENT_FIELDS = ("fingerprint", "pull_requests", "path", "line", "category", "title", "evidence",
                     "first_seen", "judges")
 JUDGE_FIELDS = ("judge", "verdict", "reason_category", "reason", "date")
-DROP_RULES = ("confidence", "tag_title", "praise", "unlocated", "duplicate")
+DROP_RULES = ("confidence", "tag_title", "praise", "unlocated", "duplicate", "context_line")
+RECORD_COUNTERS = DROP_RULES + ("context_line_downgraded",)  # a downgrade is counted but is not a drop
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -416,7 +417,8 @@ class ReplayFileModel(BaseChatModel):
 # ---------------------------------------------------------------- one review
 
 
-def classify_raw(raw_text: str, patch: str, min_confidence: float) -> Tuple[int, Dict[str, int]]:
+def classify_raw(raw_text: str, patch: str, min_confidence: float, context_policy: Optional[str] = None,
+                 context_min_confidence: Optional[float] = None) -> Tuple[int, Dict[str, int]]:
     """How many findings the model raised and which rule removed each one that
     did not survive, counted by the postprocess itself rather than by a copy of
     its loop: the copy applied drop_rule and then the locator, and missed the
@@ -426,8 +428,12 @@ def classify_raw(raw_text: str, patch: str, min_confidence: float) -> Tuple[int,
     never raised it. Every rule services/ai_reviewer.py names has a counter
     here, and a test holds the two lists equal."""
     review, _ = parse_file_review(raw_text)
-    drops = {rule: 0 for rule in DROP_RULES}
-    postprocess(review, patch, min_confidence, counts=drops)
+    drops = {rule: 0 for rule in RECORD_COUNTERS}
+    # the run's own policy, so a round measured under a non-default CONTEXT_LINE_FINDINGS attributes its
+    # own drops; None leaves postprocess at the module default, which is the shipped one
+    extra = {k: v for k, v in (("context_policy", context_policy), ("context_min_confidence", context_min_confidence))
+             if v is not None}
+    postprocess(review, patch, min_confidence, counts=drops, **extra)
     return len(review.findings), drops
 
 
@@ -490,7 +496,8 @@ async def review_pull_request(entry: Dict[str, Any], text: str, reviewer: FileRe
     record = new_record(entry, settings, model=reviewer.model_name)
     record["split"] = len(raw_files)
     record["skipped"] = [{"path": p, "reason": r} for p, r in skipped]
-    fill_record(record, files, results, texts, settings.MIN_FINDING_CONFIDENCE)
+    fill_record(record, files, results, texts, settings.MIN_FINDING_CONFIDENCE,
+                settings.CONTEXT_LINE_FINDINGS, settings.CONTEXT_LINE_MIN_CONFIDENCE)
     record["seconds"] = round(time.perf_counter() - started, 1)
     return record
 
@@ -507,7 +514,9 @@ def new_record(entry: Dict[str, Any], settings: Settings, model: str = "", cross
                      "verify_findings": settings.VERIFY_FINDINGS,
                      "ollama_num_ctx": settings.OLLAMA_NUM_CTX,
                      "max_patch_bytes": settings.MAX_PATCH_BYTES,
-                     "cross_examine_max_calls_per_review": settings.CROSS_EXAMINE_MAX_CALLS_PER_REVIEW},
+                     "cross_examine_max_calls_per_review": settings.CROSS_EXAMINE_MAX_CALLS_PER_REVIEW,
+                     "context_line_findings": settings.CONTEXT_LINE_FINDINGS,
+                     "context_line_min_confidence": settings.CONTEXT_LINE_MIN_CONFIDENCE},
         "pipeline_commit": commit, "pipeline_dirty": dirty,
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": 0.0, "replayable": True,
         "split": 0, "files": [], "skipped": [], "errored": [], "findings": [],
@@ -515,7 +524,8 @@ def new_record(entry: Dict[str, Any], settings: Settings, model: str = "", cross
 
 
 def fill_record(record: Dict[str, Any], files: List[Dict[str, Any]], results: List[FileReviewResult],
-                texts: Dict[str, List[str]], min_confidence: float) -> None:
+                texts: Dict[str, List[str]], min_confidence: float, context_policy: Optional[str] = None,
+                context_min_confidence: Optional[float] = None) -> None:
     """The per-file rows, the errored files and the findings. Errored files are
     kept apart from skipped ones, because reviews.skipped mixes the two (a file
     the model answered unusably is written into the same list by
@@ -524,7 +534,8 @@ def fill_record(record: Dict[str, Any], files: List[Dict[str, Any]], results: Li
     patches = {f["filename"]: f["patch"] for f in files}
     for r in results:
         raw_texts = texts.get(r.filename) or []
-        raw, drops = classify_raw(raw_texts[0] if raw_texts else "", patches.get(r.filename, ""), min_confidence)
+        raw, drops = classify_raw(raw_texts[0] if raw_texts else "", patches.get(r.filename, ""), min_confidence,
+                                  context_policy, context_min_confidence)
         record["files"].append({
             "filename": r.filename, "language": r.language, "status": r.status,
             "additions": next((f.get("additions", 0) for f in files if f["filename"] == r.filename), 0),
@@ -672,7 +683,7 @@ def database_record(entry: Dict[str, Any], text: str, settings: Settings, findin
         record["files"].append({
             "filename": f["filename"], "language": f["language"], "status": f["status"],
             "additions": f.get("additions", 0), "patch": f["patch"], "model_texts": [],
-            "raw": len(on_file), "drops": {rule: 0 for rule in DROP_RULES},
+            "raw": len(on_file), "drops": {rule: 0 for rule in RECORD_COUNTERS},
             "prompt_tokens": 0, "output_tokens": 0, "seconds": 0.0, "parse_ok": True, "error": None,
         })
     for row in findings:
@@ -1148,6 +1159,11 @@ async def cmd_replay(args: argparse.Namespace) -> int:
                                 record["settings"].get("max_files_per_review"),
                                 record["settings"].get("min_finding_confidence"),
                                 record["settings"].get("ollama_num_ctx"))
+        stored = record.get("settings", {})
+        if stored.get("context_line_findings"):
+            # the policy the round was recorded under, not the one in this shell; validated when it was recorded
+            settings = settings.model_copy(update={"CONTEXT_LINE_FINDINGS": stored["context_line_findings"],
+                                                   "CONTEXT_LINE_MIN_CONFIDENCE": stored.get("context_line_min_confidence", settings.CONTEXT_LINE_MIN_CONFIDENCE)})
         files = [f for f in record["files"] if f.get("model_texts")]
         skipped_files += len(record["files"]) - len(files)
         texts = {f"{record['pr']}:{f['filename']}": f["model_texts"][0] for f in files}
@@ -1175,7 +1191,8 @@ async def cmd_replay(args: argparse.Namespace) -> int:
         fresh["split"] = record.get("split", 0)
         fresh["skipped"] = list(record.get("skipped", []))
         fresh["replayed_from"] = {"tag": record["tag"], "runs": str(args.runs)}
-        fill_record(fresh, [dict(f) for f in files], results, replies, settings.MIN_FINDING_CONFIDENCE)
+        fill_record(fresh, [dict(f) for f in files], results, replies, settings.MIN_FINDING_CONFIDENCE,
+                    settings.CONTEXT_LINE_FINDINGS, settings.CONTEXT_LINE_MIN_CONFIDENCE)
         for f in record["files"]:
             if not f.get("model_texts"):
                 # the model call raised on the night, so review_file returned before the recorder saw
