@@ -215,3 +215,120 @@ def test_the_app_jwt_lives_five_minutes_and_allows_clock_skew():
     provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE)
     claims = pyjwt.decode(provider.app_jwt(), options={"verify_signature": False})
     assert claims["iss"] == "123456" and claims["exp"] - claims["iat"] == 360, "5 minutes plus the 60 s skew allowance"
+
+
+# ---------------------------------------------------------------- file context
+
+CONTENTS = f"{BASE}/repos/octocat/repo/contents/app/db.py"
+
+
+def _contents_json(text: str, **over):
+    import base64
+    body = {"type": "file", "encoding": "base64", "size": len(text.encode()),
+            "content": base64.b64encode(text.encode()).decode(), "path": "app/db.py",
+            "contents_url": "https://evil.example.com/contents/app/db.py"}
+    body.update(over)
+    return body
+
+
+@respx.mock
+async def test_a_file_is_fetched_at_the_head_commit_and_decoded_from_base64():
+    _token_route()
+    route = respx.get(CONTENTS).mock(return_value=httpx.Response(200, json=_contents_json("import os\nx = 1\n")))
+    async with httpx.AsyncClient() as http:
+        text = await GitHubClient(_provider(http), BASE, http=http).get_file_text("octocat/repo", "app/db.py", "c" * 40)
+    assert text == "import os\nx = 1\n"
+    assert route.calls.last.request.url.params["ref"] == "c" * 40
+    assert route.calls.last.request.headers["accept"] == "application/vnd.github+json", \
+        "the raw media type redirects to codeload and this client does not follow redirects"
+
+
+@respx.mock
+async def test_a_file_too_large_for_the_contents_api_yields_nothing_rather_than_an_error():
+    _token_route()
+    respx.get(CONTENTS).mock(return_value=httpx.Response(200, json=_contents_json(
+        "", encoding="none", content="", size=2_000_000)))
+    async with httpx.AsyncClient() as http:
+        assert await GitHubClient(_provider(http), BASE, http=http).get_file_text("octocat/repo", "app/db.py", "c" * 40) is None
+
+
+@respx.mock
+async def test_a_missing_file_yields_nothing_rather_than_failing_the_review():
+    _token_route()
+    respx.get(CONTENTS).mock(return_value=httpx.Response(404, json={"message": "Not Found"}))
+    async with httpx.AsyncClient() as http:
+        client = GitHubClient(_provider(http), BASE, http=http)
+        assert await client.get_file_text("octocat/repo", "app/db.py", "c" * 40) is None
+        respx.get(CONTENTS).mock(return_value=httpx.Response(200, json=_contents_json("", type="dir")))
+        assert await client.get_file_text("octocat/repo", "app/db.py", "c" * 40) is None
+
+
+@respx.mock
+async def test_a_path_that_could_walk_out_of_the_repository_is_refused_before_it_is_sent():
+    """The path comes from the pull request files payload. quote() leaves dots
+    alone, so nothing but its shape stops `..` walking the contents call out of
+    the repository the installation token is scoped to."""
+    _token_route()
+    route = respx.get(url__startswith=f"{BASE}/repos/octocat/repo/contents/")
+    async with httpx.AsyncClient() as http:
+        client = GitHubClient(_provider(http), BASE, http=http)
+        for path in ("", "/etc/passwd", "../../../etc/passwd", "app/../../secrets.py", "app/./db.py", ".."):
+            assert await client.get_file_text("octocat/repo", path, "c" * 40) is None, path
+    assert not route.called, "not one of them reached GitHub"
+
+
+@respx.mock
+async def test_a_transport_failure_or_an_unreadable_body_loses_the_file_and_not_the_review():
+    """get_file_text never raises: file context is an extra, and a review runs on
+    the patch alone without it. A connection that drops and a body that is not
+    JSON are the same kind of nothing as a 404."""
+    _token_route()
+    respx.get(CONTENTS).mock(side_effect=httpx.ConnectError("connection refused"))
+    async with httpx.AsyncClient() as http:
+        client = GitHubClient(_provider(http), BASE, http=http)
+        assert await client.get_file_text("octocat/repo", "app/db.py", "c" * 40) is None
+        respx.get(CONTENTS).mock(return_value=httpx.Response(200, content=b"<html>not json</html>",
+                                                             headers={"content-type": "text/html"}))
+        assert await client.get_file_text("octocat/repo", "app/db.py", "c" * 40) is None
+
+
+@respx.mock
+async def test_the_installation_token_asks_for_contents_read_only_when_file_context_is_on():
+    from services.github_app_auth import REVIEW_PERMISSIONS
+    wanted = {**REVIEW_PERMISSIONS, "contents": "read"}
+    route = respx.post(f"{BASE}/app/installations/555/access_tokens").mock(return_value=httpx.Response(201, json={
+        "token": "ghs_wide_ok", "expires_at": "2099-01-01T00:00:00Z", "permissions": dict(wanted)}))
+    async with httpx.AsyncClient() as http:
+        provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE, http=http,
+                                             repository="octocat/repo", permissions=wanted, droppable=("contents",))
+        assert await provider.token() == "ghs_wide_ok"
+    assert json.loads(route.calls.last.request.content)["permissions"] == wanted
+    assert provider.dropped == []
+
+
+@respx.mock
+async def test_an_installation_that_refuses_contents_read_still_mints_a_token_and_records_the_refusal():
+    from services.github_app_auth import REVIEW_PERMISSIONS
+    wanted = {**REVIEW_PERMISSIONS, "contents": "read"}
+    answers = [httpx.Response(422, json={"message": "There is at least one repository that does not exist"}),
+               httpx.Response(201, json={"token": "ghs_narrow", "expires_at": "2099-01-01T00:00:00Z",
+                                         "permissions": dict(REVIEW_PERMISSIONS)})]
+    route = respx.post(f"{BASE}/app/installations/555/access_tokens").mock(side_effect=answers)
+    async with httpx.AsyncClient() as http:
+        provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE, http=http,
+                                             repository="octocat/repo", permissions=wanted, droppable=("contents",))
+        assert await provider.token() == "ghs_narrow"
+    assert provider.dropped == ["contents"] and provider.permissions == dict(REVIEW_PERMISSIONS)
+    assert len(route.calls) == 2, "one wider mint, then one narrowed retry and no more"
+    assert json.loads(route.calls[1].request.content)["permissions"] == dict(REVIEW_PERMISSIONS)
+
+
+@respx.mock
+async def test_a_422_with_nothing_droppable_still_raises():
+    respx.post(f"{BASE}/app/installations/555/access_tokens").mock(
+        return_value=httpx.Response(422, json={"message": "no"}))
+    async with httpx.AsyncClient() as http:
+        provider = InstallationTokenProvider("123456", TEST_PRIVATE_KEY, 555, base_url=BASE, http=http,
+                                             repository="octocat/repo")
+        with pytest.raises(RuntimeError, match="lacks a permission"):
+            await provider.token()

@@ -1,0 +1,113 @@
+{
+ "repository": "ThomasJButler/ReviewBotProtocol",
+ "release": "v1.2",
+ "derived_on": "2026-09-12",
+ "derivation": "Heads are reviews.head_sha of the completed review of each pull request, read through sqlite3.connect('file:reviews.db?mode=ro&immutable=1', uri=True). The v1.2 stack is a linear chain of single-parent commits, so each pull request's base is the previous one's head, and PR 23's base is the commit the stack was built on. The repository's history was rewritten on 2026-09-12, so these are the hashes of the current history, expanded with git rev-parse; the database was remapped to the same hashes. The range is the three-dot form, git diff base...head, the pull request form the harness runs; each base here is an ancestor of its head, so the two-dot form gives the same diff. Diffs are not stored, because a review never keeps the patch, so the numbers below are what a regenerated diff has to reproduce: 'files' equals `git diff --name-only base...head | wc -l` and equals reviews.files_total for all eleven, and 'selected_at_recorded_settings' is what services.review_runner.select_files returns over the split regenerated diff, which equals reviews.files_reviewed for ten of the eleven (PR 24 is the exception and its note says why). Storing both counts is what lets the equivalence test run from git alone, since reviews.db is gitignored.",
+ "recorded_round": {
+  "date": "2026-09-07",
+  "model": "qwen3.5:9b",
+  "cross_model": "gemma4:12b",
+  "cross_examine_sequential": true,
+  "verify_findings": false,
+  "max_files_per_review": 50,
+  "ollama_num_ctx": 16384,
+  "source": "docs/REVIEW_QUALITY.md:11",
+  "note": "MAX_FILES_PER_REVIEW at its shipped default of 25 reproduces the recorded selection exactly, because the largest eligible set is 16 files (PR 24)."
+ },
+ "database": {
+  "path": "backend/reviews.db",
+  "repository": "ThomasJButler/ReviewBot-Protocol",
+  "note": "The name stored in the database still carries the hyphen, from before the GitHub repository was renamed to ThomasJButler/ReviewBotProtocol, so a query has to use the stored name while this file's 'repository' field names the repository as it is now."
+ },
+ "pull_requests": [
+  {
+   "number": 23,
+   "title": "Start the changelog and set the v1.2 roadmap straight",
+   "base_sha": "83aac044b73d5ec9cd9b0b50a0b938dbaf479b81",
+   "head_sha": "04bcd9e6584a493bef12ccd46c590f45605d36e5",
+   "files": 2,
+   "selected_at_recorded_settings": 0
+  },
+  {
+   "number": 24,
+   "title": "Post what finished when a review runs out of time",
+   "base_sha": "04bcd9e6584a493bef12ccd46c590f45605d36e5",
+   "head_sha": "f5cb21026bcf105500285ee32a8c96dd539d00d8",
+   "files": 19,
+   "selected_at_recorded_settings": 16,
+   "note": "reviews.files_reviewed is 15: backend/tests/test_runner.py was selected and then errored ('the model did not return a usable review (unreadable reply)'), which review_runner.py:259 writes into the same skipped list, so the recorded skip set has four entries where select_files yields three"
+  },
+  {
+   "number": 25,
+   "title": "Make the defanged delimiter token say it was forged",
+   "base_sha": "f5cb21026bcf105500285ee32a8c96dd539d00d8",
+   "head_sha": "3bd1f23c958ce5d77775a1338d7cfacd10f6699a",
+   "files": 8,
+   "selected_at_recorded_settings": 5
+  },
+  {
+   "number": 26,
+   "title": "Drop praise filed as a finding, and log every drop with its rule",
+   "base_sha": "3bd1f23c958ce5d77775a1338d7cfacd10f6699a",
+   "head_sha": "2595c59dbb120542a962eb9173113b483f269933",
+   "files": 13,
+   "selected_at_recorded_settings": 5
+  },
+  {
+   "number": 27,
+   "title": "Skip pull requests opened by bots unless asked",
+   "base_sha": "2595c59dbb120542a962eb9173113b483f269933",
+   "head_sha": "6f848bed4b7a1d33899367f0d006608d4217ac4d",
+   "files": 13,
+   "selected_at_recorded_settings": 10
+  },
+  {
+   "number": 28,
+   "title": "Make the delivery body hash a unique index",
+   "base_sha": "6f848bed4b7a1d33899367f0d006608d4217ac4d",
+   "head_sha": "943208908dac780444d514d3cc3f1d43c0458546",
+   "files": 7,
+   "selected_at_recorded_settings": 4
+  },
+  {
+   "number": 29,
+   "title": "Delete reviews older than a year, nightly, with an export first",
+   "base_sha": "943208908dac780444d514d3cc3f1d43c0458546",
+   "head_sha": "6345a55ba18962573cfd142e8bfc3f5d4bb083fa",
+   "files": 16,
+   "selected_at_recorded_settings": 12
+  },
+  {
+   "number": 30,
+   "title": "Document every setting where it is declared and generate the reference",
+   "base_sha": "6345a55ba18962573cfd142e8bfc3f5d4bb083fa",
+   "head_sha": "5bb0fd26699021b1d183f471ff950de23d49dd4a",
+   "files": 7,
+   "selected_at_recorded_settings": 3
+  },
+  {
+   "number": 31,
+   "title": "Give the section cards real headings and the root layout a fallback",
+   "base_sha": "5bb0fd26699021b1d183f471ff950de23d49dd4a",
+   "head_sha": "0007c5bf303b94f7e5fad7463fe6de761116c302",
+   "files": 9,
+   "selected_at_recorded_settings": 7
+  },
+  {
+   "number": 32,
+   "title": "Make the setup docs agree, and write down how a round is run",
+   "base_sha": "0007c5bf303b94f7e5fad7463fe6de761116c302",
+   "head_sha": "f5a557d45ec3d36d0b147d20a593ac8d4d786567",
+   "files": 9,
+   "selected_at_recorded_settings": 0
+  },
+  {
+   "number": 33,
+   "title": "Drop the tag list as a title, and rewrite the prompt's own sentence",
+   "base_sha": "f5a557d45ec3d36d0b147d20a593ac8d4d786567",
+   "head_sha": "1ffb059c2aeb455a3056f118ebece22ca01a8731",
+   "files": 6,
+   "selected_at_recorded_settings": 2
+  }
+ ]
+}

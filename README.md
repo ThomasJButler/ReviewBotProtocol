@@ -22,7 +22,7 @@ Built by Tom Butler as a demonstration of private, local AI: AI you own rather t
 
 ## Privacy, stated precisely
 
-Leaves the machine: HTTPS requests to api.github.com to read the PR, its files, and post the review. That is the complete list.
+Leaves the machine: HTTPS requests to api.github.com to mint the installation token, read the PR, read its files, and post the review. With `FILE_CONTEXT=true` there is a fifth kind, one per reviewed file the pull request did not add: reading that file at the head commit, so the model is shown the file and not only the hunk. That is the complete list; the switch is off by default, and turning it on also needs the App installation's Contents read permission.
 
 Never leaves the machine in local mode: the diff, the prompt, the model's output. The backend refuses to start if the environment contains a LangSmith tracing flag or an OpenAI, Anthropic, Google, Mistral or Sentry key (`STRICT_LOCAL`, on by default). No telemetry, no analytics, no fonts or scripts from a CDN in the dashboard. Next.js telemetry is disabled in the scripts.
 
@@ -34,11 +34,12 @@ Ollama: bound to loopback. The desktop app checks ollama.com hourly for updates 
 
 ### The proof
 
-Three checks, all in the repository:
+Four checks, all in the repository:
 
 - `backend/tests/test_runner.py` runs whole reviews through the real code with a fake GitHub API answered in-process and a fake model, under a socket-level guard that fails the test if anything in the process connects or resolves a name outside loopback. It runs in CI.
 - `REVIEWBOT_E2E=1 pytest -m e2e` reviews one diff with the real Ollama and model on your machine under the same guard (no GitHub involved). It is skipped by default and never runs in CI.
 - `scripts/prove-local.sh` builds a container with the backend, Ollama and a small model, then runs one review with `docker run --network none`. The entrypoint first proves the container has only a loopback interface and no route out. The result is printed, not recorded anywhere; it was last run by hand on 2026-09-03 and passed.
+- `backend/scripts/review_diff.py` reviews a branch with no GitHub App and no Docker: it takes a git range, a diff file or stdin, runs the same pipeline the App runs and prints the findings, and it pins `STRICT_LOCAL` on so a cloud model tag is refused however it is configured. Run on 2026-09-12 with the network up, `lsof` sampled the process 84 times over a two-file review and showed `127.0.0.1:11434` as its only peer; the repeat with the wifi off is in docs/TEST_PLAN.md section 6 and is still to do.
 
 ## What it is for
 

@@ -40,6 +40,12 @@ ADD_ONE = _cross([], [
 ])
 
 
+# Four tests below plant a cross-examiner addition on line 1 of DIFF (`import os`), a context line
+# the change never touched: they measure the cross-examiner, not the context-line rule, so they run
+# with the rule off.
+KEEP_CONTEXT = settings.model_copy(update={"CONTEXT_LINE_FINDINGS": "keep"})
+
+
 def _pair(cross_response, reviewer_response=FIND, cross_model="gemma-fake"):
     reviewer = RecordingChatModel(model="qwen-fake", response=reviewer_response)
     cross = RecordingChatModel(model=cross_model, response=cross_response)
@@ -89,9 +95,18 @@ async def test_the_cross_examiner_cannot_raise_severity():
     assert {f.line: f.severity.value for f in result.review.findings} == {2: "critical", 3: "high"}
 
 
-async def test_additions_must_locate_in_the_diff_and_are_stamped_with_the_cross_model():
+async def test_a_cross_examiner_addition_on_a_context_line_is_dropped_under_the_shipped_policy():
+    """The rule applies to the second model's additions through the same
+    postprocess call, so with the shipped default the addition on line 1 goes."""
     reviewer, cross = _pair(ADD_ONE)
     result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    assert sorted(f.line for f in result.review.findings) == [2, 3]
+    assert result.cross_added == 0
+
+
+async def test_additions_must_locate_in_the_diff_and_are_stamped_with_the_cross_model():
+    reviewer, cross = _pair(ADD_ONE)
+    result = await FileReviewer(reviewer, KEEP_CONTEXT, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
     lines = sorted(f.line for f in result.review.findings)
     assert lines == [1, 2, 3], "the located addition joins; the invented one is dropped"
     added = [f for f in result.review.findings if f.line == 1][0]
@@ -169,7 +184,7 @@ async def test_the_posted_review_names_both_models_and_marks_provenance():
         [{"index": 1, "verdict": "false_positive", "severity": "low", "reason": "fixture value [x](https://evil.example)", "confidence": 0.3}],
         [{"category": "quality", "severity": "low", "title": "import os is unused", "line": 1,
           "evidence": "import os", "recommendation": "Delete it.", "confidence": 0.7}]))
-    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    result = await FileReviewer(reviewer, KEEP_CONTEXT, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
     rendered = render_review([result], model="qwen-fake", cross_model="gemma-fake", cross_added=1, cross_refuted=0)
     assert "reviewed by `qwen-fake`, cross-examined by `gemma-fake`" in rendered.body
     assert "Cross-examined by `gemma-fake`: 1 added, 0 refuted." in rendered.body
@@ -249,7 +264,7 @@ async def test_a_finding_titled_with_the_tag_alone_is_slot_filling_and_is_droppe
                        {"category": "quality", "severity": "low", "title": "yagni: drop the unused import", "line": 1,
                         "evidence": "import os", "recommendation": "Delete the import.", "confidence": 0.8}])
     reviewer, cross = _pair(bare)
-    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    result = await FileReviewer(reviewer, KEEP_CONTEXT, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
     on_one = [f for f in result.review.findings if f.line == 1]
     assert [f.title for f in on_one] == ["yagni: drop the unused import"] and result.cross_added == 1
     tagged = FIND.replace('"title": "eval on user input"', '"title": "Shrink."')
@@ -280,6 +295,6 @@ async def test_a_refutation_with_an_addition_elsewhere_is_still_a_refutation():
         [{"category": "quality", "severity": "low", "title": "import os is unused", "line": 1,
           "evidence": "import os", "recommendation": "Delete it.", "confidence": 0.7}])
     reviewer, cross = _pair(elsewhere)
-    result = await FileReviewer(reviewer, settings, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
+    result = await FileReviewer(reviewer, KEEP_CONTEXT, cross_llm=cross).review_file("a.py", "python", "modified", DIFF)
     assert sorted(f.line for f in result.review.findings) == [1, 2]
     assert result.cross_refuted == 1 and result.cross_added == 1
