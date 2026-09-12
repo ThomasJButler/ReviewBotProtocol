@@ -5,6 +5,7 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 ## Unreleased
 
 - `backend/scripts/review_diff.py` reviews a diff with the network off: a git range (`main...HEAD` by default), a diff file or stdin, through the same selection, redaction, reviewer, cross-examiner and post-filters the App runs, printed as text, as the markdown the App would post, or as JSON. It reads model settings from `backend/.env`, needs no GitHub credential, writes nothing to the database, and pins `STRICT_LOCAL` on so a cloud tag is refused however it is configured. The multi-file `git diff` is split by the new `services/git_diff.py`, since `services/diff.py` only ever parsed GitHub's per-file patch. `scripts/prompt_eval.py` no longer needs Ollama up for a run that replays every model it names.
+- Precision on a fixed set of eleven real pull requests is a re-runnable number, not a one-off reading: the set and a two-judge ledger keyed by a finding fingerprint live beside the corpus in `backend/tests/precision/`, and `backend/scripts/precision.py` runs, sheets, merges, scores and replays it, judged per finding rather than as an aggregate, with `replay` re-scoring a recorded round through a changed pipeline with no model loaded.
 
 ## 1.2.0 (2026-09-08)
 
