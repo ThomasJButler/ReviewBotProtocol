@@ -181,6 +181,16 @@ while true; do lsof -i -P -a -p $(pgrep -f 'uvicorn main:app') 2>/dev/null | gre
 
 The only peers that ever appear are `127.0.0.1:11434` (Ollama) and `api.github.com:443`. The tunnel client's own connections belong to the ngrok process, not to the backend.
 
+The webhook path can never be run with the network off, because GitHub has to reach the machine. The offline command can. Turn the wifi off, then from `backend/` run `.venv/bin/python scripts/review_diff.py --range 2595c59~1..2595c59 --no-cross` (two eligible files; the six markdown files are listed under Not reviewed) with the same loop pointed at it in another terminal:
+
+```
+while true; do lsof -i -P -a -p $(pgrep -f 'scripts/review_diff.py') 2>/dev/null | grep -v LISTEN; sleep 1; done
+```
+
+Expected: the review prints, and the only peer that ever appears is `127.0.0.1:11434`. Run it again without `--no-cross` to time the two-phase path with the cross-examiner, which loads each model once.
+
+Run of 2026-09-12, reviewer alone, network up: the two eligible files took 40 and 49 seconds with `qwen3.5:9b` already resident and produced 9 findings (3 dropped by the post-filters), all of them the defence-read-as-attack shape that `docs/REVIEW_QUALITY.md` describes, on the praise rule's own test fixtures. `lsof` sampled the process 84 times over the run and the only peer it ever showed was `localhost:11434`. The wifi-off repeat and the cross-examined timing are still to do.
+
 ## 7. Afterwards
 
 Keep the App: it is the real one. Delete the scratch pull requests or the repository. Never install the App on all repositories. If you rotate the webhook secret or the key, update `backend/.env` and restart the backend.

@@ -327,12 +327,18 @@ def drop_rule(f: Finding, min_confidence: float) -> Optional[str]:
 
 
 def postprocess(review: FileReview, patch: Optional[str], min_confidence: float, *,
-                filename: str = "") -> Tuple[FileReview, int]:
+                filename: str = "", counts: Optional[Dict[str, int]] = None) -> Tuple[FileReview, int]:
+    """The kept review and how many findings went. A caller that needs the drops
+    broken down by rule, as the precision harness does, passes a dict as counts
+    and gets it filled in by rule name: the alternative was a second copy of
+    this loop somewhere else, which drifted from it."""
     parsed = parse_patch(patch)
     kept: List[Finding] = []
     seen = set()
 
     def dropped(f: Finding, rule: str) -> None:
+        if counts is not None:
+            counts[rule] = counts.get(rule, 0) + 1
         # the title was redacted at parse time; the log is how a dropped finding is seen at all
         logger.info("finding dropped", rule=rule, filename=_meta(filename), line=f.line, title=f.title[:120])
 
