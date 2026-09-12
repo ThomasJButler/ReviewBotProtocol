@@ -102,9 +102,12 @@ class Settings(BaseSettings):
     """Review pull requests opened by a bot (dependabot, renovate). Off: they are recorded as skipped_bot; each
     would cost the machine about an hour."""
     REVIEW_RETENTION_DAYS: int = 365
-    """Reviews, their findings and webhook deliveries older than this many days are deleted at startup and then
-    nightly, never a row still running. 0 keeps everything. A deleted review's dashboard link becomes a 404, so
-    scripts/export_reviews.py writes what is worth keeping to JSON first."""
+    """Reviews and their findings older than this many days are deleted at startup and then nightly, never a row still
+    running; 0 keeps everything. A webhook delivery that old is not deleted but stripped to a tombstone of its delivery
+    id, the SHA-256 of its signed body, its event and the time it arrived, with status expired, because GitHub's
+    signature never expires and that hash is the only thing that stops a captured delivery being replayed; the
+    tombstones, a couple of hundred bytes each, are kept for as long as the database exists. A deleted review's
+    dashboard link becomes a 404, so scripts/export_reviews.py writes what is worth keeping to JSON first."""
     MAX_FILES_PER_REVIEW: int = 25
     """The most files one review reads, riskiest first by path and size; the rest are listed under Not reviewed.
     Each file is one model call, two with the cross-examiner."""
