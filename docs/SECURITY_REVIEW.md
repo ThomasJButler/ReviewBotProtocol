@@ -1,8 +1,8 @@
 # ReviewBot Protocol security review
 
-Note added 2026-09-07. This document is the record of the security review of the original OpenAI implementation. It was written on 2026-09-03 at commit 8ee88ea, before the backend was rewritten around a local Ollama model later the same day (27fb130), so its body quotes code that no longer exists: `OPENAI_API_KEY` as a required setting and both `ChatOpenAI` construction sites are the subject of SR-10, and the same implementation is described throughout the findings. What still holds is the threat model, the finding list with its Status lines, and the sections written against the rewritten code: "Second round", "Third round", "Fourth round", "Claude Security scan (2026-09-04)" and "Re-verified on 2026-09-07", which is the current statement of what is fixed and which two residuals stand. For the design as it is now, read docs/LOCAL_MIGRATION.md; for the setup, the README and backend/README.md.
+Note added 2026-09-07. This document is the record of the security review of the original OpenAI implementation. It was written on 2026-09-03 at commit 2c4682f, before the backend was rewritten around a local Ollama model later the same day (da296af), so its body quotes code that no longer exists: `OPENAI_API_KEY` as a required setting and both `ChatOpenAI` construction sites are the subject of SR-10, and the same implementation is described throughout the findings. What still holds is the threat model, the finding list with its Status lines, and the sections written against the rewritten code: "Second round", "Third round", "Fourth round", "Claude Security scan (2026-09-04)" and "Re-verified on 2026-09-07", which is the current statement of what is fixed and which two residuals stand. For the design as it is now, read docs/LOCAL_MIGRATION.md; for the setup, the README and backend/README.md.
 
-Date: 2026-09-03. Branch: v1.1-Local-AI at commit 8ee88ea. Reviewer: Claude (Fable 5.1 orchestrating), commissioned by Tom Butler.
+Date: 2026-09-03. Branch: v1.1-Local-AI at commit 2c4682f. Reviewer: Claude (Fable 5.1 orchestrating), commissioned by Tom Butler.
 
 This document is the record of the Phase 0 investigation. It is severity-ranked, it names what an attacker actually achieves, and it says how hard each attack is. It also lists what was checked and found fine, so the reader knows what was looked at. Findings are numbered SR-01 onwards. The Status column is updated as fixes land; until then every item is Open.
 
@@ -134,7 +134,7 @@ No inline comment, PR summary or final status check has ever been produced by th
 
 Evidence.
 
-backend/services/review_workflow.py:210, :469, :946, :957, :540-563, :601, :628-642, :844-867; backend/services/ai_reviewer.py:199, :953, :955-957; backend/services/queue_processor.py:149-151, :306-330, :318-327, :377-378, :431, :434, :465-468; backend/handlers/review.py:762, :820-821, :862-876, :978, :1014; backend/handlers/webhook.py:387-403; backend/main.py:40-54; app/api/review/route.ts:26, :47-51, :185-224; git log -S'"files_reviewed": state["files_reviewed"]' to cd3749e.
+backend/services/review_workflow.py:210, :469, :946, :957, :540-563, :601, :628-642, :844-867; backend/services/ai_reviewer.py:199, :953, :955-957; backend/services/queue_processor.py:149-151, :306-330, :318-327, :377-378, :431, :434, :465-468; backend/handlers/review.py:762, :820-821, :862-876, :978, :1014; backend/handlers/webhook.py:387-403; backend/main.py:40-54; app/api/review/route.ts:26, :47-51, :185-224; git log -S'"files_reviewed": state["files_reviewed"]' to 9134edf.
 
 Fix.
 
@@ -992,7 +992,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 - Where: .gitignore:118
 - Difficulty for an attacker: trivial
 - Category: tooling-trap
-- Status: Fixed 2026-09-03 (commit 92460dc): .gitignore ignores only root-level scratch files.
+- Status: Fixed 2026-09-03 (commit 3799858): .gitignore ignores only root-level scratch files.
 
 What it is.
 
@@ -1128,7 +1128,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-backend/README.md:47-51 presents the primary install route as '2. Run the automated setup script: `bash ./setup.sh `', with the manual venv steps offered only as an alternative ('Or manually create virtual environment', :53). backend/setup.sh does not exist anywhere in the working tree, and a repo-wide find for any setup.sh returns nothing. It was deleted by commit 0579209 in the same 'portfolio presentation' cleanup that removed the Dockerfiles and the test suite. A reader following the README in order hits 'no such file or directory' on the very first command they are told to run.
+backend/README.md:47-51 presents the primary install route as '2. Run the automated setup script: `bash ./setup.sh `', with the manual venv steps offered only as an alternative ('Or manually create virtual environment', :53). backend/setup.sh does not exist anywhere in the working tree, and a repo-wide find for any setup.sh returns nothing. It was deleted by commit 611fea7 in the same 'portfolio presentation' cleanup that removed the Dockerfiles and the test suite. A reader following the README in order hits 'no such file or directory' on the very first command they are told to run.
 
 What an attacker achieves.
 
@@ -1150,7 +1150,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-The repository has no .github directory at all, so there is no workflow that installs the Python dependencies, and no .github/dependabot.yml, meaning the bump in 223268d came from GitHub's default security-update behaviour rather than a configured, grouped update the owner reviewed. There is no lockfile of any kind (no requirements.lock, no poetry.lock, no uv.lock, no pyproject.toml) so the loose transitive deps float: uvicorn[standard]==0.24.0 at requirements.txt:3 pulls uvloop, httptools, watchfiles and websockets with no upper bound, and aiopg==1.4.0 at :35 pulls psycopg2-binary>=2.9.5 with [...]
+The repository has no .github directory at all, so there is no workflow that installs the Python dependencies, and no .github/dependabot.yml, meaning the bump in b8cab4c came from GitHub's default security-update behaviour rather than a configured, grouped update the owner reviewed. There is no lockfile of any kind (no requirements.lock, no poetry.lock, no uv.lock, no pyproject.toml) so the loose transitive deps float: uvicorn[standard]==0.24.0 at requirements.txt:3 pulls uvloop, httptools, watchfiles and websockets with no upper bound, and aiopg==1.4.0 at :35 pulls psycopg2-binary>=2.9.5 with [...]
 
 What an attacker achieves.
 
@@ -1616,7 +1616,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-Import grep across the 33 backend .py files shows celery (:35), kombu (:37), aiopg (:32, pulls psycopg2-binary), alembic (:31), aiofiles (:10), requests (:9), python-dateutil (:60), click (:61), python-multipart (:6), python-dotenv (:49), langchain-community (:24, largest transitive tree) and explicit transitive pins openai (:26), tiktoken (:27), langsmith (:30) are never imported; pytest/pytest-asyncio/pytest-cov (:53-55) and black/isort/mypy (:58-60) share the runtime file while no tests exist (backend/tests deleted in 0579209; .gitignore:118-120).
+Import grep across the 33 backend .py files shows celery (:35), kombu (:37), aiopg (:32, pulls psycopg2-binary), alembic (:31), aiofiles (:10), requests (:9), python-dateutil (:60), click (:61), python-multipart (:6), python-dotenv (:49), langchain-community (:24, largest transitive tree) and explicit transitive pins openai (:26), tiktoken (:27), langsmith (:30) are never imported; pytest/pytest-asyncio/pytest-cov (:53-55) and black/isort/mypy (:58-60) share the runtime file while no tests exist (backend/tests deleted in 611fea7; .gitignore:118-120).
 
 What an attacker achieves.
 
@@ -1638,7 +1638,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-Eleven docker:* scripts (package.json:22-32) invoke docker-compose but no compose or Dockerfile exists (deleted in cf58336 and 0579209); dev:backend (:7) sources a missing backend/.venv; test scripts (:14-16) run jest, which is not installed and has no tests; .github/workflows/ci.yml (deleted in 80903be) ran npm audit and pip-audit and deploy-azure.yml used secrets.AZURE_CREDENTIALS, so nothing audits dependencies now. dev:tunnel (:8) exposes every Next route via ngrok. prepare: husky (:20) and .husky/pre-commit:1 run local lint-staged only.
+Eleven docker:* scripts (package.json:22-32) invoke docker-compose but no compose or Dockerfile exists (deleted in dc783eb and 611fea7); dev:backend (:7) sources a missing backend/.venv; test scripts (:14-16) run jest, which is not installed and has no tests; .github/workflows/ci.yml (deleted in e3e2602) ran npm audit and pip-audit and deploy-azure.yml used secrets.AZURE_CREDENTIALS, so nothing audits dependencies now. dev:tunnel (:8) exposes every Next route via ngrok. prepare: husky (:20) and .husky/pre-commit:1 run local lint-staged only.
 
 What an attacker achieves.
 
@@ -1660,7 +1660,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-README.md:52 says Next.js 15 while package.json:45 and package-lock.json:8931-8932 pin 14.2.33; README.md:58 and backend/README.md:33 say Python 3.11+ but pydantic 2.9.2 (pydantic-core 2.23.4) and greenlet 3.1.1 ship wheels only to cp313, so on this host's 3.14.6 pip install needs a Rust toolchain or fails; effective range is 3.11 to 3.13. Historic hints disagree (deleted CI 3.11, deleted setup.sh 3.8, deleted main-simple.py 3.13, commit 6d79b5f). eslint-config-next 14.2.14 (package.json:76) lags next.
+README.md:52 says Next.js 15 while package.json:45 and package-lock.json:8931-8932 pin 14.2.33; README.md:58 and backend/README.md:33 say Python 3.11+ but pydantic 2.9.2 (pydantic-core 2.23.4) and greenlet 3.1.1 ship wheels only to cp313, so on this host's 3.14.6 pip install needs a Rust toolchain or fails; effective range is 3.11 to 3.13. Historic hints disagree (deleted CI 3.11, deleted setup.sh 3.8, deleted main-simple.py 3.13, commit 09b413d). eslint-config-next 14.2.14 (package.json:76) lags next.
 
 What an attacker achieves.
 
@@ -1902,7 +1902,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-Commit d18240a (2025-09-22) commented out the verify_github_signature check and the return in verify_webhook_signature; cd3749e (2025-11-02) restored both; both are on main and this branch. In the disabled state the function returned None so the unpack at webhook.py:91 raised TypeError into the 200-with-error path, so the window was probably never exercised, but the intent was to bypass authentication on main. No tests exist (.gitignore ignores test_*.py outside backend/tests and backend/tests is empty). Current code has verification enabled.
+Commit e12a554 (2025-09-22) commented out the verify_github_signature check and the return in verify_webhook_signature; 9134edf (2025-11-02) restored both; both are on main and this branch. In the disabled state the function returned None so the unpack at webhook.py:91 raised TypeError into the 200-with-error path, so the window was probably never exercised, but the intent was to bypass authentication on main. No tests exist (.gitignore ignores test_*.py outside backend/tests and backend/tests is empty). Current code has verification enabled.
 
 What an attacker achieves.
 
@@ -2078,7 +2078,7 @@ Verification: 1 adversarial verifier, 0 refuted.
 
 What it is.
 
-Files removed in cf58336/0579209 remain readable: WHERE_I_LEFT_OFF.md ('PR Review Not Working MAIN ISSUE', 'GitHub App Deleted BLOCKER', 'Webhook processing (not set up)'), claudetodo.txt ('fully functional' with a live ngrok URL), backend/api-test-report-20251107-220316.md (17/21 passing, /review/manual in 0.049 s), FIXES_SUMMARY_NOV7.md, backend/seed_test_user.py ('any password works for testuser in DEBUG mode'), CLAUDE.md describing scripts and a lib/ai tree that never existed, and the only test suite (backend/tests/*, test_langgraph.py, test_webhook_signature.py, pytest.ini, run_tests.py); [...]
+Files removed in dc783eb/611fea7 remain readable: WHERE_I_LEFT_OFF.md ('PR Review Not Working MAIN ISSUE', 'GitHub App Deleted BLOCKER', 'Webhook processing (not set up)'), claudetodo.txt ('fully functional' with a live ngrok URL), backend/api-test-report-20251107-220316.md (17/21 passing, /review/manual in 0.049 s), FIXES_SUMMARY_NOV7.md, backend/seed_test_user.py ('any password works for testuser in DEBUG mode'), CLAUDE.md describing scripts and a lib/ai tree that never existed, and the only test suite (backend/tests/*, test_langgraph.py, test_webhook_signature.py, pytest.ini, run_tests.py); [...]
 
 What an attacker achieves.
 
@@ -2086,7 +2086,7 @@ Reconnaissance only: the mock-auth username, the shape of unauthenticated review
 
 Fix.
 
-Restore or rewrite the backend test suite from 0579209^:backend/tests/, remove the test_*.py ignore rule, and make README claims match reality.
+Restore or rewrite the backend test suite from 611fea7^:backend/tests/, remove the test_*.py ignore rule, and make README claims match reality.
 
 Verification: 1 adversarial verifier, 0 refuted.
 
@@ -2369,7 +2369,7 @@ Refuted in this round:
 
 ## Claude Security scan (2026-09-04)
 
-Tom ran the Claude Security plugin himself (`/claude-security`, whole repository, high effort) on the tree at commit 37d5482 with the round-four work uncommitted. Its pipeline: an inventory into seven components, a threat model per component, two researchers per component and category cell (50 in all), two breadth sweeps, then a three-lens adversarial panel on every candidate. Twenty-five candidates, thirteen after de-duplication, six survived, seven were rejected unanimously; the report is stamped `verified` and lives in `CLAUDE-SECURITY-20260904-150824/` (kept out of commits by its own `.gitignore`). All six were fixed the same afternoon:
+Tom ran the Claude Security plugin himself (`/claude-security`, whole repository, high effort) on the tree at commit d912b6f with the round-four work uncommitted. Its pipeline: an inventory into seven components, a threat model per component, two researchers per component and category cell (50 in all), two breadth sweeps, then a three-lens adversarial panel on every candidate. Twenty-five candidates, thirteen after de-duplication, six survived, seven were rejected unanimously; the report is stamped `verified` and lives in `CLAUDE-SECURITY-20260904-150824/` (kept out of commits by its own `.gitignore`). All six were fixed the same afternoon:
 
 - CS-01 [medium] scripts/hosted/gpu-up.sh:35: the SSH tunnel to the GPU pod accepted any host key on first contact, and every pod start is a first contact. Fixed: the pod's host key is pinned once under a fixed alias in a dedicated known-hosts file; the script refuses to start without the pin and refuses a pod whose key does not match; the plan documents how to pin and verify the fingerprint.
 - CS-02 [medium] backend/services/ai_reviewer.py:42: the marker-defanging regex was quadratic on a line of 32,000 `<` characters and ran on the event loop, so a hostile pull request could stall the webhook and the dashboard. Fixed: bounded, newline-free repeats on both sides of the marker name (linear), and redaction and defanging now run in a worker thread; timing tests pin both.
@@ -2379,7 +2379,7 @@ Tom ran the Claude Security plugin himself (`/claude-security`, whole repository
 
 ### Re-verified on 2026-09-07
 
-Six verifiers (one per finding, each reading the current branch rather than the scan's notes) re-checked the scan's findings against the code as it stood at 2df1c5f, after three days of further change. F1, F2, F16 and F17 fixed, with pins in `backend/tests/test_scan_round.py`; F14 and F15 partly: the replay key is the signed body's hash, but a captured body whose delivery ended failed or interrupted is accepted again under a fresh id (that is also what lets an operator redeliver after a crash), and the queue let such an older head cancel an in-flight review of a newer one. Closed the same day: the payload's `pull_request.updated_at` travels with the job and an older delivery is answered "stale" without touching the newer job (`services/review_queue.py`, pinned in `tests/test_queue.py`); the widened link pattern's whitespace runs are bounded so a bracket followed by a flood of spaces is linear (F17's one residual); the hosted-mode doc's example tunnel command carries the pinned host-key options (F1's one residual, the script already did); and a test reads `gpu-up.sh` for the pin, since nothing else exercises the script. Two residuals stay as written down: the regex work under `asyncio.to_thread` does not leave the event loop under the GIL, which the linear bounds make harmless; and the replay check's read-then-insert has no unique index behind it, which the queue's own duplicate check makes harmless (one review runs, two delivery rows may be recorded).
+Six verifiers (one per finding, each reading the current branch rather than the scan's notes) re-checked the scan's findings against the code as it stood at 2852be5, after three days of further change. F1, F2, F16 and F17 fixed, with pins in `backend/tests/test_scan_round.py`; F14 and F15 partly: the replay key is the signed body's hash, but a captured body whose delivery ended failed or interrupted is accepted again under a fresh id (that is also what lets an operator redeliver after a crash), and the queue let such an older head cancel an in-flight review of a newer one. Closed the same day: the payload's `pull_request.updated_at` travels with the job and an older delivery is answered "stale" without touching the newer job (`services/review_queue.py`, pinned in `tests/test_queue.py`); the widened link pattern's whitespace runs are bounded so a bracket followed by a flood of spaces is linear (F17's one residual); the hosted-mode doc's example tunnel command carries the pinned host-key options (F1's one residual, the script already did); and a test reads `gpu-up.sh` for the pin, since nothing else exercises the script. Two residuals stay as written down: the regex work under `asyncio.to_thread` does not leave the event loop under the GIL, which the linear bounds make harmless; and the replay check's read-then-insert has no unique index behind it, which the queue's own duplicate check makes harmless (one review runs, two delivery rows may be recorded).
 
 ## Refuted findings
 
@@ -2495,7 +2495,7 @@ Grouped by the investigator lens that checked them. Each entry cites the evidenc
 - Backend packages with zero OSV advisories at the pinned version. OSV querybatch to 0 vulns for uvicorn 0.24.0, pydantic 2.9.2, pydantic-settings 2.6.1, httpx 0.25.2, aiofiles 23.2.1, PyGithub 1.59.1, langchain-community 0.3.27, openai 1.58.1, tiktoken 0.8.0, SQLAlchemy 2.0.36, alembic 1.14.0, aiopg 1.4.0, aiosqlite 0.20.0, [...]
 - Frontend runtime bundle reach of npm advisories. Import grep across app/, components/, lib/, hooks/, contexts/ shows only react, next/_, lucide-react, @radix-ui/_, recharts, zod, date-fns, react-hot-toast, @monaco-editor/react, clsx, tailwind-merge, class-variance-authority; of the 45 audit entries only `nex [...]
 - Lint, format and TypeScript configuration. .eslintrc.json:2 extends next/core-web-vitals and prettier with two rules disabled (:4-5); .prettierrc is style-only; tsconfig.json:6 strict true, :25 includes only project sources; lint-staged (package.json:87-95) runs eslint --fix and prettier --write on sta [...]
-- Azure deployment artefacts in history. `git show 053bed61f5^:azure-parameters.json` contains only YOUR_* placeholders; deploy-azure.yml (80903be^) reads `secrets.AZURE_CREDENTIALS` and masks the ACR password with ::add-mask::; deploy-azure-free.sh reads secrets from the environment and never echoes [...]
+- Azure deployment artefacts in history. `git show e2c941b7e5^:azure-parameters.json` contains only YOUR_* placeholders; deploy-azure.yml (e3e2602^) reads `secrets.AZURE_CREDENTIALS` and masks the ACR password with ::add-mask::; deploy-azure-free.sh reads secrets from the environment and never echoes [...]
 
 ### gaps-critic-prep
 
