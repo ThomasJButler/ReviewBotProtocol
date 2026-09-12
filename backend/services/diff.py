@@ -184,3 +184,34 @@ def _locate_single_kind(parsed: ParsedPatch, line: int, evidence: str) -> Tuple[
     pool = added or candidates
     at_line = min(pool, key=lambda no: (abs(no - line), no))
     return at_line, _kind_at(parsed, at_line)
+
+
+def hunk_spans(patch: Optional[str]) -> List[Tuple[int, int]]:
+    """The first and last new-file line of every hunk, from the header numbers.
+    ParsedPatch counts hunks but keeps no ranges, and a window of the file
+    around a change needs the ranges."""
+    out: List[Tuple[int, int]] = []
+    for raw in (patch or "").replace("\r\n", "\n").split("\n"):
+        m = _HUNK.match(raw)
+        if not m:
+            continue
+        start = int(m.group(3))
+        count = int(m.group(4)) if m.group(4) is not None else 1
+        out.append((start, start + max(count, 1) - 1))
+    return out
+
+
+def quotes_text(text: str, evidence: str) -> bool:
+    """Whether the quoted evidence appears in a block of text, which is how a
+    finding that quotes the file context we sent is told from one that invented
+    a line. The same normalisation and the same substance floor as the locator,
+    so the two answers cannot disagree about what counts as a quote."""
+    if not text or not evidence:
+        return False
+    hay = _norm(text)
+    parts = [p for p in evidence.splitlines() if p.strip()] or [evidence]
+    for part in parts:
+        for form in _evidence_forms(part):
+            if _substantial(form) and form in hay:
+                return True
+    return False

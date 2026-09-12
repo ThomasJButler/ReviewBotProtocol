@@ -10,7 +10,7 @@ minutes before it expires and is never logged."""
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import jwt
@@ -27,10 +27,17 @@ JWT_LIFETIME_SECONDS = 300  # GitHub allows up to ten minutes; five is plenty fo
 class InstallationTokenProvider:
     def __init__(self, app_id: str, private_key_pem: str, installation_id: int,
                  base_url: str = "https://api.github.com", http: Optional[httpx.AsyncClient] = None,
-                 repository: Optional[str] = None, permissions: Optional[Dict[str, str]] = None):
+                 repository: Optional[str] = None, permissions: Optional[Dict[str, str]] = None,
+                 droppable: Tuple[str, ...] = ()):
         """`repository` is the bare repository name (not owner/name); when given,
         the minted token is confined to it and to `permissions` (default: the two
-        a review needs)."""
+        a review needs).
+
+        `droppable` names permission keys the caller can do without: GitHub
+        answers a mint for a permission the installation has not granted with a
+        422, and without this every review would fail on an installation that
+        has not accepted Contents read. A droppable key is given up once, with a
+        warning, and the mint is retried."""
         self.app_id = str(app_id)
         self.private_key_pem = private_key_pem
         self.installation_id = int(installation_id)
@@ -38,6 +45,8 @@ class InstallationTokenProvider:
         self._http = http
         self.repository = repository.split("/")[-1] if repository else None
         self.permissions = dict(permissions) if permissions is not None else (dict(REVIEW_PERMISSIONS) if repository else None)
+        self.droppable = tuple(droppable)
+        self.dropped: List[str] = []   # permissions given up on a 422, for the caller to log and skip
         self._token: Optional[str] = None
         self._expires_at: Optional[datetime] = None
         self._lock = asyncio.Lock()
@@ -64,17 +73,31 @@ class InstallationTokenProvider:
                 "X-GitHub-Api-Version": API_VERSION,
                 "User-Agent": "ReviewBot-Protocol",
             }
-            body: Dict[str, Any] = {}
-            if self.repository:
-                body["repositories"] = [self.repository]
-            if self.permissions:
-                body["permissions"] = self.permissions
-            client = self._http or httpx.AsyncClient(timeout=30.0)
-            try:
-                resp = await client.post(url, headers=headers, json=body) if body else await client.post(url, headers=headers)
-            finally:
-                if client is not self._http:
-                    await client.aclose()
+            # Two attempts at most, and the second only after a droppable permission was given
+            # up: the retry stays inside this lock, because the lock is not reentrant.
+            for attempt in (0, 1):
+                body: Dict[str, Any] = {}
+                if self.repository:
+                    body["repositories"] = [self.repository]
+                if self.permissions:
+                    body["permissions"] = self.permissions
+                client = self._http or httpx.AsyncClient(timeout=30.0)
+                try:
+                    resp = await client.post(url, headers=headers, json=body) if body else await client.post(url, headers=headers)
+                finally:
+                    if client is not self._http:
+                        await client.aclose()
+                giving_up = [k for k in self.droppable if k in (self.permissions or {})]
+                if resp.status_code == 422 and body and attempt == 0 and giving_up:
+                    # narrowed before the retry, because the width check below compares what was
+                    # granted against what was actually asked for
+                    logger.warning("the installation refused a permission; minting without it",
+                                   installation_id=self.installation_id, dropped=",".join(giving_up))
+                    for key in giving_up:
+                        self.permissions.pop(key, None)  # type: ignore[union-attr]
+                        self.dropped.append(key)
+                    continue
+                break
             if resp.status_code == 422 and body:
                 raise RuntimeError("GitHub refused to scope the installation token: the App installation lacks a permission "
                                    f"a review needs ({', '.join(f'{k}:{v}' for k, v in (self.permissions or {}).items())}) "

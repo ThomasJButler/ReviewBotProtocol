@@ -21,9 +21,11 @@ from pydantic import ValidationError
 
 from config.logging import get_logger
 from config.settings import CONTEXT_LINE_DEFAULT, CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT, Settings
-from services.diff import locate_evidence_kind, parse_patch
-from services.prompts import MARK_BEGIN, MARK_END, cross_prompt, delimiters, review_prompt, verify_prompt
-from services.redaction import redact_text
+from services import file_context
+from services.diff import locate_evidence_kind, parse_patch, quotes_text
+from services.prompts import (MARK_BEGIN, MARK_END, MARK_FILE, cross_prompt, delimiters, file_marker, review_prompt,
+                              verify_prompt)
+from services.redaction import redact, redact_text
 from services.schemas import (SEVERITY_ORDER, AnnotatedFileReview, CrossExamination, FileReview, Finding, ReviewedFinding,
                               Severity, Verdict, cross_schema, output_schema, verdict_schema)
 
@@ -34,7 +36,7 @@ _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
 # marker never swallows the line break before it (line numbers stay honest). Brackets
 # beyond the bound are left behind on their own, which cannot rebuild a delimiter
 # because the marker name itself is gone.
-_MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END})[A-Za-z0-9_]{{0,64}}[\t >]{{0,16}}")
+_MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END}|{MARK_FILE})[A-Za-z0-9_]{{0,64}}[\t >]{{0,16}}")
 
 
 TAG_WORDS = {"yagni", "delete", "stdlib", "native", "shrink"}
@@ -188,6 +190,8 @@ class FileReviewResult:
     cross_added: int = 0    # findings the cross-examiner added that survived postprocess
     redactions: Dict[str, int] = field(default_factory=dict)
     patch: str = ""         # the redacted patch, kept so a later cross-examination phase can run on it
+    context_mode: str = ""  # whole, window or none when file context was sent; "" when the switch is off
+    file_redactions: int = 0  # credentials stripped from the file text, which the patch counts never saw
 
 
 def _content_text(content: Any) -> str:
@@ -356,13 +360,18 @@ def _one_step_down(severity: Severity) -> Severity:
 def postprocess(review: FileReview, patch: Optional[str], min_confidence: float, *,
                 filename: str = "", counts: Optional[Dict[str, int]] = None,
                 context_policy: str = CONTEXT_LINE_DEFAULT,
-                context_min_confidence: float = CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT) -> Tuple[FileReview, int]:
+                context_min_confidence: float = CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT,
+                context_text: str = "") -> Tuple[FileReview, int]:
     """The kept review and how many findings went. A caller that needs the drops
     broken down by rule, as the precision harness does, passes a dict as counts
     and gets it filled in by rule name: the alternative was a second copy of
     this loop somewhere else, which drifted from it. The context-line keywords
     default from the same constants the Settings fields default from, so a
-    caller that passes no policy still gets the shipped one."""
+    caller that passes no policy still gets the shipped one. context_text is the
+    file listing that was sent beside the diff, when one was: a finding that
+    quotes only that listing is still dropped, because an inline comment can
+    only attach to a line of the diff, but it is counted apart from a quote the
+    model invented."""
     parsed = parse_patch(patch)
     kept: List[Finding] = []
     seen = set()
@@ -383,7 +392,12 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float,
             f = f.model_copy(update={"title": _title_from(f.recommendation)})
         located, part, kind = locate_evidence_kind(parsed, f.line, f.evidence)
         if located is None:
-            dropped(f, "unlocated")
+            # a quote of the file listing we sent is told from a line the model invented; both are
+            # dropped, because an inline comment can only attach to a line of the diff
+            if context_text and quotes_text(context_text, f.evidence):
+                dropped(f, "outside_diff")
+            else:
+                dropped(f, "unlocated")
             continue
         action = context_line_action(kind, f, context_policy, context_min_confidence)
         if action == "drop":
@@ -599,18 +613,43 @@ class FileReviewer:
             summary = (summary or "")[: 500 - len(note)].rstrip() + note
         return AnnotatedFileReview(findings=kept, summary=summary), refuted, calls, tokens_in, tokens_out
 
-    async def review_file(self, filename: str, language: str, status: str, patch: str) -> FileReviewResult:
+    @staticmethod
+    def _file_block(file_text: str, patch: str, settings: Settings, marker: str) -> Tuple[file_context.Rendered, int]:
+        """Redact, defang and render the file text, in that order and in one
+        worker thread. Rendering after defanging is what makes the label
+        trustworthy: a forged label inside the file is already a
+        [forged-data-marker] by the time the real ones are written."""
+        redacted, counts = redact(file_text)
+        return file_context.render(_defang(redacted), patch, settings, marker), sum(counts.values())
+
+    async def review_file(self, filename: str, language: str, status: str, patch: str,
+                          file_text: str = "") -> FileReviewResult:
         started = time.perf_counter()
         # Redaction and defanging scan attacker-authored text with regexes; they run in a
         # worker thread so a pathological patch cannot stall the webhook and the dashboard.
         patch = await asyncio.to_thread(redact_text, patch or "")  # idempotent; the runner already redacted
         code_diff = await asyncio.to_thread(_defang, patch)
-        data_begin, data_end = delimiters(secrets.token_hex(8))
+        nonce = secrets.token_hex(8)
+        data_begin, data_end = delimiters(nonce)
+        marker = file_marker(nonce)
+        block, context_mode, file_redactions, labels = "", "", 0, 0
+        if self.settings.FILE_CONTEXT:
+            # "unavailable" is the switch on and no text: the fetch failed, or the caller had
+            # nothing to give. It is counted apart from "none", which is a file we read and
+            # then left out because the patch had filled the budget.
+            context_mode = "unavailable"
+            if file_text:
+                # the same worker thread the patch gets, for the same reason: whole files of
+                # attacker-authored text are more regex work, not less
+                rendered_context, file_redactions = await asyncio.to_thread(
+                    self._file_block, file_text, patch, self.settings, marker)
+                block, context_mode, labels = rendered_context.block, rendered_context.mode, rendered_context.markers
         inputs = {"filename": _meta(filename), "language": _meta(language, 40), "status": _meta(status, 40),
-                  "code_diff": code_diff, "data_begin": data_begin, "data_end": data_end}
+                  "code_diff": code_diff, "file_context": block, "data_begin": data_begin, "data_end": data_end}
         rendered = "\n".join(_content_text(m.content) for m in self.prompt.format_messages(**inputs))
         human = _content_text(self.prompt.format_messages(**inputs)[-1].content)
-        if human.count(data_begin) != 1 or human.count(data_end) != 1 or human.index(data_begin) > human.index(data_end):
+        if human.count(data_begin) != 1 or human.count(data_end) != 1 or human.index(data_begin) > human.index(data_end) \
+                or human.count(marker) != labels:
             logger.error("prompt boundary check failed", filename=_meta(filename))
             return FileReviewResult(filename, language, status, AnnotatedFileReview(findings=[], summary="Review skipped: prompt boundary check failed."),
                                     parse_ok=False, duration_seconds=time.perf_counter() - started, error="PromptBoundaryError")
@@ -628,13 +667,14 @@ class FileReviewer:
         first, ok = parse_file_review(text)
         first, dropped = postprocess(first, patch, self.settings.MIN_FINDING_CONFIDENCE, filename=filename,
                                      context_policy=self.settings.CONTEXT_LINE_FINDINGS,
-                                     context_min_confidence=self.settings.CONTEXT_LINE_MIN_CONFIDENCE)
+                                     context_min_confidence=self.settings.CONTEXT_LINE_MIN_CONFIDENCE,
+                                     context_text=block)
         review = annotate(first, self.model_name)
         usage = getattr(message, "usage_metadata", None) or {}
         result = FileReviewResult(
             filename=filename, language=language, status=status, review=review, dropped=dropped, parse_ok=ok,
             prompt_tokens=int(usage.get("input_tokens") or 0), output_tokens=int(usage.get("output_tokens") or 0),
-            patch=patch,
+            patch=patch, context_mode=context_mode, file_redactions=file_redactions,
         )
         if self.cross_inline:
             await self.cross_examine_file(result)

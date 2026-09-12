@@ -448,3 +448,95 @@ async def test_the_cross_examiner_gate_tolerates_a_tag_pulled_as_latest(monkeypa
     assert health["model_present"] is True
     assert health["cross_model_present"] is True, "the cross tag gets the same :latest fallback as the reviewer tag"
 
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not on PATH")
+def test_with_file_context_on_the_file_is_read_from_a_temporary_git_repository(tmp_path, monkeypatch, capsys):
+    """The offline command matches production with the switch on: the whole file
+    at the range's head goes to the model beside the diff, read with git show and
+    no network at all."""
+    git = git_repo(tmp_path)["git"]
+    app = tmp_path / "app.py"
+    tail = "".join(f"CONSTANT_{i} = {i}\n" for i in range(40))   # far enough away to be no diff context
+    app.write_text("import os\ndef main():\n    pass\n" + tail + "SENTINEL_FILE_ONLY = 1\n", encoding="utf-8")
+    git("add", "app.py")
+    git("commit", "-m", "first")
+    git("checkout", "-b", "feature")
+    app.write_text("import os\nSENTINEL_9f3a = eval(user_input)\ndef main():\n    pass\n" + tail
+                   + "SENTINEL_FILE_ONLY = 1\n", encoding="utf-8")
+    git("add", "app.py")
+    git("commit", "-m", "second")
+    monkeypatch.setenv("FILE_CONTEXT", "true")
+    llm, _ = patch_seam(monkeypatch)
+    code = R.main(["--repo", str(tmp_path), "--range", "main...feature", "--env-file", ""])
+    err = capsys.readouterr().err
+    assert code == 0
+    assert "SENTINEL_FILE_ONLY" in llm.seen_text, "a line only the file holds reached the model"
+    assert "file context on: 1 of 1 files read" in err
+    # and with the switch off the same run sends the hunk alone
+    monkeypatch.delenv("FILE_CONTEXT")
+    off, _ = patch_seam(monkeypatch)
+    assert R.main(["--repo", str(tmp_path), "--range", "main...feature", "--env-file", ""]) == 0
+    capsys.readouterr()
+    assert "SENTINEL_FILE_ONLY" not in off.seen_text
+
+
+def test_the_new_side_of_the_diff_is_where_the_files_are_read_from():
+    assert R.new_side(R.parse_args(["--range", "v1.1.0..v1.2.0"])) == "v1.2.0"
+    assert R.new_side(R.parse_args(["--range", "main...feature"])) == "feature"
+    assert R.new_side(R.parse_args(["--range", "main...HEAD"])) == "HEAD", "the commit, not the files on disk"
+    assert R.new_side(R.parse_args([])) == "HEAD", "the default range is main...HEAD"
+    assert R.new_side(R.parse_args(["--range", "main"])) is None, "a dotless range is against the working tree"
+    assert R.new_side(R.parse_args(["--staged"])) == "", "the staged diff's new side is the index"
+    assert R.new_side(R.parse_args(["--file", "x.diff"])) is None, "a diff from a file names no revision"
+    assert R.where_read(R.parse_args(["--staged"])) == "the index"
+    assert R.where_read(R.parse_args(["--range", "main"])) == "the working tree"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not on PATH")
+def test_a_dirty_working_tree_does_not_change_what_a_range_sends(tmp_path, monkeypatch, capsys):
+    """`main...HEAD` is a diff of two commits, so the file beside the hunk is the
+    file at HEAD. Reading the working tree instead showed the model lines no diff
+    in the run mentioned, and hid lines it did."""
+    git = git_repo(tmp_path)["git"]
+    app = tmp_path / "app.py"
+    tail = "".join(f"CONSTANT_{i} = {i}\n" for i in range(40))
+    app.write_text("import os\ndef main():\n    pass\n" + tail + "SENTINEL_AT_HEAD = 1\n", encoding="utf-8")
+    git("add", "app.py")
+    git("commit", "-m", "first")
+    git("checkout", "-b", "feature")
+    app.write_text("import os\nSENTINEL_9f3a = eval(user_input)\ndef main():\n    pass\n" + tail
+                   + "SENTINEL_AT_HEAD = 1\n", encoding="utf-8")
+    git("add", "app.py")
+    git("commit", "-m", "second")
+    # uncommitted, so it is on neither side of main...HEAD
+    app.write_text(app.read_text(encoding="utf-8").replace("SENTINEL_AT_HEAD = 1", "SENTINEL_UNCOMMITTED = 1"),
+                   encoding="utf-8")
+    monkeypatch.setenv("FILE_CONTEXT", "true")
+    llm, _ = patch_seam(monkeypatch)
+    assert R.main(["--repo", str(tmp_path), "--range", "main...HEAD", "--env-file", ""]) == 0
+    assert "file context on: 1 of 1 files read at HEAD" in capsys.readouterr().err
+    assert "SENTINEL_AT_HEAD" in llm.seen_text, "the file as the range's right-hand side holds it"
+    assert "SENTINEL_UNCOMMITTED" not in llm.seen_text, "the working tree is not the new side of a range"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not on PATH")
+def test_the_staged_diff_reads_the_file_from_the_index(tmp_path, monkeypatch, capsys):
+    """`--staged` diffs the index, so the file beside the hunk is the file as the
+    index holds it, not as the working tree does: the unstaged part of the change
+    is on neither side of that diff."""
+    git = git_repo(tmp_path)["git"]
+    app = tmp_path / "app.py"
+    tail = "".join(f"CONSTANT_{i} = {i}\n" for i in range(40))
+    app.write_text("import os\ndef main():\n    pass\n" + tail + "SENTINEL_COMMITTED = 1\n", encoding="utf-8")
+    git("add", "app.py")
+    git("commit", "-m", "first")
+    app.write_text("import os\nSENTINEL_9f3a = eval(user_input)\ndef main():\n    pass\n" + tail
+                   + "SENTINEL_STAGED = 1\n", encoding="utf-8")
+    git("add", "app.py")
+    app.write_text(app.read_text(encoding="utf-8").replace("SENTINEL_STAGED = 1", "SENTINEL_UNSTAGED = 1"),
+                   encoding="utf-8")
+    monkeypatch.setenv("FILE_CONTEXT", "true")
+    llm, _ = patch_seam(monkeypatch)
+    assert R.main(["--repo", str(tmp_path), "--staged", "--env-file", ""]) == 0
+    assert "file context on: 1 of 1 files read at the index" in capsys.readouterr().err
+    assert "SENTINEL_STAGED" in llm.seen_text and "SENTINEL_UNSTAGED" not in llm.seen_text

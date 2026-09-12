@@ -22,7 +22,7 @@ Built by Tom Butler as a demonstration of private, local AI: AI you own rather t
 
 ## Privacy, stated precisely
 
-Leaves the machine: HTTPS requests to api.github.com to read the PR, its files, and post the review. That is the complete list.
+Leaves the machine: HTTPS requests to api.github.com to mint the installation token, read the PR, read its files, and post the review. With `FILE_CONTEXT=true` there is a fifth kind, one per reviewed file the pull request did not add: reading that file at the head commit, so the model is shown the file and not only the hunk. That is the complete list; the switch is off by default, and turning it on also needs the App installation's Contents read permission.
 
 Never leaves the machine in local mode: the diff, the prompt, the model's output. The backend refuses to start if the environment contains a LangSmith tracing flag or an OpenAI, Anthropic, Google, Mistral or Sentry key (`STRICT_LOCAL`, on by default). No telemetry, no analytics, no fonts or scripts from a CDN in the dashboard. Next.js telemetry is disabled in the scripts.
 

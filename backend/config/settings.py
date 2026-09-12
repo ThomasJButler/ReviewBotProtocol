@@ -116,6 +116,17 @@ class Settings(BaseSettings):
     MAX_PATCH_BYTES: int = 32_000
     """The largest per-file diff sent to the model, in bytes. At about 2.8 bytes a token it must fit
     OLLAMA_NUM_CTX beside the prompt and the reply; a bigger file is skipped with a reason, never truncated."""
+    FILE_CONTEXT: bool = False
+    """Send the file the diff came from beside the diff, whole when it fits the context left after the patch and the
+    reply, else the parts of it around each hunk. It costs one extra api.github.com call per reviewed file, the App
+    installation's Contents read permission, and roughly double the prompt tokens and the seconds a file takes. Off
+    until a measured round says otherwise; while it is off the reviewer sees the prompt the benchmarks measured, byte
+    for byte."""
+    FILE_CONTEXT_LINES: int = 60
+    """Lines of the file kept either side of each hunk when the whole file does not fit beside the patch, with
+    overlapping windows merged into one. A larger window answers more questions about imports and callers and leaves
+    less room for the diff itself; it is ignored when FILE_CONTEXT is off, when the whole file fits, and when the patch
+    has filled the budget on its own."""
     MAX_WEBHOOK_BODY_BYTES: int = 2 * 1024 * 1024
     """The most bytes a webhook delivery may carry, checked on Content-Length and again while streaming, before
     the signature check. GitHub's pull request payloads are far smaller."""
@@ -224,7 +235,8 @@ class Settings(BaseSettings):
         return v.replace("\\n", "\n")
 
     @field_validator("DEBUG", "REVIEW_DRAFTS", "REVIEW_BOT_PULL_REQUESTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", "CROSS_EXAMINE_SEQUENTIAL",
-                     "CROSS_EXAMINE_NOTE_FIRST", mode="before")
+                     "CROSS_EXAMINE_NOTE_FIRST",
+                     "FILE_CONTEXT", mode="before")
     @classmethod
     def parse_bool(cls, v):
         if isinstance(v, str):

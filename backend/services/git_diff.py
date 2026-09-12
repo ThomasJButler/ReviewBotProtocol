@@ -7,10 +7,16 @@ unchanged.
 Each file's patch starts at its first hunk header. services/diff.py parses
 GitHub's hunk-only patch and would read a `+++ b/name` line as an added line
 and a `diff --git` line as context (its in_hunk flag is never reset), so no
-header line may ever reach it. Pure text and no subprocess: the caller runs
-git, reads a .diff file, or reads stdin."""
+header line may ever reach it. The splitting is pure text: the caller runs git,
+reads a .diff file, or reads stdin.
+
+`file_at` is the one exception, and it is here rather than in a script because
+both offline readers need it: it is how an offline review and the precision
+runner get the file the hunk came from, which the App reads through the
+contents API."""
 
 import re
+import subprocess
 from typing import Dict, List, Optional
 
 GITHUB_CONTEXT_LINES = 3  # git's default and GitHub's; the pipeline's line numbers assume it
@@ -170,3 +176,30 @@ def _unquote(name: str) -> str:
         out.extend(ch.encode("utf-8"))
         i += 1
     return out.decode("utf-8", errors="replace")
+
+
+def file_at(repo: str, rev: str, path: str) -> str:
+    """One file's text at one revision, or "" when git cannot give it as text:
+    the revision or the path is unknown, or the file is binary. Empty rather
+    than an exception, because file context is an extra and a review runs on the
+    patch alone without it.
+
+    An empty `rev` is the index, `git show :path`, which is the new side of a
+    staged diff. A revision that is not what the diff's new side is would price
+    the wrong file, so the caller resolves the side first and this reads it."""
+    for value in (repo, path):
+        if not value or value.startswith("-"):
+            return ""
+    if rev.startswith("-"):
+        return ""
+    try:
+        done = subprocess.run(["git", "--no-pager", "-C", repo, "show", f"{rev}:{path}"],
+                              capture_output=True, check=False)
+    except (FileNotFoundError, OSError):
+        return ""
+    if done.returncode != 0 or b"\x00" in done.stdout:
+        return ""
+    try:
+        return done.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
