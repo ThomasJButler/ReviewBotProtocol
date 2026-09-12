@@ -20,12 +20,12 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import ValidationError
 
 from config.logging import get_logger
-from config.settings import Settings
-from services.diff import locate_evidence, locate_evidence_part, parse_patch
+from config.settings import CONTEXT_LINE_DEFAULT, CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT, Settings
+from services.diff import locate_evidence_kind, parse_patch
 from services.prompts import MARK_BEGIN, MARK_END, cross_prompt, delimiters, review_prompt, verify_prompt
 from services.redaction import redact_text
 from services.schemas import (SEVERITY_ORDER, AnnotatedFileReview, CrossExamination, FileReview, Finding, ReviewedFinding,
-                              Verdict, cross_schema, output_schema, verdict_schema)
+                              Severity, Verdict, cross_schema, output_schema, verdict_schema)
 
 logger = get_logger(__name__)
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
@@ -326,13 +326,50 @@ def drop_rule(f: Finding, min_confidence: float) -> Optional[str]:
     return None
 
 
+def context_line_action(kind: str, f: Finding, policy: str, min_confidence: float) -> str:
+    """keep, drop or downgrade a finding by where the locator put its evidence.
+
+    A finding on a line the pull request never touched is a claim about code
+    nobody asked about, and the live nights say it is nearly always noise. A
+    quote of a line the change removed is never touched: the prompt asks for a
+    removal to be reported on "the new-file line that now lacks it"
+    (services/prompts.py), so a removal is a finding about the change itself.
+    The kind is the locator's own answer, never a second predicate."""
+    if kind != "context":
+        return "keep"
+    if policy == "drop":
+        return "drop"
+    if policy == "downgrade":
+        return "downgrade"
+    if policy == "confidence":
+        return "keep" if f.confidence >= min_confidence else "drop"
+    return "keep"
+
+
+def _one_step_down(severity: Severity) -> Severity:
+    """One step down SEVERITY_ORDER, info staying info: severity only ever goes
+    down in this pipeline, as the cross-examiner and the verifier already have it."""
+    order = list(Severity)
+    return order[min(SEVERITY_ORDER[severity] + 1, len(order) - 1)]
+
+
 def postprocess(review: FileReview, patch: Optional[str], min_confidence: float, *,
-                filename: str = "") -> Tuple[FileReview, int]:
+                filename: str = "", counts: Optional[Dict[str, int]] = None,
+                context_policy: str = CONTEXT_LINE_DEFAULT,
+                context_min_confidence: float = CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT) -> Tuple[FileReview, int]:
+    """The kept review and how many findings went. A caller that needs the drops
+    broken down by rule, as the precision harness does, passes a dict as counts
+    and gets it filled in by rule name: the alternative was a second copy of
+    this loop somewhere else, which drifted from it. The context-line keywords
+    default from the same constants the Settings fields default from, so a
+    caller that passes no policy still gets the shipped one."""
     parsed = parse_patch(patch)
     kept: List[Finding] = []
     seen = set()
 
     def dropped(f: Finding, rule: str) -> None:
+        if counts is not None:
+            counts[rule] = counts.get(rule, 0) + 1
         # the title was redacted at parse time; the log is how a dropped finding is seen at all
         logger.info("finding dropped", rule=rule, filename=_meta(filename), line=f.line, title=f.title[:120])
 
@@ -344,15 +381,27 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float,
         if _instruction_title(f.title) and _title_from(f.recommendation):
             logger.info("finding retitled", rule="instruction_title", filename=_meta(filename), line=f.line, title=f.title[:120])
             f = f.model_copy(update={"title": _title_from(f.recommendation)})
-        located, part = locate_evidence_part(parsed, f.line, f.evidence)
+        located, part, kind = locate_evidence_kind(parsed, f.line, f.evidence)
         if located is None:
             dropped(f, "unlocated")
+            continue
+        action = context_line_action(kind, f, context_policy, context_min_confidence)
+        if action == "drop":
+            dropped(f, "context_line")
             continue
         key = (located, f.title.strip().lower())
         if key in seen:
             dropped(f, "duplicate")
             continue
         seen.add(key)
+        if action == "downgrade":
+            # counted and logged only for a finding that survives the dedupe, so the counter is what the review kept
+            lower = _one_step_down(f.severity)
+            if counts is not None:
+                counts["context_line_downgraded"] = counts.get("context_line_downgraded", 0) + 1
+            logger.info("finding downgraded", rule="context_line", filename=_meta(filename), line=located,
+                        severity=lower.value, was=f.severity.value)
+            f = f.model_copy(update={"severity": lower})
         if part != f.evidence:
             f = f.model_copy(update={"evidence": part.strip()[:300]})
         kept.append(f.model_copy(update={"line": located}))
@@ -456,7 +505,9 @@ class FileReviewer:
             severity = f.severity if SEVERITY_ORDER[f.severity] >= SEVERITY_ORDER[v.severity] else v.severity
             kept.append(f.model_copy(update={"severity": severity, "cross_verdict": v.verdict.value,
                                              "cross_reason": v.reason, "cross_severity": v.severity}))
-        additions, _ = postprocess(FileReview(findings=ce.additions, summary=""), patch, floor, filename=filename)
+        additions, _ = postprocess(FileReview(findings=ce.additions, summary=""), patch, floor, filename=filename,
+                                   context_policy=self.settings.CONTEXT_LINE_FINDINGS,
+                                   context_min_confidence=self.settings.CONTEXT_LINE_MIN_CONFIDENCE)
         seen = {(f.line, f.title.strip().lower()) for f in kept}
         # a line where the second model has just confirmed the first reviewer's finding: an addition
         # of the same category there is the same problem under a shorter title, not a new one
@@ -575,7 +626,9 @@ class FileReviewer:
         if self.settings.LOG_PROMPTS:
             logger.info("model output", filename=filename, output=redact_text(text)[:4000])
         first, ok = parse_file_review(text)
-        first, dropped = postprocess(first, patch, self.settings.MIN_FINDING_CONFIDENCE, filename=filename)
+        first, dropped = postprocess(first, patch, self.settings.MIN_FINDING_CONFIDENCE, filename=filename,
+                                     context_policy=self.settings.CONTEXT_LINE_FINDINGS,
+                                     context_min_confidence=self.settings.CONTEXT_LINE_MIN_CONFIDENCE)
         review = annotate(first, self.model_name)
         usage = getattr(message, "usage_metadata", None) or {}
         result = FileReviewResult(

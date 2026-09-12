@@ -326,6 +326,103 @@ def test_a_tag_in_front_of_a_real_title_is_the_form_the_prompt_asks_for(title):
     assert [f.title for f in kept.findings] == [title] and dropped == 0
 
 
+# ---------------------------------------------------------------- a context line as weaker evidence
+
+# one context line, one added line, one removal: the three kinds the locator can answer with
+_MIXED = ("@@ -1,3 +1,3 @@\n"
+          " import os\n"
+          "-assert_authorised(user)\n"
+          "+token = request.headers['x']\n"
+          " def main():\n")
+_POLICIES = ("keep", "drop", "downgrade", "confidence")
+
+
+def _on(line, evidence, severity="medium", title="A finding", confidence=0.9):
+    return {"category": "quality", "severity": severity, "title": title, "line": line,
+            "evidence": evidence, "recommendation": "Fix it.", "confidence": confidence}
+
+
+def _post(findings, policy, patch=_MIXED, context_min_confidence=0.9, **kwargs):
+    return postprocess(FileReview(findings=findings, summary=""), patch, 0.5, context_policy=policy,
+                       context_min_confidence=context_min_confidence, **kwargs)
+
+
+def test_a_finding_on_a_context_line_is_kept_under_the_keep_policy():
+    kept, dropped = _post([_on(3, "def main():")], "keep")
+    assert [(f.line, f.severity.value) for f in kept.findings] == [(3, "medium")] and dropped == 0
+
+
+def test_a_finding_on_a_context_line_is_dropped_under_the_drop_policy():
+    """The shipped policy: a claim about a line the pull request never touched."""
+    kept, dropped = _post([_on(3, "def main():")], "drop")
+    assert kept.findings == [] and dropped == 1
+
+
+def test_a_finding_on_a_context_line_loses_one_severity_step_under_the_downgrade_policy():
+    kept, dropped = _post([_on(3, "def main():")], "downgrade")
+    assert [(f.line, f.severity.value) for f in kept.findings] == [(3, "low")] and dropped == 0
+
+
+def test_a_critical_finding_on_a_context_line_becomes_high_never_low():
+    kept, _ = _post([_on(3, "def main():", severity="critical")], "downgrade")
+    assert [f.severity.value for f in kept.findings] == ["high"]
+
+
+def test_an_info_finding_on_a_context_line_is_already_at_the_bottom_and_stays_there():
+    kept, dropped = _post([_on(3, "def main():", severity="info")], "downgrade")
+    assert [f.severity.value for f in kept.findings] == ["info"] and dropped == 0
+
+
+def test_the_confidence_policy_keeps_a_confident_context_finding_and_drops_a_doubtful_one():
+    kept, _ = _post([_on(3, "def main():", confidence=0.9)], "confidence")
+    assert len(kept.findings) == 1, "at the threshold it survives"
+    kept, dropped = _post([_on(3, "def main():", confidence=0.85)], "confidence")
+    assert kept.findings == [] and dropped == 1
+
+
+@pytest.mark.parametrize("policy", _POLICIES)
+def test_a_finding_quoting_a_removed_line_survives_every_policy(policy):
+    """The prompt asks for a removal to be reported on the new-file line that now
+    lacks it, so the pipeline must not punish the model for doing as it was told."""
+    kept, dropped = _post([_on(2, "assert_authorised(user)", confidence=0.5)], policy)
+    assert [f.line for f in kept.findings] == [2] and dropped == 0
+
+
+@pytest.mark.parametrize("policy", _POLICIES)
+def test_a_finding_on_an_added_line_is_untouched_by_every_policy(policy):
+    kept, dropped = _post([_on(2, "token = request.headers['x']", severity="high", confidence=0.5)], policy)
+    assert [(f.line, f.severity.value) for f in kept.findings] == [(2, "high")] and dropped == 0
+
+
+def test_two_context_findings_sharing_a_line_are_both_dropped_by_their_own_rule():
+    """Not one as a context line and the other as a duplicate: the rule acts
+    before the dedupe key, so a leaderboard counts both against the rule."""
+    counts = {}
+    kept, dropped = _post([_on(3, "def main():"), _on(3, "def main():")], "drop", counts=counts)
+    assert kept.findings == [] and dropped == 2
+    assert counts == {"context_line": 2}
+
+
+def test_every_context_line_drop_and_downgrade_is_logged_with_its_rule():
+    from structlog.testing import capture_logs
+    with capture_logs() as logs:
+        _post([_on(3, "def main():")], "drop", filename="a.py")
+    assert [(e["event"], e["rule"]) for e in logs] == [("finding dropped", "context_line")]
+    assert logs[0]["filename"] == "a.py"
+    with capture_logs() as logs:
+        _post([_on(3, "def main():")], "downgrade", filename="a.py")
+    assert [(e["event"], e["rule"]) for e in logs] == [("finding downgraded", "context_line")]
+    assert logs[0]["severity"] == "low" and logs[0]["was"] == "medium" and logs[0]["line"] == 3
+
+
+@pytest.mark.parametrize("policy", _POLICIES)
+def test_a_new_file_is_all_added_lines_so_the_rule_never_fires_on_one(policy):
+    new_file = "@@ -0,0 +1,2 @@\n+import os\n+token = request.headers['x']\n"
+    kept, dropped = _post([_on(1, "import os"), _on(2, "token = request.headers['x']", title="Another")],
+                          policy, patch=new_file)
+    assert sorted(f.line for f in kept.findings) == [1, 2] and dropped == 0
+
+
 class TestRendering:
     def test_html_offsite_links_and_mentions_are_neutralised(self):
         evil = ('Fix this <img src=x onerror=alert(1)> see [docs](https://evil.example/phish) and https://evil.example/x '
@@ -406,3 +503,23 @@ def test_a_review_cut_short_says_so_above_the_counts():
     assert body.index(note) < body.index("No findings in 0 reviewed files")
     assert "`late.py`: not reached before the review's time ran out" in body
     assert "ran out of time" not in render_review([], model="m").body
+
+
+def test_postprocess_fills_a_counts_dict_by_rule_name_and_leaves_it_alone_when_not_given_one():
+    """The precision harness needs the drops broken down by rule to say why a
+    finding vanished, and its own copy of this loop drifted from it: the copy
+    had no instruction-title retitle, so it deduped on the title the model typed
+    rather than the title the pipeline keeps. The counter is this loop's now."""
+    findings = [
+        _finding("Correctly implements it."),
+        _finding("Fix it.", confidence=0.2),
+        _finding("Fix it.", title="shrink"),
+        _finding("Fix it.", line=40, evidence="a line that is not in the diff"),
+        _finding("Fix it.", title="Dup"), _finding("Fix it.", title="dup"),
+    ]
+    counts = {"confidence": 0}
+    kept, dropped = postprocess(FileReview(findings=findings, summary=""), DIFF, 0.5, counts=counts)
+    assert len(kept.findings) == 1 and dropped == 5
+    assert counts == {"confidence": 1, "tag_title": 1, "praise": 1, "unlocated": 1, "duplicate": 1}
+    again, dropped_again = postprocess(FileReview(findings=findings, summary=""), DIFF, 0.5)
+    assert dropped_again == dropped and [f.title for f in again.findings] == [f.title for f in kept.findings]

@@ -8,8 +8,11 @@ One file per measurement day. Every number in them comes from `backend/scripts/p
 | [2026-09-05](2026-09-05-prompt-refinement.md)                                                                    | The refinement day: 65 new cases, five reviewer prompts, six cross-examiner prompts, two verifiers, one model resident at a time, the hand polish, and the cloud references                                       |
 | [2026-09-06](2026-09-06-round-three.md)                                                                          | Round three: one candidate each for the reviewer, verifier and cross-examiner, the cross-examiner's key order both ways, the judge and corpus fixes a pre-launch review found, and round two re-judged under them |
 | [2026-09-07](2026-09-06-round-three.md#addendum-2026-09-07-evening-praise-filed-as-a-finding-measured-by-replay) | The praise rule, measured by replaying round three's runs through the pipeline before and after it (`runs/2026-09-07/`); the key-order pair like for like is the earlier addendum in the same file                |
+| [2026-09-12](2026-09-06-round-three.md#addendum-2026-09-12-a-context-line-as-weaker-evidence-measured-by-replay) | The context-line rule, four policies replayed through the same two runs with no model (`runs/2026-09-12/`); the corpus cannot rank them, so the real-code audit of all 119 stored findings decides it             |
 
 Every table here measures recall on planted diffs. The first measurement of precision on real pull requests, and what it says about which weaknesses are the model and which are the harness, is [../REVIEW_QUALITY.md](../REVIEW_QUALITY.md).
+
+Precision on real pull requests is now measured every round too, by `backend/scripts/precision.py` against the fixed set of eleven pull requests in `backend/tests/precision/pull_requests.json` and the two-judge ledger beside it; the judge protocol and the rolling table of rounds are [PRECISION.md](PRECISION.md), and each round's row is also written to `runs/<date>/precision-<tag>.md` so the day table above keeps meaning one measurement day.
 
 ## How to read a table
 

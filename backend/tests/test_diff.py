@@ -1,4 +1,4 @@
-from services.diff import locate_evidence, parse_patch
+from services.diff import locate_evidence, locate_evidence_kind, parse_patch
 from tests.conftest import DIFF
 
 
@@ -149,6 +149,53 @@ def test_a_removal_at_the_end_of_a_hunk_lands_on_the_last_line_before_it():
     parsed = parse_patch(_TRAILING)
     assert parsed.removed_lines == {3: ["assert_authorised(user)"]}
     assert locate_evidence(parsed, 3, "assert_authorised(user)") == 2
+
+
+def test_the_locator_says_a_quote_of_a_removed_line_was_located_as_a_removal():
+    """The context-line rule exempts a removal, and the exemption is only as
+    honest as the locator's own answer about how it got there."""
+    parsed = parse_patch(_REMOVAL)
+    quote = '<p role="status" className="cart-status">{message}</p>'
+    assert locate_evidence_kind(parsed, 17, quote) == (17, quote, "removal")
+    assert locate_evidence_kind(parsed, 14, "-    " + quote)[2] == "removal"
+
+
+def test_a_removal_at_the_end_of_a_hunk_is_still_a_removal_on_the_line_before_it():
+    parsed = parse_patch(_TRAILING)
+    assert locate_evidence_kind(parsed, 3, "assert_authorised(user)") == (2, "assert_authorised(user)", "removal")
+
+
+def test_the_locator_distinguishes_an_added_line_from_a_context_line():
+    parsed = parse_patch(DIFF)
+    assert locate_evidence_kind(parsed, 2, "eval(user_input)") == (2, "eval(user_input)", "added")
+    assert locate_evidence_kind(parsed, 1, "import os") == (1, "import os", "context")
+    assert locate_evidence_kind(parsed, 1, "def main()")[2] == "context", "relocated, and still a line nobody touched"
+    assert locate_evidence_kind(parsed, 1, "import os\nSENTINEL_9f3a = eval(user_input)")[2] == "context", \
+        "the kind belongs to whichever part of a multi-line quote located"
+
+
+_SUBSTRING_OF_A_REMOVAL = (
+    "@@ -1,2 +1,2 @@\n"
+    "-    check = validate_token(request.headers)\n"
+    "     token = request.headers\n"
+)
+
+
+def test_a_quote_that_is_only_a_substring_of_an_unrelated_removal_is_still_a_context_line():
+    """The regression guard on the refactor: the kind must come from the locator
+    and never be re-derived by a removal predicate asked afterwards. Here
+    `request.headers` appears inside the removed check as well as on the context
+    line the locator placed it on, so an unconditional predicate would call it a
+    removal and exempt a finding the locator never treated as one."""
+    parsed = parse_patch(_SUBSTRING_OF_A_REMOVAL)
+    assert locate_evidence_kind(parsed, 1, "request.headers") == (1, "request.headers", "context")
+    assert locate_evidence_kind(parsed, 1, "validate_token(request.headers)")[2] == "removal", \
+        "the whole removed line is a removal, by the branch that answered"
+
+
+def test_a_fabricated_quote_is_located_nowhere_and_has_no_kind():
+    parsed = parse_patch(DIFF)
+    assert locate_evidence_kind(parsed, 2, "os.system('rm -rf /')") == (None, "os.system('rm -rf /')", "")
 
 
 _CAROUSEL = (

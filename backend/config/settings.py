@@ -20,6 +20,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 TRACING_VARS = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING", "LANGCHAIN_TRACING")
 ALWAYS_FATAL_VARS = ("LANGCHAIN_HANDLER",)
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+CONTEXT_LINE_POLICIES = ("keep", "drop", "downgrade", "confidence")
+# services/ai_reviewer.postprocess defaults its keywords from these, so the function and the
+# field cannot disagree and the callers that pass no settings still exercise shipped behaviour
+CONTEXT_LINE_DEFAULT = "drop"
+CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT = 0.9
 TRACING_KEY_VARS = ("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")
 CLOUD_KEY_VARS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "MISTRAL_API_KEY", "SENTRY_DSN")
 
@@ -120,6 +125,18 @@ class Settings(BaseSettings):
     MIN_FINDING_CONFIDENCE: float = 0.5
     """A finding the model rates below this confidence is dropped. The measured false-positive rate assumes this
     value; lower keeps more of the model's doubts."""
+    CONTEXT_LINE_FINDINGS: str = CONTEXT_LINE_DEFAULT
+    """What becomes of a finding whose evidence lands on a context line the pull request never touched: keep it,
+    drop it, downgrade it one severity step, or keep it only at or above CONTEXT_LINE_MIN_CONFIDENCE. A finding that
+    quotes a line the change removed is never touched, because the prompt asks for a removal to be reported on
+    the new-file line that now lacks it. Measured by replay in docs/benchmarks: drop removes four of the 119
+    findings this bot has posted on real pull requests here and moves no corpus number. One of keep, drop,
+    downgrade, confidence."""
+    CONTEXT_LINE_MIN_CONFIDENCE: float = CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT
+    """The confidence a context-line finding must reach to survive when CONTEXT_LINE_FINDINGS is confidence;
+    ignored under the other three policies. At 0.9 this keeps two of the four context-line findings on record and
+    drops the other two, because the prompt's rubric offers 0.9, 0.7 and 0.5 and the model writes 0.95, 0.85 and
+    0.8 as well."""
     VERIFY_FINDINGS: bool = False
     """A second pass by the same model that tries to refute each finding before it is posted. Off: measured in
     docs/benchmarks, it removes some false positives at one extra call per finding."""
@@ -213,6 +230,16 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return v.strip().lower() in ("true", "1", "yes", "on")
         return bool(v)
+
+    @field_validator("CONTEXT_LINE_FINDINGS", mode="before")
+    @classmethod
+    def parse_context_line_policy(cls, v):
+        """A typo here would silently keep every context-line finding, so it is a
+        startup error instead."""
+        name = str(v or "").strip().lower()
+        if name not in CONTEXT_LINE_POLICIES:
+            raise ValueError(f"CONTEXT_LINE_FINDINGS must be one of {', '.join(CONTEXT_LINE_POLICIES)}")
+        return name
 
     @model_validator(mode="after")
     def check_private_key_parses(self):
