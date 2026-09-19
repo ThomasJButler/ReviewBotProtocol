@@ -72,7 +72,7 @@ from langchain_core.messages import AIMessage, BaseMessage  # noqa: E402
 from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
 from langchain_core.prompts import ChatPromptTemplate  # noqa: E402
 
-from config.settings import Settings  # noqa: E402
+from config.settings import LocalOnlyViolation, Settings  # noqa: E402
 from services import prompts as P  # noqa: E402
 from services.ai_reviewer import drop_rule, FileReviewer, parse_file_review  # noqa: E402
 from services.diff import locate_evidence, parse_patch  # noqa: E402
@@ -226,7 +226,9 @@ async def unload_models(settings: Settings, models: List[str]) -> None:
                 print(f"could not unload {model}: {exc}", file=sys.stderr)
 
 
-def _settings(model: Optional[str], allow_cloud: bool = False) -> Settings:
+def _settings(model: Optional[str], allow_cloud: bool = False, cross_model: Optional[str] = None) -> Settings:
+    """The harness's own Settings. The cross-examiner's tag goes in through the
+    constructor too, so the local-only guard judges it like the reviewer's."""
     env = {
         "GITHUB_APP_ID": "1", "GITHUB_PRIVATE_KEY": _THROWAWAY_KEY,
         "GITHUB_WEBHOOK_SECRET": "prompt-eval-not-a-secret-0123456789", "LOCAL_API_TOKEN": "",
@@ -239,6 +241,8 @@ def _settings(model: Optional[str], allow_cloud: bool = False) -> Settings:
         env["OLLAMA_MODEL"] = model
     elif os.environ.get("OLLAMA_MODEL"):
         env["OLLAMA_MODEL"] = os.environ["OLLAMA_MODEL"]
+    if cross_model:
+        env["CROSS_EXAMINE_MODEL"] = cross_model
     return Settings(_env_file=None, **env)
 
 
@@ -387,13 +391,16 @@ async def main() -> int:
 
     for noisy in ("httpx", "httpcore", "services.ai_reviewer"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    settings = _settings(args.model, allow_cloud=args.allow_cloud)
+    # the cross tag is judged by the local-only guard here, like the reviewer's; a replayed cross model
+    # was never loaded and its recorded tag is not put through the guard
+    live_cross = args.cross_model if (args.cross_model and not args.replay_cross) else None
+    try:
+        settings = _settings(args.model, allow_cloud=args.allow_cloud, cross_model=live_cross)
+    except LocalOnlyViolation as refused:
+        print(f"refused by the local-only guard: {refused} (--allow-cloud is the one way round it, for the synthetic corpus only)", file=sys.stderr)
+        return 2
     if args.allow_cloud:
         print("--allow-cloud: STRICT_LOCAL is off for this run; a cloud tag sends every prompt to ollama.com", file=sys.stderr)
-    health = await ollama_health(settings)
-    if not health.get("reachable") or not health.get("model_present"):
-        print(f"Ollama at {settings.OLLAMA_BASE_URL} is not reachable or {settings.OLLAMA_MODEL} is not pulled: {health}", file=sys.stderr)
-        return 2
 
     if args.cases_from_stdin or args.cases_from_file:
         fields = set(Case.__dataclass_fields__)
@@ -454,6 +461,21 @@ async def main() -> int:
                 spec["cross_prompt"] = _with_shape(spec.get("cross_prompt") or P.cross_prompt, CROSS_SHAPE)
             if spec.get("verify"):
                 spec["verifier_prompt"] = _with_shape(spec.get("verifier_prompt") or P.verify_prompt, VERDICT_SHAPE)
+    # A run that replays every model it names loads nothing and generates nothing, so it runs with
+    # Ollama down: the reviewer replayed, the cross-examiner replayed or absent, and no verify pass,
+    # which is the one call a replayed run still makes live. Decided from the variants that will
+    # actually run, after the candidate prompts have been registered.
+    wanted = [v for v in args.variants.split(",") if v]
+    needs_verify = any(VARIANTS[v].get("verify") for v in wanted if v in VARIANTS)
+    replays_everything = bool(args.replay) and live_cross is None and not needs_verify
+    if not replays_everything:
+        health = await ollama_health(settings)
+        if not health.get("reachable") or not health.get("model_present"):
+            print(f"Ollama at {settings.OLLAMA_BASE_URL} is not reachable or {settings.OLLAMA_MODEL} is not pulled: {health}", file=sys.stderr)
+            return 2
+        if live_cross and not health.get("cross_model_present"):
+            print(f"the cross-examiner {live_cross} is not pulled: {health}", file=sys.stderr)
+            return 2
     if args.out:
         Path(args.out).mkdir(parents=True, exist_ok=True)
     print(f"model {settings.OLLAMA_MODEL} at {settings.OLLAMA_BASE_URL}, num_ctx {settings.OLLAMA_NUM_CTX}, "

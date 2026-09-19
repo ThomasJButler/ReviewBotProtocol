@@ -4,6 +4,8 @@ Each release lists what changed for someone running it. The numbers quoted anywh
 
 ## Unreleased
 
+- `backend/scripts/review_diff.py` reviews a diff with the network off: a git range (`main...HEAD` by default), a diff file or stdin, through the same selection, redaction, reviewer, cross-examiner and post-filters the App runs, printed as text, as the markdown the App would post, or as JSON. It reads model settings from `backend/.env`, needs no GitHub credential, writes nothing to the database, and pins `STRICT_LOCAL` on so a cloud tag is refused however it is configured. The multi-file `git diff` is split by the new `services/git_diff.py`, since `services/diff.py` only ever parsed GitHub's per-file patch. `scripts/prompt_eval.py` no longer needs Ollama up for a run that replays every model it names.
+
 ## 1.2.0 (2026-09-08)
 
 Robust enough for someone else to run. A review that runs out of time now posts what it has, the database stops growing forever, every setting says what it costs, and the reviewer's own noise was measured on real pull requests for the first time.

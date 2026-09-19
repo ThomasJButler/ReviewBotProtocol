@@ -164,3 +164,89 @@ async def test_a_row_counts_the_drops_by_the_postprocess_rules():
     assert row["raw"] == 4 and row["kept"] == 1 and row["hit"] is True
     assert row["dropped_praise"] == 1 and row["dropped_tag_title"] == 1 and row["dropped_unlocatable"] == 1
     assert row["dropped_low_confidence"] == 0
+
+
+def _cases_file(tmp_path: Path) -> Path:
+    p = tmp_path / "cases.json"
+    p.write_text(json.dumps([{"key": "a", "filename": "a.py", "language": "python", "patch": DIFF,
+                              "expect": [2], "expect_category": ["security"], "min_severity": "high"}]))
+    return p
+
+
+async def test_a_run_that_replays_every_model_it_names_never_asks_whether_ollama_is_up(tmp_path, monkeypatch, capsys):
+    """A replayed reviewer with no live cross-examiner and no verify pass loads
+    nothing and generates nothing, so a pipeline change can be re-measured
+    with Ollama down: the health gate is not even consulted."""
+    async def asked(settings):
+        raise AssertionError("the health gate was consulted")
+    monkeypatch.setattr(H, "ollama_health", asked)
+    monkeypatch.setattr(sys, "argv", ["prompt_eval.py", "--cases-from-file", str(_cases_file(tmp_path)), "--variants", "new",
+                                      "--repeats", "1", "--replay", str(_run_file(tmp_path))])
+    assert await H.main() == 0
+    out = capsys.readouterr().out
+    assert "replaying the reviewer replies" in out and "== new ==" in out
+
+
+async def test_a_live_cross_examiner_beside_a_replayed_reviewer_still_needs_ollama(tmp_path, monkeypatch, capsys):
+    """--replay without --replay-cross means the second model really runs, so
+    the gate still applies, and it now checks the cross-examiner's tag too."""
+    async def down(settings):
+        return {"reachable": False, "model": settings.OLLAMA_MODEL, "model_present": False, "loaded": []}
+    monkeypatch.setattr(H, "ollama_health", down)
+    monkeypatch.setattr(sys, "argv", ["prompt_eval.py", "--cases-from-file", str(_cases_file(tmp_path)), "--variants", "cross",
+                                      "--repeats", "1", "--replay", str(_run_file(tmp_path)), "--cross-model", "gemma-fake"])
+    assert await H.main() == 2
+    assert "not reachable" in capsys.readouterr().err
+
+
+async def test_a_pulled_reviewer_beside_an_absent_cross_examiner_is_refused_by_name(tmp_path, monkeypatch, capsys):
+    seen = {}
+
+    async def partial(settings):
+        seen["cross"] = settings.CROSS_EXAMINE_MODEL
+        return {"reachable": True, "model": settings.OLLAMA_MODEL, "model_present": True, "loaded": [],
+                "cross_model": settings.CROSS_EXAMINE_MODEL, "cross_model_present": False}
+    monkeypatch.setattr(H, "ollama_health", partial)
+    monkeypatch.setattr(sys, "argv", ["prompt_eval.py", "--cases-from-file", str(_cases_file(tmp_path)), "--variants", "cross",
+                                      "--repeats", "1", "--replay", str(_run_file(tmp_path)), "--cross-model", "gemma-fake"])
+    assert await H.main() == 2
+    assert seen["cross"] == "gemma-fake", "the gate asks about the cross-examiner's tag, which _settings never sets"
+    assert "cross-examiner gemma-fake is not pulled" in capsys.readouterr().err
+
+
+async def test_the_default_variants_with_a_candidate_directory_and_a_full_replay_never_ask_whether_ollama_is_up(tmp_path, monkeypatch, capsys):
+    """The default --variants string names new+verify, which the candidate
+    directory replaces before anything runs; the gate must judge the
+    variants that will run, not the string."""
+    refute = json.dumps({"verdicts": [{"index": 0, "verdict": "false_positive", "severity": "low",
+                                       "reason": "a fixture value", "confidence": 0.9}], "additions": [], "summary_note": "fixture"})
+    run = tmp_path / "pass2-cross_x.json"
+    run.write_text(json.dumps({"model": "qwen-recorded", "cross_model": "gemma-recorded", "variant": "cross:x", "rows": [
+        {"case": "a", "model_texts": [REVIEW, refute], "prompt_tokens": 2000, "output_tokens": 300, "seconds": 30.0}], "summary": {}}))
+    cross_dir = tmp_path / "cross"
+    cross_dir.mkdir()
+    (cross_dir / "x.txt").write_text("Judge the findings. {data_begin} is the start and {data_end} the end.")
+
+    async def asked(settings):
+        raise AssertionError("the health gate was consulted")
+    monkeypatch.setattr(H, "ollama_health", asked)
+    monkeypatch.setattr(sys, "argv", ["prompt_eval.py", "--cases-from-file", str(_cases_file(tmp_path)), "--repeats", "1",
+                                      "--replay", str(run), "--replay-cross", str(run), "--cross-model", "gemma-recorded",
+                                      "--cross-prompts-dir", str(cross_dir)])
+    assert await H.main() == 0
+    out = capsys.readouterr().out
+    assert "== cross:x ==" in out and "replaying the cross-examiner replies" in out
+
+
+async def test_a_cloud_cross_examiner_tag_is_refused_by_the_local_only_guard(tmp_path, monkeypatch, capsys):
+    """The cross tag used to reach the run without passing the guard; --model
+    with the same tag was refused, --cross-model was not."""
+    async def up(settings):
+        return {"reachable": True, "model": settings.OLLAMA_MODEL, "model_present": True, "loaded": []}
+    monkeypatch.setattr(H, "ollama_health", up)
+    monkeypatch.setattr(sys, "argv", ["prompt_eval.py", "--cases-from-file", str(_cases_file(tmp_path)), "--variants", "cross",
+                                      "--repeats", "1", "--replay", str(_run_file(tmp_path)), "--cross-model", "gemma4:31b-cloud"])
+    assert await H.main() == 2
+    err = capsys.readouterr().err
+    assert "refused by the local-only guard" in err and "cloud" in err
+
