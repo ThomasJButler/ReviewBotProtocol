@@ -42,7 +42,11 @@ _MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END}|{MARK_FILE})[A-
 
 TAG_WORDS = {"yagni", "delete", "stdlib", "native", "shrink"}
 # The eleven rule names the document prompt opens a title with, and forbids alone:
-# "Titles open with the rule name, then the problem, never the name alone".
+# "Titles open with the rule name, then the problem, never the name alone". A document
+# title that is only rule names is retitled from its recommendation rather than dropped:
+# round one on 2026-09-19 raised two of them and one, "Mechanism: Tech" on the unlogged
+# table, was a real catch whose whole problem sat in the recommendation, the same shape
+# round three found on the code side.
 DOC_TAG_WORDS = {"sum", "method", "quote", "source", "stale", "twin", "ref", "undefined", "tech", "mechanism", "plan"}
 # the words a bare tag list is strung together with, and the words of the instruction itself
 _TAG_GLUE = {"and", "or", "then", "the", "a", "to", "what", "remove", "never", "tag", "alone", "use"}
@@ -60,8 +64,10 @@ def _tag_only_title(title: str, tags=TAG_WORDS) -> bool:
     real ("yagni, delete unused import") is the form the prompt asks for and stays.
 
     A document is judged by DOC_TAG_WORDS instead, the eleven rule names the document
-    prompt opens a title with. The caller picks the list by the file's language, so a
-    code finding is judged by exactly the words it was before."""
+    prompt opens a title with, and the answer there is a retitle rather than a drop:
+    postprocess replaces the title from the recommendation, because round one on
+    2026-09-19 lost a real catch to the drop. The caller picks the list by the file's
+    language, so a code finding is judged by exactly the words it was before."""
     t = title.strip().lower().rstrip(".:")
     if t in tags:
         return True
@@ -332,15 +338,16 @@ def drop_rule(f: Finding, min_confidence: float, language: str = "") -> Optional
     """Why a finding is dropped before it is located, or None to go on. The
     harness applies the same rules to a raw reply so a leaderboard can count them.
 
-    The file's language picks the tag list the title rule reads, the same thing the
-    prompt itself was chosen by: a code file is judged by exactly the words it was
-    before the document pair existed, and a document by the eleven rule names whatever
-    category a finding carries, security for steering text included. The default is
-    the empty language, which is the code list."""
+    The file's language decides whether the title rule drops at all. A code file is
+    judged by exactly the words it was before the document pair existed, and the default
+    is the empty language, which is the code list. A document's tag-only title is not
+    dropped here: postprocess retitles it from the recommendation, after round one on
+    2026-09-19 dropped "Mechanism: Tech" on the unlogged-table case, a real catch that
+    carried the whole problem in its recommendation, the same shape round three found on
+    the code side. The confidence and praise rules run on a document as they do on code."""
     if f.confidence < min_confidence:
         return "confidence"
-    tags = DOC_TAG_WORDS if language in DOCUMENT_LANGUAGES else TAG_WORDS
-    if _tag_only_title(f.title, tags):
+    if language not in DOCUMENT_LANGUAGES and _tag_only_title(f.title, TAG_WORDS):
         return "tag_title"
     if _praise(f):
         return "praise"
@@ -388,9 +395,9 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float,
     file listing that was sent beside the diff, when one was: a finding that
     quotes only that listing is still dropped, because an inline comment can
     only attach to a line of the diff, but it is counted apart from a quote the
-    model invented. language is the file's language, passed straight to drop_rule so
-    the title rule reads the tag list the prompt was chosen by, and read for nothing
-    else here."""
+    model invented. language is the file's language: drop_rule reads it for the title
+    rule, and the retitle below reads it for a document title that is only rule
+    names."""
     parsed = parse_patch(patch)
     kept: List[Finding] = []
     seen = set()
@@ -408,6 +415,12 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float,
             continue
         if _instruction_title(f.title) and _title_from(f.recommendation):
             logger.info("finding retitled", rule="instruction_title", filename=_meta(filename), line=f.line, title=f.title[:120])
+            f = f.model_copy(update={"title": _title_from(f.recommendation)})
+        # a document title that is only rule names is the same shape: the finding under it is often
+        # right, so it is retitled from the recommendation rather than dropped. An empty
+        # recommendation gives no title, and the finding goes on with the one it came with.
+        elif language in DOCUMENT_LANGUAGES and _tag_only_title(f.title, DOC_TAG_WORDS) and _title_from(f.recommendation):
+            logger.info("finding retitled", rule="tag_title", filename=_meta(filename), line=f.line, title=f.title[:120])
             f = f.model_copy(update={"title": _title_from(f.recommendation)})
         located, part, kind = locate_evidence_kind(parsed, f.line, f.evidence)
         if located is None:

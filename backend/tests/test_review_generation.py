@@ -753,15 +753,19 @@ async def test_a_markdown_file_with_the_context_switch_on_gets_the_document_cont
     assert len(label) == 1 and label[0].endswith("the whole file at this commit, 7 lines")
 
 
-def test_a_document_title_is_judged_by_the_document_rule_names():
-    """The document prompt opens a title with its rule name and forbids the name
-    alone, as the code prompt does with its tags. The file's language picks the
-    list, the same thing the prompt was chosen by: in a markdown file "sum, method"
-    is two rule names and nothing else, while "sum, the total does not close" names
-    the problem after the rule and stays, and so does "delete the plan", because
-    delete is not one of the document rule names."""
+def test_a_document_title_that_is_only_rule_names_is_retitled_not_dropped():
+    """The document prompt opens a title with its rule name and forbids the name alone,
+    as the code prompt does with its tags, but the finding under a bare rule name is
+    often right: round one on 2026-09-19 dropped "Mechanism: Tech" on the unlogged-table
+    case, a real catch carrying the whole problem in its recommendation. So in a markdown
+    file "mechanism" and "sum, method" keep their findings and take the first sentence of
+    the recommendation as a title, while "sum, the total does not close" names the problem
+    after the rule and keeps its own, and so does "delete the plan", because delete is not
+    one of the document rule names. The two retitled findings are given different
+    recommendations because a retitle that gave both the same title on the same line would
+    be a duplicate."""
     findings = [
-        _doc("mechanism", "mechanism"),
+        _doc("mechanism", "mechanism", recommendation="Say that the boxes are billed monthly."),
         _doc("arithmetic", "sum, method"),
         _doc("arithmetic", "sum, the total does not close"),
         _doc("quality", "delete the plan"),
@@ -769,8 +773,21 @@ def test_a_document_title_is_judged_by_the_document_rule_names():
     counts = {}
     kept, dropped = postprocess(FileReview(findings=findings, summary=""), MD_DIFF, 0.5,
                                 language="markdown", counts=counts)
-    assert [f.title for f in kept.findings] == ["sum, the total does not close", "delete the plan"]
-    assert dropped == 2 and counts == {"tag_title": 2}
+    assert [f.title for f in kept.findings] == ["Say that the boxes are billed monthly.", "Write 36 pounds a month.",
+                                                "sum, the total does not close", "delete the plan"]
+    assert dropped == 0 and counts == {}
+
+
+def test_a_document_rule_name_title_with_an_empty_recommendation_never_reaches_the_retitle():
+    """The retitle replaces a title only when the recommendation gives one, so a bare
+    rule name over an empty recommendation is never handed on with an empty title. It
+    never reaches the retitle either: an empty recommendation is a finding that says
+    nothing at all, which the praise rule drops first."""
+    counts = {}
+    kept, dropped = postprocess(FileReview(findings=[_doc("mechanism", "mechanism", recommendation="")], summary=""),
+                                MD_DIFF, 0.5, language="markdown", counts=counts)
+    assert [f.title for f in kept.findings] == []
+    assert dropped == 1 and counts == {"praise": 1}
 
 
 def test_a_title_with_no_language_named_is_judged_by_the_code_tag_words():

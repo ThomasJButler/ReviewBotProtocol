@@ -2349,9 +2349,14 @@ CASES = [
             '+\n'
             '+The total is the figure the summary quotes.\n'
         ),
-        expect=(7,),
+        expect=(5, 6, 7),
         expect_category=('arithmetic',),
         min_severity='medium',
+        note=(
+            'Widened to the two figure rows on 2026-09-19 after round one located a correct finding '
+            'on line 5, the repeat quoting a figure row rather than the total it does not add up to '
+            '(docs/PROMPT_DESIGN.md section 7).'
+        ),
         source='sum',
     ),
     Case(
@@ -2454,9 +2459,14 @@ CASES = [
             '+\n'
             ' ## Next\n'
         ),
-        expect=(19,),
+        expect=(17, 19),
         expect_category=('mechanism',),
         min_severity='high',
+        note=(
+            'Widened to the heading on 2026-09-19 after round one located a correct finding on it, '
+            'the repeat quoting the three lines of the block from the heading down '
+            '(docs/PROMPT_DESIGN.md section 7).'
+        ),
         source='mechanism',
     ),
     Case(
