@@ -2,19 +2,26 @@
 
 import json
 import re
+import sys
+from pathlib import Path
 
 import pytest
 import structlog
 
 from config.settings import settings
-from services.ai_reviewer import FileReviewer, parse_file_review, postprocess
+from services.ai_reviewer import FileReviewer, drop_rule, parse_file_review, postprocess
 from services.comment_renderer import render_review, sanitise
 from services.prompts import (MARK_BEGIN, MARK_END, MARK_FILE, HUMAN_TEMPLATE, HUMAN_TEMPLATE_WITH_CONTEXT,
-                              SYSTEM_PROMPT, SYSTEM_PROMPT_HEAD, SYSTEM_PROMPT_EVIDENCE_ON, review_prompt,
-                              review_prompt_with_context)
-from services.schemas import FileReview
+                              SYSTEM_PROMPT, SYSTEM_PROMPT_HEAD, FILE_CONTEXT_RULE, SYSTEM_PROMPT_EVIDENCE_ON,
+                              DOC_SYSTEM_PROMPT, DOC_SYSTEM_PROMPT_HEAD, DOC_SYSTEM_PROMPT_EVIDENCE_ON,
+                              DOC_SYSTEM_PROMPT_WITH_CONTEXT, DOC_CROSS_SYSTEM_PROMPT,
+                              doc_review_prompt_with_context, review_prompt, review_prompt_with_context)
+from services.schemas import FileReview, Finding
 from tests.conftest import DIFF
 from tests.fakes import RecordingChatModel
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import prompt_eval as H  # noqa: E402
 
 GOOD = json.dumps({"findings": [
     {"category": "security", "severity": "critical", "title": "eval on user input", "line": 2,
@@ -554,6 +561,37 @@ def test_the_system_prompt_is_its_two_halves_joined_byte_for_byte():
     assert SYSTEM_PROMPT_EVIDENCE_ON.startswith("Evidence: the line copied from the diff")
 
 
+def test_the_document_prompt_is_its_two_halves_joined_byte_for_byte():
+    """The document prompt is split at the same seam as the code prompt, so the
+    file-context rule sits directly above the evidence rule in both. The halves are
+    docs/MARKDOWN_REVIEW_PLAN.md section 3 as drafted on 2026-09-19."""
+    assert DOC_SYSTEM_PROMPT == DOC_SYSTEM_PROMPT_HEAD + DOC_SYSTEM_PROMPT_EVIDENCE_ON
+    assert DOC_SYSTEM_PROMPT_WITH_CONTEXT == (DOC_SYSTEM_PROMPT_HEAD + FILE_CONTEXT_RULE
+                                              + DOC_SYSTEM_PROMPT_EVIDENCE_ON)
+    assert DOC_SYSTEM_PROMPT_EVIDENCE_ON.startswith("Evidence: one line copied from the diff")
+
+
+def test_the_document_prompts_pass_the_harness_rule_for_a_candidate():
+    """scripts/prompt_eval.py loads a *.txt candidate only when it holds one
+    {data_begin}, one {data_end} and no other brace, because the text becomes a
+    ChatPromptTemplate and any other brace is read as a variable. The shipped
+    document prompts are measured as candidates, so they meet the same rule."""
+    for prompt in (DOC_SYSTEM_PROMPT, DOC_SYSTEM_PROMPT_WITH_CONTEXT, DOC_CROSS_SYSTEM_PROMPT):
+        H._validate_candidate(prompt, "document prompt")
+
+
+def test_the_document_prompts_name_the_five_document_categories_and_no_code_one():
+    """The category enum is the grammar handed to Ollama, so a finding can only
+    carry a value the enum has. Naming performance, quality or accessibility in a
+    document prompt sends the model hunting for code problems in prose, and filing a
+    stale count under quality scores nothing in prompt_judge.py's category column."""
+    for prompt in (DOC_SYSTEM_PROMPT, DOC_CROSS_SYSTEM_PROMPT):
+        for word in ("performance", "quality", "accessibility"):
+            assert not re.search(rf"\b{word}\b", prompt, re.IGNORECASE), f"{word} is a code category"
+        for word in ("arithmetic", "consistency", "reference", "mechanism", "plan"):
+            assert re.search(rf"\b{word}\b", prompt, re.IGNORECASE), f"{word} is unnamed"
+
+
 async def test_the_file_context_reaches_the_model_inside_the_data_delimiters_with_its_label():
     fake = RecordingChatModel(response=GOOD)
     result = await _reviewer_with_context(fake).review_file("app.py", "python", "modified", DIFF, FILE_TEXT)
@@ -653,3 +691,150 @@ def test_postprocess_only_asks_the_new_question_when_a_block_was_sent():
     postprocess(FileReview(findings=[made_up], summary=""), DIFF, 0.5, counts=counts,
                 context_text="lines 1 to 9 of 9\n    return CONFIG[value]\n")
     assert counts == {"outside_diff": 1}
+
+
+# ---------------------------------------------------------------- the document prompt pair
+
+# A markdown file whose one arithmetic line does not close: three boxes at 12 is 36, not 40.
+MD_LINE = "Three boxes at 12 pounds a month is 40 pounds a month."
+MD_DIFF = ("@@ -0,0 +1,3 @@\n"
+           "+# Cost model\n"
+           "+\n"
+           "+" + MD_LINE + "\n")
+# The same file after two lines were added to it, so a listing of it is more than the diff
+# already holds and the file block is rendered.
+MD_TEXT = ("# Cost model\n"
+           "\n"
+           "## Costs\n"
+           "\n"
+           + MD_LINE + "\n"
+           "\n"
+           "Every box is billed monthly.\n")
+MD_CONTEXT_DIFF = ("@@ -3,3 +3,5 @@\n"
+                   " ## Costs\n"
+                   " \n"
+                   "+" + MD_LINE + "\n"
+                   "+\n"
+                   " Every box is billed monthly.\n")
+
+
+def _doc(category, title, recommendation="Write 36 pounds a month.", line=3, evidence=MD_LINE):
+    return {"category": category, "severity": "medium", "title": title, "line": line,
+            "evidence": evidence, "recommendation": recommendation, "confidence": 0.9}
+
+
+async def test_a_markdown_file_gets_the_document_prompt_and_a_python_file_the_code_one():
+    """The prompt is chosen per file, not per reviewer: one pull request holds both
+    languages and one FileReviewer reviews all of it."""
+    fake = RecordingChatModel()
+    reviewer = FileReviewer(fake, settings)
+    await reviewer.review_file("docs/plan.md", "markdown", "added", MD_DIFF)
+    await reviewer.review_file("app.py", "python", "modified", DIFF)
+    document, code = fake.calls[0][0].content, fake.calls[1][0].content
+    assert document.startswith("You are ReviewBot's document reviewer")
+    assert "security and accessibility specialist" not in document
+    assert code.startswith("You are ReviewBot, a security and accessibility specialist")
+
+
+async def test_a_markdown_file_with_the_context_switch_on_gets_the_document_context_prompt():
+    """The pairing the runner builds when the switch is on: both prompts carrying the
+    file-context rule, so a markdown file with a listing beside it is read by the
+    document prompt that knows the listing is there."""
+    fake = RecordingChatModel()
+    reviewer = FileReviewer(fake, ON, prompt=review_prompt_with_context, doc_prompt=doc_review_prompt_with_context)
+    result = await reviewer.review_file("docs/plan.md", "markdown", "modified", MD_CONTEXT_DIFF, MD_TEXT)
+    assert result.error is None
+    assert result.review.summary != "Review skipped: prompt boundary check failed."
+    system = fake.calls[0][0].content
+    assert system.startswith("You are ReviewBot's document reviewer")
+    assert "File context: when a listing of this file" in system
+    human = _human(fake)
+    label = [line for line in human.split("\n") if MARK_FILE in line]
+    assert len(label) == 1 and label[0].endswith("the whole file at this commit, 7 lines")
+
+
+def test_a_document_title_that_is_only_rule_names_is_retitled_not_dropped():
+    """The document prompt opens a title with its rule name and forbids the name alone,
+    as the code prompt does with its tags, but the finding under a bare rule name is
+    often right: round one on 2026-09-19 dropped "Mechanism: Tech" on the unlogged-table
+    case, a real catch carrying the whole problem in its recommendation. So in a markdown
+    file "mechanism" and "sum, method" keep their findings and take the first sentence of
+    the recommendation as a title, while "sum, the total does not close" names the problem
+    after the rule and keeps its own, and so does "delete the plan", because delete is not
+    one of the document rule names. The two retitled findings are given different
+    recommendations because a retitle that gave both the same title on the same line would
+    be a duplicate."""
+    findings = [
+        _doc("mechanism", "mechanism", recommendation="Say that the boxes are billed monthly."),
+        _doc("arithmetic", "sum, method"),
+        _doc("arithmetic", "sum, the total does not close"),
+        _doc("quality", "delete the plan"),
+    ]
+    counts = {}
+    kept, dropped = postprocess(FileReview(findings=findings, summary=""), MD_DIFF, 0.5,
+                                language="markdown", counts=counts)
+    assert [f.title for f in kept.findings] == ["Say that the boxes are billed monthly.", "Write 36 pounds a month.",
+                                                "sum, the total does not close", "delete the plan"]
+    assert dropped == 0 and counts == {}
+
+
+def test_a_document_rule_name_title_with_an_empty_recommendation_never_reaches_the_retitle():
+    """The retitle replaces a title only when the recommendation gives one, so a bare
+    rule name over an empty recommendation is never handed on with an empty title. It
+    never reaches the retitle either: an empty recommendation is a finding that says
+    nothing at all, which the praise rule drops first."""
+    counts = {}
+    kept, dropped = postprocess(FileReview(findings=[_doc("mechanism", "mechanism", recommendation="")], summary=""),
+                                MD_DIFF, 0.5, language="markdown", counts=counts)
+    assert [f.title for f in kept.findings] == []
+    assert dropped == 1 and counts == {"praise": 1}
+
+
+def test_a_title_with_no_language_named_is_judged_by_the_code_tag_words():
+    """The language defaults to the empty string and the empty string is the code
+    list, so a caller that names no language gets exactly the code path it had
+    before the document pair existed: "yagni, delete" is the tag list and goes,
+    and "mechanism" names no code tag and stays."""
+    findings = [_doc("quality", "yagni, delete"), _doc("mechanism", "mechanism")]
+    counts = {}
+    kept, dropped = postprocess(FileReview(findings=findings, summary=""), MD_DIFF, 0.5, counts=counts)
+    assert [f.title for f in kept.findings] == ["mechanism"]
+    assert dropped == 1 and counts == {"tag_title": 1}
+
+
+def test_a_document_category_on_a_code_file_is_still_judged_by_the_code_tags():
+    """The grammar hands all nine categories to both prompts, so a Python file's
+    reply can come back filed under plan. Keying the tag list on the category let
+    such a finding out of the tag_title drop it took before this branch; keying it
+    on the file's language does not, and the same finding in a markdown file names
+    no document rule and stays."""
+    f = Finding(**_doc("plan", "yagni, delete"))
+    assert drop_rule(f, 0.5) == "tag_title"
+    assert drop_rule(f, 0.5, "markdown") is None
+
+
+def test_the_document_prompts_own_sentence_as_a_title_is_replaced_not_dropped():
+    """The shape round three produced 42 times from the code prompt, in the document
+    prompt's words: the instruction copied into the title slot over a finding that is
+    often right. The title comes from the recommendation instead."""
+    rec = "Write 36 pounds a month, which is what three boxes at 12 gives. The total below repeats it."
+    title = "the rule name, then the problem, never the name alone"
+    kept, dropped = postprocess(FileReview(findings=[_doc("arithmetic", title, recommendation=rec)], summary=""),
+                                MD_DIFF, 0.5)
+    assert dropped == 0
+    assert [f.title for f in kept.findings] == ["Write 36 pounds a month, which is what three boxes at 12 gives."]
+
+
+async def test_the_verify_pass_is_skipped_for_a_document_and_still_runs_for_code():
+    """The verifier prompt names the four code categories and reasons about attackers,
+    so a document finding would be judged by the wrong rules. The skip is per language:
+    the same reviewer verifies the Python file in the next call."""
+    doc_reply = json.dumps({"findings": [_doc("arithmetic", "sum, the total does not close")],
+                            "summary": "A cost model."})
+    fake = RecordingChatModel(responses=[doc_reply, GOOD])
+    reviewer = FileReviewer(fake, settings, verify=True)
+    result = await reviewer.review_file("docs/plan.md", "markdown", "added", MD_DIFF)
+    assert len(fake.calls) == 1 and result.verify_calls == 0
+    assert [f.title for f in result.review.findings] == ["sum, the total does not close"]
+    code = await reviewer.review_file("app.py", "python", "modified", DIFF)
+    assert len(fake.calls) > 2 and code.verify_calls > 0

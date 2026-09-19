@@ -18,6 +18,11 @@ _EXTENSIONS = {
 }
 _SPECIAL = {'dockerfile': 'dockerfile', 'makefile': 'makefile', 'jenkinsfile': 'groovy', 'vagrantfile': 'ruby'}
 
+# The languages reviewed with the document prompt pair rather than the code one, defined once
+# so the runner and the reviewer cannot disagree. Markdown only, because that is what the corpus
+# covers; rst and text stay skipped.
+DOCUMENT_LANGUAGES = frozenset({"markdown"})
+
 
 def get_file_language(filename: str) -> str:
     name = Path(filename or "").name

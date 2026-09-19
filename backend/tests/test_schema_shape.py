@@ -1,7 +1,7 @@
 """The grammar handed to Ollama must not let the model close the review
 before it has written its findings."""
 
-from services.schemas import cross_schema, output_schema
+from services.schemas import Category, cross_schema, output_schema
 
 
 def test_findings_is_required_so_a_truncated_summary_cannot_end_the_object():
@@ -24,6 +24,22 @@ def test_the_cross_schema_can_put_the_note_first_and_keeps_every_key_required():
     assert list(first["properties"]) == ["summary_note", "verdicts", "additions"]
     assert first["required"] == ["summary_note", "verdicts", "additions"]
     assert first["properties"]["verdicts"] == default["properties"]["verdicts"]
+
+
+def test_the_category_enum_carries_the_code_values_then_the_document_ones_in_order():
+    assert [c.value for c in Category] == [
+        "security",
+        "performance",
+        "quality",
+        "accessibility",
+        "arithmetic",
+        "consistency",
+        "reference",
+        "mechanism",
+        "plan",
+    ]
+    # the grammar Ollama is handed puts the enum under $defs, and the model can emit nothing else
+    assert output_schema()["$defs"]["Category"]["enum"] == [c.value for c in Category]
 
 
 async def test_the_reviewer_binds_the_note_first_order_from_the_setting_or_the_argument():

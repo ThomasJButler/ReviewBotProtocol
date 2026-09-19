@@ -240,6 +240,26 @@ def test_a_diff_with_no_eligible_file_prints_nothing_to_review_and_exits_zero(tm
     assert "  README.md: not code" in out
 
 
+def test_the_markdown_flag_sends_the_same_readme_only_diff_to_the_document_prompt(tmp_path, monkeypatch, capsys):
+    """--markdown lays REVIEW_MARKDOWN over the env file, so the file the
+    previous test leaves with nothing to review is reviewed here."""
+    clean = json.dumps({"findings": [], "summary": "Nothing wrong with it."})
+    llm, _ = patch_seam(monkeypatch, reviewer=RecordingChatModel(model="qwen-fake", response=clean))
+    path = write_diff(tmp_path, section("README.md", MARKDOWN_PATCH))
+    code = R.main(["--file", path, "--env-file", "", "--markdown"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Nothing to review" not in out
+    assert "README.md: not code" not in out
+    assert "Language: markdown" in llm.seen_text
+
+    code = R.main(["--file", path, "--env-file", "", "--markdown", "--format", "json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert [f["filename"] for f in doc["files"]] == ["README.md"]
+    assert doc["skipped"] == []
+
+
 def test_a_cloud_model_tag_on_the_command_line_is_refused(tmp_path, monkeypatch, capsys):
     patch_seam(monkeypatch)
     code = R.main(["--file", write_diff(tmp_path, section("app.py", DIFF)),
