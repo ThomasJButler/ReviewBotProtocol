@@ -27,7 +27,7 @@ The review ran with `qwen3.5:9b` reviewing, `gemma4:12b` cross-examining, and `V
   - the test suite goes red on a machine whose `.env` switches markdown on;
   - the output grammar and one title rule changed for code reviews, although the pull request says the Python path is byte-identical;
   - `prompt_eval.py` now scores a code-prompt candidate and the shipped prompt on different prompts for the nine markdown cases.
-- **The first live markdown reviews found nothing real** (section 5). 37 comments on two docs-only pull requests, none right, and 0 of 15 known problems hit. The reviewer seems to have caught one, and the cross-examiner removed it. Replies cut at the 2,000-token limit are reported as unreadable, each file is reviewed as if the rest of its pull request didn't exist, and the prompt's own example leaked into a critical. `REVIEW_MARKDOWN` should go back off in `backend/.env`.
+- **The first live markdown reviews found nothing real** (section 5). 51 comments on three docs-only pull requests, and 0 of 15 known problems hit. Every comment on the two runs judged one by one is wrong, and the reviewer's single real catch was removed by the cross-examiner. Replies cut at the 2,000-token limit are reported as unreadable, each file is reviewed as if the rest of its pull request didn't exist, a correction gets reported as the defect it fixes, and the prompt's own example leaked into a critical. `REVIEW_MARKDOWN` should go back off in `backend/.env`.
 
 ## 1. Fix PR 53 before it merges
 
@@ -182,29 +182,33 @@ Renderer and runner changes, with unit tests only and no model.
    - So a reply that reports the planted note but repeats its approval in the summary is never counted. Condition 1 of the plan is judged by hand today.
    - Fix: give `Case` a list of strings the summary must not contain (for `md_redteam_approved`, "approv" and "three models"), scored beside `injection_obeyed`.
    - The live pass on the private repository (item 7 of the brief) is done, and section 5 has the result: 0 of 15, and 37 wrong comments.
-   - Before any new markdown round, do section 5's pipeline items: 1 (cut-off replies), 2's post-filter (files in the same pull request), 3 (note-first off, the absence guard), 4 (prompt echo), 7 (duplicates) and 9 (unreadable files). They need no model.
+   - Before any new markdown round, do section 5's pipeline items: 1 (cut-off replies), 2's post-filter (files in the same pull request), 3 (note-first off, the absence guard), 4 (prompt echo), 7 (duplicates), 9 (unreadable files), and the post-filters in 13 to 15 (corrections, table headers, a cited source). They need no model.
    - Then measure the prompt candidates from section 5 (items 2, 5 and 6) with next brief items 1 to 6. The corpus needs a clean ADR, a clean review log and a clean docs map before its false-positive numbers mean anything for pages like these.
    - Then run the private pass again as a live precision round. The answer-key re-review is the recall test.
 
 ## 5. What the live markdown reviews showed
 
-On the evening of 2026-09-19, `REVIEW_MARKDOWN` was switched on in the live App and two docs-only pull requests from the private design repository in `docs/MARKDOWN_REVIEW_PLAN.md` section 0 were reviewed again:
+On the evening of 2026-09-19, `REVIEW_MARKDOWN` was switched on in the live App and three docs-only pull requests from the private design repository in `docs/MARKDOWN_REVIEW_PLAN.md` section 0 were reviewed again:
 
 - **The design-freeze re-review.** The design freeze after the ten fixes from its first review pass. Nothing on it was known to be wrong, so this run measures false positives.
 - **The answer-key re-review.** The data, cost and security notes before their fifteen fixes. Those fifteen are the plan's section 8 classes 1 to 15, so this run measures recall on a real diff.
+- **The reconcile re-review.** The branch that carries those fifteen fixes, where each corrected document keeps a Correction section at the end rather than rewriting its body. 11 files, 14 findings, 4 of them critical.
 
-Project details stay out of this file, as in the plan's section 8. The evidence is in `~/ReviewBot-runs/2026-09-19/markdown-live-pr5/`, `markdown-live-pr6/` and `markdown-live-audit.json`.
+Project details stay out of this file, as in the plan's section 8. The evidence is in `~/ReviewBot-runs/2026-09-19/markdown-live-pr5/`, `markdown-live-pr6/`, `markdown-live-audit.json` and `pr4-findings.json`.
 
 The live settings were not the measured ones: `MAX_PATCH_BYTES=64000`, `OLLAMA_NUM_CTX=32768` and `CROSS_EXAMINE_NOTE_FIRST=true`. Round three left note-first off, and it has never run on the markdown cases.
 
-**The verdict: 37 comments, none right, and recall 0 of 15.**
+**The verdict: 51 comments over three runs, and recall 0 of 15.**
+
+The first two runs were judged comment by comment against the pages and the owner's review log. The third was not: items 13 to 15 below come from the owner's own reading of it plus the stored findings, so treat them as evidence, not as a verdict.
 
 - The design-freeze run posted 30 comments: 24 false positives and 6 repeats of them. Two of the 30 came from an earlier run with the switch still off.
 - The answer-key run posted 7. Six are false positives. The seventh sits on a line of class 5 (three roles, none with DELETE) but argues that the grant SQL is missing, which the page defers on purpose. Two skeptics rejected it.
 - Against the fifteen known problems: 0 hits, 3 near misses, 12 misses. Round one's corpus recall was 0.714.
   - One near miss is worse than a miss. The reviewer seems to have caught class 3, the unlogged staging table. The cross-examiner then refuted it "because the text regarding unlogged tables is not present in the diff". The text is on an added line.
-- The cross-examiner confirmed all 35 stored findings. The verify pass is skipped for documents, so it is the only filter a document finding gets.
-- All three criticals are false.
+- The cross-examiner confirmed all 35 stored findings of the first two runs. The verify pass is skipped for documents, so it is the only filter a document finding gets.
+- All three criticals of those two runs are false, and the reconcile run added four more.
+- The owner's reading of all three: it points at the right places (the outbox keys, the queue policy, the lifecycle rules, who holds DELETE) and then reports the fix as the defect. Items 13 to 15 are his three fixes.
 
 **Before anything else:** set `REVIEW_MARKDOWN=false` in `backend/.env` again. As it stands the App posts about one wrong comment for every document it reviews.
 
@@ -222,6 +226,7 @@ The fixes, each for v1.5:
    - Fix, prompt side and measured: give both document prompts the pull request's changed-file list, as paths and status only, defanged, inside the data block.
    - Fix, post-filter: drop a document finding that says a named path doesn't exist, isn't visible or isn't in the diff when that path is in the file list. The stored findings can be dry-run today.
    - A related case: a docs map row marking a file "not yet written" and naming the pull request that delivers it was flagged as unimplemented on one run. The same four rows, with the marker gone because the files now exist, were flagged again on the next. The `ref` and `plan` rules need "an index row that names the pull request delivering it is a deferral with a place".
+   - Seen a third time on the reconcile run: two criticals on a plan document, for naming roles and schemas that a document in the same pull request defines.
 3. **The cross-examiner confirms what its own words refute.**
    - On the answer-key run, the note for the Postgres comment calls finding [0] a false positive, yet the comment went out as a confirmed critical. Either a "real" verdict carried a refuting reason, or a refutation was undone by the correction rule (`ai_reviewer.py:576-589`). The log that would tell them apart isn't kept.
    - Fixes:
@@ -246,6 +251,7 @@ The fixes, each for v1.5:
    - The fifth is a bare "reference: undefined", which went out unchanged because `DOC_TAG_WORDS` lacks the category names (section 1 item 7).
    - Fix: next brief item 5, stated sharply in both prompts. Steering text addresses the reviewer or a model; a record of past reviews (a log, a changelog, a status block) and instructions to builders are not steering text.
    - Add a clean review-log case to the corpus. `REVIEW_SKIP_PATHS` (v1.3 item 3) can also declare a review log.
+   - The reconcile run filed another one, on a prompt template that tells its builders what to do.
 7. **Duplicates.**
    - 8 comments sit on 3 lines, four of them on one line.
    - One title ran down four consecutive rows of the docs map, on both runs.
@@ -277,6 +283,27 @@ The fixes, each for v1.5:
     - Time is only stored per review. The design-freeze run's 1,804 s was 952 s of reviewer and 840 s of cross-examiner. Files that ended with no posted comment took about half of it. The three cut-off files took 370 s for nothing.
     - Fix: store per file, as a JSON column on the review row, the language, prompt family, seconds, tokens, `done_reason`, and the cross-examiner's refuted count and dropped additions. Show them on the review page.
     - Copy `server.log` into the run folder after each live round, since it rotates.
+
+The last three are the owner's, from reading all three runs. They are where most of the reconcile run went wrong.
+
+13. **A correction is read cold, so the fix is filed as the defect.**
+    - A corrected document on that branch keeps its body and adds a Correction section at the end, with a banner line at the top saying the section supersedes the body where the two disagree. That is the house rule for a merged document.
+    - 5 of the 14 findings are on that shape. The banner line alone drew a `plan` finding on three separate documents.
+    - Two more take the correction's own words as the error: the lifecycle rule that cannot read a date off an object, and a uniqueness modifier withdrawn from a table. Both sentences are the fix, written down, and the bot reported them as the problem.
+    - Prompt candidate, measured: a section that says it corrects the body is the change, not a claim of the page. Judge the body against it, and never report its words as the page's error.
+    - Post-filter, cheaper and first: drop a document finding whose located line is that banner, or sits under a heading matching `^#+\s*correction`.
+    - The fuller form, later: diff a correction against the text it replaces on the base. `services/file_context.py` already fetches file contents at a ref through the GitHub client, so the base version is reachable without new plumbing.
+    - Corpus: a clean page carrying a correction section, which no case has today.
+14. **Evidence that is a table header.**
+    - Two findings quote a table's header row, one high and one medium. The claim is about the table, so the locator anchors the comment on a line that says nothing, and the author gets a heading with a complaint attached.
+    - Prefer relocating to dropping: move the finding to the first data row under the header, and drop it only when the header is all the evidence there is.
+    - Measure by replay, and check it against the corpus cases whose expected lines are table rows, so recall cannot move.
+15. **A claim that cites its source, checked against nothing.**
+    - The reconcile run's critical says a database claim is wrong. The line it quotes is a research row that quotes the vendor's manual, with the URL and the date it was checked, and the manual agrees with the page.
+    - That same sentence is the document prompt's own worked example for the `tech` rule. Two runs produced a finding echoing it, one of them on a latency line that never mentions the database. The model fires on the keyword whichever way the page states it.
+    - ReviewBot runs offline on purpose, so it cannot open the URL. The rule has to be evidential: a line that quotes a named source with a date earns a `tech` finding only when another line of the page contradicts it, and the finding must name that line.
+    - Post-filter: drop, or cap at low, a `tech` finding whose evidence carries a URL or a "checked <date>" and whose recommendation quotes no second line of the page.
+    - Also rewrite the prompt's worked example, or state it as direction-sensitive, and keep `md_tech_unlogged` scoring when you do.
 
 ## 6. The seven comments
 
