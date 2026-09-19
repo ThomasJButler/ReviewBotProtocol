@@ -2,6 +2,8 @@
 
 import json
 import re
+import sys
+from pathlib import Path
 
 import pytest
 import structlog
@@ -10,11 +12,16 @@ from config.settings import settings
 from services.ai_reviewer import FileReviewer, parse_file_review, postprocess
 from services.comment_renderer import render_review, sanitise
 from services.prompts import (MARK_BEGIN, MARK_END, MARK_FILE, HUMAN_TEMPLATE, HUMAN_TEMPLATE_WITH_CONTEXT,
-                              SYSTEM_PROMPT, SYSTEM_PROMPT_HEAD, SYSTEM_PROMPT_EVIDENCE_ON, review_prompt,
+                              SYSTEM_PROMPT, SYSTEM_PROMPT_HEAD, FILE_CONTEXT_RULE, SYSTEM_PROMPT_EVIDENCE_ON,
+                              DOC_SYSTEM_PROMPT, DOC_SYSTEM_PROMPT_HEAD, DOC_SYSTEM_PROMPT_EVIDENCE_ON,
+                              DOC_SYSTEM_PROMPT_WITH_CONTEXT, DOC_CROSS_SYSTEM_PROMPT, review_prompt,
                               review_prompt_with_context)
 from services.schemas import FileReview
 from tests.conftest import DIFF
 from tests.fakes import RecordingChatModel
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import prompt_eval as H  # noqa: E402
 
 GOOD = json.dumps({"findings": [
     {"category": "security", "severity": "critical", "title": "eval on user input", "line": 2,
@@ -552,6 +559,37 @@ def test_the_system_prompt_is_its_two_halves_joined_byte_for_byte():
     character, or every benchmark in docs/benchmarks is about another prompt."""
     assert SYSTEM_PROMPT == SYSTEM_PROMPT_HEAD + SYSTEM_PROMPT_EVIDENCE_ON
     assert SYSTEM_PROMPT_EVIDENCE_ON.startswith("Evidence: the line copied from the diff")
+
+
+def test_the_document_prompt_is_its_two_halves_joined_byte_for_byte():
+    """The document prompt is split at the same seam as the code prompt, so the
+    file-context rule sits directly above the evidence rule in both. The halves are
+    docs/MARKDOWN_REVIEW_PLAN.md section 3 as drafted on 2026-09-19."""
+    assert DOC_SYSTEM_PROMPT == DOC_SYSTEM_PROMPT_HEAD + DOC_SYSTEM_PROMPT_EVIDENCE_ON
+    assert DOC_SYSTEM_PROMPT_WITH_CONTEXT == (DOC_SYSTEM_PROMPT_HEAD + FILE_CONTEXT_RULE
+                                              + DOC_SYSTEM_PROMPT_EVIDENCE_ON)
+    assert DOC_SYSTEM_PROMPT_EVIDENCE_ON.startswith("Evidence: one line copied from the diff")
+
+
+def test_the_document_prompts_pass_the_harness_rule_for_a_candidate():
+    """scripts/prompt_eval.py loads a *.txt candidate only when it holds one
+    {data_begin}, one {data_end} and no other brace, because the text becomes a
+    ChatPromptTemplate and any other brace is read as a variable. The shipped
+    document prompts are measured as candidates, so they meet the same rule."""
+    for prompt in (DOC_SYSTEM_PROMPT, DOC_SYSTEM_PROMPT_WITH_CONTEXT, DOC_CROSS_SYSTEM_PROMPT):
+        H._validate_candidate(prompt, "document prompt")
+
+
+def test_the_document_prompts_name_the_five_document_categories_and_no_code_one():
+    """The category enum is the grammar handed to Ollama, so a finding can only
+    carry a value the enum has. Naming performance, quality or accessibility in a
+    document prompt sends the model hunting for code problems in prose, and filing a
+    stale count under quality scores nothing in prompt_judge.py's category column."""
+    for prompt in (DOC_SYSTEM_PROMPT, DOC_CROSS_SYSTEM_PROMPT):
+        for word in ("performance", "quality", "accessibility"):
+            assert not re.search(rf"\b{word}\b", prompt, re.IGNORECASE), f"{word} is a code category"
+        for word in ("arithmetic", "consistency", "reference", "mechanism", "plan"):
+            assert re.search(rf"\b{word}\b", prompt, re.IGNORECASE), f"{word} is unnamed"
 
 
 async def test_the_file_context_reaches_the_model_inside_the_data_delimiters_with_its_label():
