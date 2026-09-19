@@ -1,8 +1,10 @@
 """Retention: reviews.db must not grow forever. Every review keeps quoted
 lines of the code it reviewed, so a year is the default and 0 keeps all.
 
-sweep() deletes reviews (with their findings) and webhook deliveries older
-than REVIEW_RETENTION_DAYS, never a row that is still running or queued.
+sweep() deletes reviews (with their findings) older than REVIEW_RETENTION_DAYS,
+never a row that is still running or queued, and strips webhook deliveries that
+old to a tombstone of id, body hash, event and received time: that hash is the
+only thing that makes a replayed signed body a replay, so it outlives the data.
 run_nightly() sweeps at startup and then once a day until cancelled. What
 is worth keeping longer is exported first with scripts/export_reviews.py."""
 
@@ -31,10 +33,10 @@ def cutoff_for(settings: Settings, now: Optional[datetime] = None) -> Optional[d
 async def sweep(session_factory: async_sessionmaker, settings: Settings, now: Optional[datetime] = None) -> Dict[str, int]:
     cutoff = cutoff_for(settings, now)
     if cutoff is None:
-        return {"reviews": 0, "findings": 0, "deliveries": 0}
+        return {"reviews": 0, "findings": 0, "deliveries_expired": 0}
     async with session_factory() as session:
         counts = await ReviewRepository(session).delete_older_than(cutoff)
-        counts["deliveries"] = await WebhookRepository(session).delete_older_than(cutoff)
+        counts["deliveries_expired"] = await WebhookRepository(session).expire_older_than(cutoff)
     if any(counts.values()):
         logger.info("retention sweep", days=settings.REVIEW_RETENTION_DAYS, **counts)
     return counts

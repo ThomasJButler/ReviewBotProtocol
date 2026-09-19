@@ -61,6 +61,7 @@ const STATUS_STYLES: Record<string, string> = {
   ignored: GREY,
   skipped_draft: GREY,
   skipped_bot: GREY,
+  expired: GREY,
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -77,6 +78,7 @@ const STATUS_LABELS: Record<string, string> = {
   ignored: 'Ignored',
   skipped_draft: 'Draft, skipped',
   skipped_bot: 'Bot author, skipped',
+  expired: 'Expired',
 }
 
 /** The state of a review run. Lives here so both badges share one palette. */

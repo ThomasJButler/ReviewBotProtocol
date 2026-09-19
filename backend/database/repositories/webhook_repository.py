@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, desc, select, update
+from sqlalchemy import desc, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,13 +63,22 @@ class WebhookRepository:
         await self.session.commit()
         return int(result.rowcount or 0)
 
-    async def delete_older_than(self, cutoff: datetime) -> int:
-        """Deliveries received before the cutoff, unless queued or running. A body
-        replayed after that long is accepted again, which is why the cutoff is a
-        year and not a week."""
+    async def expire_older_than(self, cutoff: datetime) -> int:
+        """Deliveries received before the cutoff are stripped to a tombstone, not
+        deleted: the delivery id, the SHA-256 of the signed body, the event and
+        the received time stay, with status "expired"; the repository, pull
+        request, head, action and review link go. GitHub's HMAC carries no
+        timestamp, so the stored hash is the only thing that makes a captured
+        body a replay, and it has to outlive the review data. record() reads any
+        status outside failed and interrupted as a duplicate, so a tombstone
+        refuses a replay with no other code; a failed or interrupted row past
+        the cutoff expires too, since a body that old arriving again is a
+        replay rather than a redelivery. Queued and running rows are left alone,
+        and an expired row is not rewritten, so each row is counted once."""
         result = await self.session.execute(
-            delete(WebhookDelivery).where(WebhookDelivery.received_at < cutoff,
-                                          WebhookDelivery.status.notin_(("queued", "running"))))
+            update(WebhookDelivery)
+            .where(WebhookDelivery.received_at < cutoff, WebhookDelivery.status.notin_(("queued", "running", "expired")))
+            .values(status="expired", action=None, repository=None, pr_number=None, head_sha=None, review_id=None))
         await self.session.commit()
         return int(result.rowcount or 0)
 

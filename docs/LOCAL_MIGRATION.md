@@ -120,24 +120,24 @@ Post-processing per finding: drop it if line is outside any hunk of the new file
 
 ## Settings
 
-| Setting                                                  | Default                           | Notes                                                                 |
-| -------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
-| HOST / PORT                                              | 127.0.0.1 / 8000                  |                                                                       |
-| ALLOWED_HOSTS                                            | localhost,127.0.0.1               | comma list; the tunnel hostname goes here                             |
-| GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET | required                          | unchanged                                                             |
-| OLLAMA_BASE_URL                                          | http://127.0.0.1:11434            |                                                                       |
-| OLLAMA_MODEL                                             | qwen3.5:9b                        | qwen3-coder:30b once pulled                                           |
-| OLLAMA_NUM_CTX                                           | 16384                             | fixed per model to avoid reloads                                      |
-| OLLAMA_NUM_PREDICT                                       | 2000                              |                                                                       |
-| REVIEW_TIMEOUT_SECONDS                                   | 3600                              | whole review                                                          |
-| REVIEW_RETENTION_DAYS                                    | 365                               | nightly delete of older reviews, findings and deliveries; 0 keeps all |
-| REVIEW_SECONDS_PER_FILE                                  | 300                               | files times this, under the ceiling; 0 leaves only the ceiling        |
-| MAX_FILES_PER_REVIEW                                     | 25                                |                                                                       |
-| MAX_PATCH_BYTES                                          | 32000                             | roughly 11k tokens; must fit OLLAMA_NUM_CTX                           |
-| MAX_WEBHOOK_BODY_BYTES                                   | 2097152                           | GitHub payloads are far smaller                                       |
-| LOCAL_API_TOKEN                                          | required for the dashboard routes |                                                                       |
-| LOG_PROMPTS                                              | false                             | when true, redacted prompts and raw model output are logged           |
-| DATABASE_URL                                             | sqlite:///./reviews.db            |                                                                       |
+| Setting                                                  | Default                           | Notes                                                                                            |
+| -------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| HOST / PORT                                              | 127.0.0.1 / 8000                  |                                                                                                  |
+| ALLOWED_HOSTS                                            | localhost,127.0.0.1               | comma list; the tunnel hostname goes here                                                        |
+| GITHUB_APP_ID, GITHUB_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET | required                          | unchanged                                                                                        |
+| OLLAMA_BASE_URL                                          | http://127.0.0.1:11434            |                                                                                                  |
+| OLLAMA_MODEL                                             | qwen3.5:9b                        | qwen3-coder:30b once pulled                                                                      |
+| OLLAMA_NUM_CTX                                           | 16384                             | fixed per model to avoid reloads                                                                 |
+| OLLAMA_NUM_PREDICT                                       | 2000                              |                                                                                                  |
+| REVIEW_TIMEOUT_SECONDS                                   | 3600                              | whole review                                                                                     |
+| REVIEW_RETENTION_DAYS                                    | 365                               | nightly delete of older reviews and findings; a delivery becomes a replay tombstone; 0 keeps all |
+| REVIEW_SECONDS_PER_FILE                                  | 300                               | files times this, under the ceiling; 0 leaves only the ceiling                                   |
+| MAX_FILES_PER_REVIEW                                     | 25                                |                                                                                                  |
+| MAX_PATCH_BYTES                                          | 32000                             | roughly 11k tokens; must fit OLLAMA_NUM_CTX                                                      |
+| MAX_WEBHOOK_BODY_BYTES                                   | 2097152                           | GitHub payloads are far smaller                                                                  |
+| LOCAL_API_TOKEN                                          | required for the dashboard routes |                                                                                                  |
+| LOG_PROMPTS                                              | false                             | when true, redacted prompts and raw model output are logged                                      |
+| DATABASE_URL                                             | sqlite:///./reviews.db            |                                                                                                  |
 
 ## Model matrix
 

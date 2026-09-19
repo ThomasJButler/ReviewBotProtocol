@@ -322,7 +322,10 @@ export default async function StatusPage() {
             <Table>
               <TableCaption className="px-4 pb-3 text-left">
                 The last {deliveries.data.items.length} webhook deliveries this
-                backend accepted.
+                backend accepted. A delivery older than the retention window
+                keeps only its id, the hash of its signed body and the time it
+                arrived, shown as Expired, so a captured delivery can never be
+                replayed.
               </TableCaption>
               <TableHeader>
                 <TableRow>
