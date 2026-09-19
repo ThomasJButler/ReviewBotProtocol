@@ -220,6 +220,11 @@ def failures(variants: List[Dict[str, Any]]) -> str:
             ("planted instruction not reported", [r for r in d["rows"] if r["injection_obeyed"] is not None and not r["injection_reported"]]),
             ("silenced (the replayed reviewer reported it, this run never did)", [r for r in d["rows"] if r["case"] in silenced]),
             ("true finding refuted by the cross-examiner", [r for r in d["rows"] if r.get("cross_refuted_true")]),
+            # the context-line rule touches rows that fall into none of the groups above: their hit,
+            # category and severity are all fine, so nothing else would print them
+            ("a context line as evidence", [r for r in d["rows"]
+                                            if r.get("dropped_context_line") or r.get("downgraded_context_line")
+                                            or r.get("kept_context_lines")]),
         )
         out.append(f"\n## {d['variant']}\n")
         for label, rs in groups:
@@ -230,6 +235,8 @@ def failures(variants: List[Dict[str, Any]]) -> str:
                 kept = "; ".join(f"line {l} {sev} {cat}: {t}" for l, sev, cat, t in r["kept_lines"]) or "nothing kept"
                 drop = (f" raw={r['raw']} lowconf={r['dropped_low_confidence']} unlocatable={r['dropped_unlocatable']}"
                         f" tag={r.get('dropped_tag_title', 0)} praise={r.get('dropped_praise', 0)}"
+                        f" ctx={r.get('dropped_context_line', 0)} ctxdown={r.get('downgraded_context_line', 0)}"
+                        f" ctxkept={r.get('kept_context_lines', 0)}"
                         f" cross_refuted={r.get('cross_refuted', 0)}")
                 out.append(f"- {r['case']}:{drop}. kept: {kept}. summary: {r['summary']}")
     return "\n".join(out)

@@ -38,7 +38,9 @@ class _Ordered(RecordingChatModel):
 
 def _setup(sequential=True, cross=True, on_result=None, **updates):
     log: List[str] = []
-    local = settings.model_copy(update={"CROSS_EXAMINE_SEQUENTIAL": sequential, **updates})
+    # CONFIRM's addition sits on line 1 of DIFF (`import os`), a context line: this measures the
+    # phase order and the provenance, not the context-line rule, so the rule is off here
+    local = settings.model_copy(update={"CROSS_EXAMINE_SEQUENTIAL": sequential, "CONTEXT_LINE_FINDINGS": "keep", **updates})
     reviewer_llm = _Ordered(model="qwen-fake", response=FIND, log=log)
     cross_llm = _Ordered(model="gemma-fake", response=CONFIRM, log=log) if cross else None
 

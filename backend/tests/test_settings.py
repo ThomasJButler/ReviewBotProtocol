@@ -81,6 +81,21 @@ def test_verify_findings_is_off_by_default_and_parses_like_the_other_booleans():
         assert Settings(_env_file=None, VERIFY_FINDINGS=raw).VERIFY_FINDINGS is want, raw
 
 
+def test_the_context_line_policy_accepts_its_four_names_and_refuses_anything_else():
+    for raw, want in ((" KEEP ", "keep"), ("Drop", "drop"), ("downgrade", "downgrade"), ("CONFIDENCE", "confidence")):
+        assert Settings(_env_file=None, CONTEXT_LINE_FINDINGS=raw).CONTEXT_LINE_FINDINGS == want, raw
+    with pytest.raises(ValueError, match="CONTEXT_LINE_FINDINGS"):
+        Settings(_env_file=None, CONTEXT_LINE_FINDINGS="drpo")
+
+
+def test_the_shipped_context_line_policy_is_the_one_the_benchmark_addendum_picked():
+    """Asserted as the literal, so the class and docs/benchmarks cannot drift: the
+    2026-09-12 replays left every corpus number unmoved and the real-code audit
+    said drop."""
+    s = Settings(_env_file=None)
+    assert s.CONTEXT_LINE_FINDINGS == "drop" and s.CONTEXT_LINE_MIN_CONFIDENCE == 0.9
+
+
 def test_a_key_that_is_not_a_private_key_is_refused_at_startup():
     with pytest.raises(ValueError, match="GITHUB_PRIVATE_KEY"):
         Settings(_env_file=None, GITHUB_PRIVATE_KEY="-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----")
