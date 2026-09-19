@@ -9,6 +9,6 @@ aiosqlite==0.22.1
 structlog==26.1.0
 PyJWT==2.13.0
 cryptography==50.0.1
-langchain-core==1.6.1
+langchain-core==1.6.2
 langgraph==1.2.11
 langchain-ollama==1.1.0
