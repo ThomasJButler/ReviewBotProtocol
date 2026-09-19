@@ -406,3 +406,23 @@ def test_a_review_cut_short_says_so_above_the_counts():
     assert body.index(note) < body.index("No findings in 0 reviewed files")
     assert "`late.py`: not reached before the review's time ran out" in body
     assert "ran out of time" not in render_review([], model="m").body
+
+
+def test_postprocess_fills_a_counts_dict_by_rule_name_and_leaves_it_alone_when_not_given_one():
+    """The precision harness needs the drops broken down by rule to say why a
+    finding vanished, and its own copy of this loop drifted from it: the copy
+    had no instruction-title retitle, so it deduped on the title the model typed
+    rather than the title the pipeline keeps. The counter is this loop's now."""
+    findings = [
+        _finding("Correctly implements it."),
+        _finding("Fix it.", confidence=0.2),
+        _finding("Fix it.", title="shrink"),
+        _finding("Fix it.", line=40, evidence="a line that is not in the diff"),
+        _finding("Fix it.", title="Dup"), _finding("Fix it.", title="dup"),
+    ]
+    counts = {"confidence": 0}
+    kept, dropped = postprocess(FileReview(findings=findings, summary=""), DIFF, 0.5, counts=counts)
+    assert len(kept.findings) == 1 and dropped == 5
+    assert counts == {"confidence": 1, "tag_title": 1, "praise": 1, "unlocated": 1, "duplicate": 1}
+    again, dropped_again = postprocess(FileReview(findings=findings, summary=""), DIFF, 0.5)
+    assert dropped_again == dropped and [f.title for f in again.findings] == [f.title for f in kept.findings]
