@@ -2,7 +2,7 @@
 
 Written 2026-09-19. ReviewBot reviews one file's diff per model call and skips every `.md` file as "not code" (`backend/services/review_runner.py`, `SKIP_LANGUAGES`). In a repository where every pull request is planned, costed and threat-modelled in markdown before a line of code exists, that means the bot reviews nothing until the design is already frozen. This document is the plan for reviewing the markdown: what the pipeline already does that prose needs, the two prompts, the corpus to measure them against, and the order to build it in. It follows the rule in `docs/PROMPT_DESIGN.md`: prompt text ships measured or not at all.
 
-Built on branch `v1.4-markdown-review` on 2026-09-19 in five commits: add five document categories to the finding grammar; add nine markdown cases to the prompt corpus; add the document reviewer and cross-examiner prompts; choose the prompt pair by file language; add `REVIEW_MARKDOWN`, off, to let markdown reach the document prompt. The flag ships off, so a `.md` file is still skipped as not code until someone turns it on. The first measurement round is 2026-09-19 and its write-up will be that day's file in `docs/benchmarks` once the round has finished. Where this document and the code disagree, the code is right; the corrections below say so in the place the original claim sat.
+Built on branch `v1.4-markdown-review` on 2026-09-19 in five commits: add five document categories to the finding grammar; add nine markdown cases to the prompt corpus; add the document reviewer and cross-examiner prompts; choose the prompt pair by file language; add `REVIEW_MARKDOWN`, off, to let markdown reach the document prompt. The flag ships off, so a `.md` file is still skipped as not code until someone turns it on. The first measurement round ran on 2026-09-19 and did not pass section 6's bar ([`docs/benchmarks/2026-09-19-markdown-round-one.md`](benchmarks/2026-09-19-markdown-round-one.md)), and the branch also carries one change the round's rows asked for, a document title that is only rule names retitled from its recommendation rather than dropped, and two widened expects. Where this document and the code disagree, the code is right; the corrections below say so in the place the original claim sat.
 
 ## 0. Why, with the numbers
 
@@ -107,7 +107,7 @@ Nine cases in the `Case` shape from `backend/tests/prompt_corpus.py`: seven plan
 
 What each one measures, beside the class it plants:
 
-- `md_sum_total` (arithmetic, sum): a total row that does not close; the two figure rows carry sources and dates, so `source` must stay quiet. Its `expect` covers the two figure rows as well as the total since round one on 2026-09-19, when a repeat reported the right problem while quoting a figure row, which is the convention in `docs/PROMPT_DESIGN.md` section 7: `expect` lists every line of the planted block.
+- `md_sum_total` (arithmetic, sum): a total row that does not close; the two figure rows carry sources and dates, so `source` must stay quiet. Its `expect` covers the two figure rows as well as the total since 2026-09-19, when a repeat in round two, the candidate prompt, reported the right problem while quoting a figure row, which is the convention in `docs/PROMPT_DESIGN.md` section 7: `expect` lists every line of the planted block.
 - `md_twin_vault` (consistency, twin): a permissions table forbids what a procedure in the same file requires. The table is context and the procedure is added, so this also measures the added-line anchoring rule: a finding on line 14 is dropped by the pipeline, a finding on line 22 survives.
 - `md_tech_unlogged` (mechanism, tech): a durability claim Postgres contradicts. The quoted line is 195 characters, under the 200-character threshold, so it does not exercise the opening rule; `md_guard_rerun`'s 253-character line is the one that does.
 - `md_stale_count` (consistency, stale): six tables in words, five in the list beside it; the ADR citation in the same sentence is not a finding, since the diff gives nothing that contradicts it.
@@ -139,9 +139,9 @@ What each one measures, beside the class it plants:
         expect_category=('arithmetic',),
         min_severity='medium',
         note=(
-            'Widened to the two figure rows on 2026-09-19 after round one located a correct finding '
-            'on line 5, the repeat quoting a figure row rather than the total it does not add up to '
-            '(docs/PROMPT_DESIGN.md section 7).'
+            'Widened to the two figure rows on 2026-09-19 after round two, the candidate prompt, located a '
+            'correct finding on line 5, the repeat quoting a figure row rather than the total it does not '
+            'add up to (docs/PROMPT_DESIGN.md section 7).'
         ),
         source='sum',
     ),
@@ -385,6 +385,8 @@ Ships when, on `qwen3.5:9b` at the shipped `OLLAMA_NUM_CTX`, two repeats:
 Then the precision round the code prompt got on 2026-09-12: run `scripts/review_diff.py --markdown` over a real docs-only branch with the network off, judge every finding by hand against the documents, and record the number beside the corpus figure. One such branch exists with an answer key: the third pull request in section 0 has ten findings from the frontier pass logged in that repository's review log, so the document prompt's recall on a real diff is a comparison rather than a guess.
 
 Two settings to measure rather than assume, each its own round: `FILE_CONTEXT=true` on markdown (cross-references and counts need the rest of the file, and the listing is already built), and `CONTEXT_LINE_FINDINGS=downgrade` for markdown only, since a contradiction's older half is usually a context line. That second one has no harness flag: it is a setting, so the round sets it in the environment the harness reads.
+
+**Round one, 2026-09-19.** Condition 1 held on the harness's test: the pair obeyed the planted instruction in neither repeat and reported it in both, though both summaries repeat the planted note's premise while naming it an instruction, which is a finding for the next round. Condition 2 failed: four of the seven planted cases hit with the named category; `md_undefined_reminder` was found on its planted line under the wrong category, and `md_twin_vault` and `md_stale_count` were missed in both repeats. Condition 3 failed: one false positive on the two clean cases in the first repeat and three in the second. Condition 4 held: the cross-examiner refuted no true finding (`x_refT` 0). `REVIEW_MARKDOWN` stays off. The rows, the replays through the retitle rule and the widened expects, and the next brief are in [`docs/benchmarks/2026-09-19-markdown-round-one.md`](benchmarks/2026-09-19-markdown-round-one.md).
 
 ## 7. What this is not
 

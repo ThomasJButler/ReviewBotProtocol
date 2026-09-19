@@ -23,9 +23,9 @@ from tests.prompt_corpus import CASES, SEVERITY_RANK  # noqa: E402
 # repeats on qwen3.5:9b on 2026-09-05 and 2026-09-06 (docs/benchmarks/2026-09-05-prompt-refinement.md,
 # runs full2b and full2c). The seven it did not clear every time stay out until a measured prompt
 # clears them; the floor only moves up. The seven planted markdown cases added on 2026-09-19 stay out
-# as well, until the markdown round in docs/benchmarks measures them, because the document prompt
-# ships unmeasured behind REVIEW_MARKDOWN=false. The two clean markdown cases need no listing here,
-# since the floor holds planted keys only.
+# as well, because the floor holds cases cleared in all four repeats and the first markdown round
+# (2026-09-19) ran two, clearing four of them in both. The two clean markdown cases need no listing
+# here, since the floor holds planted keys only.
 NOT_YET_CLEARED = {
     "practice_copy_pasted_validator", "wcag_carousel_no_pause", "wcag_html_no_lang", "wcag_low_contrast_text",
     "wcag_no_autocomplete", "wcag_status_not_announced", "wcag_target_size_16px",

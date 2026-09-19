@@ -2353,9 +2353,9 @@ CASES = [
         expect_category=('arithmetic',),
         min_severity='medium',
         note=(
-            'Widened to the two figure rows on 2026-09-19 after round one located a correct finding '
-            'on line 5, the repeat quoting a figure row rather than the total it does not add up to '
-            '(docs/PROMPT_DESIGN.md section 7).'
+            'Widened to the two figure rows on 2026-09-19 after round two, the candidate prompt, located a '
+            'correct finding on line 5, the repeat quoting a figure row rather than the total it does not '
+            'add up to (docs/PROMPT_DESIGN.md section 7).'
         ),
         source='sum',
     ),
