@@ -2,6 +2,8 @@
 
 Written 2026-09-08, the day v1.2.0 shipped. v1.2 made the bot robust enough for a stranger to run. This one is about the thing that decides whether anyone keeps reading it: on the eleven v1.2 pull requests it filed 22 findings and none were worth acting on, while a Claude review of the same diffs found nine real defects and a security scan found two more. The measurement and the reasoning behind this order are in `docs/REVIEW_QUALITY.md`; this file is the work.
 
+**Update, 2026-09-19:** all six branches are merged to `main` (PRs 40 to 45), so the tables below describe the plan, not the current branches. ReviewBot reviewed them itself first. Its 77 inline comments were checked one by one, and none held up. The causes, and the fixes they point to, are in `docs/REVIEWBOT_FINDINGS_v1.3.md`, and its section 3 is the next list. Round four (section 5) and the two `FILE_CONTEXT` rounds are still to run.
+
 Every branch below already exists off `main`. They are deliberately **not** stacked: v1.2 was a stack of eleven and merging it went sideways, because deleting a base branch closes the pull request stacked on it rather than retargeting it. Independent branches merge in any order.
 
 ## 0. If the time is short: the order
