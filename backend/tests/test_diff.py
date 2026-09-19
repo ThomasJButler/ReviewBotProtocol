@@ -1,4 +1,4 @@
-from services.diff import locate_evidence, locate_evidence_kind, parse_patch
+from services.diff import hunk_spans, locate_evidence, locate_evidence_kind, parse_patch, quotes_text
 from tests.conftest import DIFF
 
 
@@ -265,3 +265,24 @@ def test_a_quote_that_swaps_the_quote_marks_is_the_same_line():
     parsed = parse_patch(patch)
     assert locate_evidence(parsed, 2, "url = request.args['url']") == 2
     assert locate_evidence(parsed, 3, "url = request.args['url']") == 2, "and it is found from a wrong line number too"
+
+
+def test_hunk_spans_come_from_the_header_numbers_of_every_hunk():
+    """The window around a change needs each hunk's range, which ParsedPatch
+    counts but does not keep."""
+    patch = "@@ -1,2 +1,2 @@\n-a\n+b\n c\n@@ -10,2 +10,3 @@\n x\n+y\n z\n\\ No newline at end of file\n"
+    assert hunk_spans(patch) == [(1, 2), (10, 12)]
+    assert hunk_spans(DIFF) == [(1, 4)]
+    assert hunk_spans("@@ -0,0 +1 @@\n+only\n") == [(1, 1)], "a hunk header with no count is one line"
+    assert hunk_spans("") == [] and hunk_spans(None) == []
+
+
+def test_a_quote_of_the_context_block_is_told_from_a_line_the_model_invented():
+    """This is what tells a finding that quotes the file we sent from one that
+    quotes nothing at all, and it answers with the locator's own normalisation."""
+    block = 'lines 1 to 3 of 90\nimport os\ndef helper(value):\n    return CONFIG["value"]\n'
+    assert quotes_text(block, 'return CONFIG["value"]')
+    assert quotes_text(block, "+    return CONFIG['value']"), "a marker and the other quote mark still match"
+    assert not quotes_text(block, "os.system('rm -rf /')")
+    assert not quotes_text(block, "os"), "too short to mean anything, as in the locator"
+    assert not quotes_text("", "return CONFIG[value]") and not quotes_text(block, "")

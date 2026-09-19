@@ -77,8 +77,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
 from config.settings import LocalOnlyViolation, Settings  # noqa: E402
 from services.ai_reviewer import FileReviewer, FileReviewResult, parse_file_review, postprocess  # noqa: E402
 from services.diff import parse_patch  # noqa: E402
-from services.git_diff import GITHUB_CONTEXT_LINES, split_git_diff  # noqa: E402
+from services.git_diff import GITHUB_CONTEXT_LINES, file_at, split_git_diff  # noqa: E402
 from services.llm import build_chat_model, ollama_health, unload_model  # noqa: E402
+from services.prompts import review_prompt_with_context  # noqa: E402
 from services.review_runner import prepare_files, select_files  # noqa: E402
 
 PR_SET = BACKEND / "tests" / "precision" / "pull_requests.json"
@@ -100,7 +101,7 @@ VERDICTS = ("real", "not_real")
 JUDGEMENT_FIELDS = ("fingerprint", "pull_requests", "path", "line", "category", "title", "evidence",
                     "first_seen", "judges")
 JUDGE_FIELDS = ("judge", "verdict", "reason_category", "reason", "date")
-DROP_RULES = ("confidence", "tag_title", "praise", "unlocated", "duplicate", "context_line")
+DROP_RULES = ("confidence", "tag_title", "praise", "unlocated", "outside_diff", "duplicate", "context_line")
 RECORD_COUNTERS = DROP_RULES + ("context_line_downgraded",)  # a downgrade is counted but is not a drop
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -345,7 +346,8 @@ def verdict_of(entry: Dict[str, Any]) -> str:
 
 
 def settings_for(model: Optional[str] = None, cross_model: Optional[str] = None, max_files: Optional[int] = None,
-                 min_confidence: Optional[float] = None, num_ctx: Optional[int] = None) -> Settings:
+                 min_confidence: Optional[float] = None, num_ctx: Optional[int] = None,
+                 file_context: bool = False, file_context_lines: Optional[int] = None) -> Settings:
     """The harness's own Settings, built through the constructor and ignoring
     backend/.env. Both model tags go in this way rather than through model_copy
     so that refuse_to_leak (config/settings.py:236-262) judges them: this reads
@@ -367,6 +369,10 @@ def settings_for(model: Optional[str] = None, cross_model: Optional[str] = None,
         env["MIN_FINDING_CONFIDENCE"] = min_confidence
     if num_ctx is not None:
         env["OLLAMA_NUM_CTX"] = num_ctx
+    if file_context:
+        env["FILE_CONTEXT"] = "true"
+    if file_context_lines is not None:
+        env["FILE_CONTEXT_LINES"] = file_context_lines
     try:
         return Settings(_env_file=None, **env)
     except LocalOnlyViolation as refused:
@@ -467,7 +473,8 @@ async def review_files(files: List[Dict[str, Any]], reviewer: FileReviewer, reco
         if key_for:
             key_for(f["filename"])
         before = len(recorder.texts)
-        result = await reviewer.review_file(f["filename"], f["language"], f["status"], f["patch"])
+        result = await reviewer.review_file(f["filename"], f["language"], f["status"], f["patch"],
+                                            f.get("file_text", ""))
         texts[f["filename"]] = list(recorder.texts[before:])
         results.append(result)
     if reviewer.cross_enabled:
@@ -484,14 +491,26 @@ async def review_files(files: List[Dict[str, Any]], reviewer: FileReviewer, reco
 
 async def review_pull_request(entry: Dict[str, Any], text: str, reviewer: FileReviewer, recorder: Recorder,
                               settings: Settings, unload: Optional[Callable[[str], Any]] = None,
-                              key_for: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+                              key_for: Optional[Callable[[str], None]] = None,
+                              file_text_for: Optional[Callable[[str, str], str]] = None) -> Dict[str, Any]:
     """One pull request, from its diff text rather than its sha range, so the
     one git call lives in `run` and both the tests and `replay` can drive this
-    with a literal diff and need neither git nor a model."""
+    with a literal diff and need neither git nor a model.
+
+    file_text_for reads one file at one revision, the way the App's contents
+    call does; it is a parameter rather than a git call here for the same
+    reason the diff is."""
     started = time.perf_counter()
     raw_files = split_git_diff(text)
     selected, skipped = select_files(raw_files, settings)
     files, _ = prepare_files(selected)
+    if settings.FILE_CONTEXT and file_text_for is not None:
+        for f in files:
+            if f.get("status") == "added":
+                continue   # an added file's diff is already the whole file
+            text_at_head = file_text_for(entry["head_sha"], f["filename"])
+            if text_at_head:
+                f["file_text"] = text_at_head
     results, texts = await review_files(files, reviewer, recorder, settings, key_for=key_for, unload=unload)
     record = new_record(entry, settings, model=reviewer.model_name)
     record["split"] = len(raw_files)
@@ -516,7 +535,9 @@ def new_record(entry: Dict[str, Any], settings: Settings, model: str = "", cross
                      "max_patch_bytes": settings.MAX_PATCH_BYTES,
                      "cross_examine_max_calls_per_review": settings.CROSS_EXAMINE_MAX_CALLS_PER_REVIEW,
                      "context_line_findings": settings.CONTEXT_LINE_FINDINGS,
-                     "context_line_min_confidence": settings.CONTEXT_LINE_MIN_CONFIDENCE},
+                     "context_line_min_confidence": settings.CONTEXT_LINE_MIN_CONFIDENCE,
+                     "file_context": settings.FILE_CONTEXT,
+                     "file_context_lines": settings.FILE_CONTEXT_LINES},
         "pipeline_commit": commit, "pipeline_dirty": dirty,
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "seconds": 0.0, "replayable": True,
         "split": 0, "files": [], "skipped": [], "errored": [], "findings": [],
@@ -542,6 +563,7 @@ def fill_record(record: Dict[str, Any], files: List[Dict[str, Any]], results: Li
             "patch": patches.get(r.filename, ""), "model_texts": raw_texts, "raw": raw, "drops": drops,
             "prompt_tokens": r.prompt_tokens, "output_tokens": r.output_tokens,
             "seconds": round(r.duration_seconds, 1), "parse_ok": r.parse_ok, "error": r.error,
+            "context_mode": r.context_mode, "file_redactions": r.file_redactions,
         })
         if not (r.parse_ok and not r.error):
             record["errored"].append({"path": r.filename,
@@ -699,7 +721,8 @@ async def cmd_run(args: argparse.Namespace) -> int:
     entries = entries_for(fixed, args.only)
     out = refuse_out_inside_repo(args.out)
     settings = settings_for(args.model, "" if args.no_cross else args.cross_model, args.max_files,
-                            args.min_confidence, args.num_ctx)
+                            args.min_confidence, args.num_ctx,
+                            file_context=args.file_context, file_context_lines=args.file_context_lines)
     out.mkdir(parents=True, exist_ok=True)
     if args.from_database:
         stored, meta = read_database(args.from_database, fixed["database"]["repository"])
@@ -737,14 +760,17 @@ async def cmd_run(args: argparse.Namespace) -> int:
         cross_llm = build_chat_model(settings, model=settings.CROSS_EXAMINE_MODEL,
                                      keep_alive=settings.CROSS_EXAMINE_KEEP_ALIVE)
         cross_llm.callbacks = [recorder]
-    reviewer = FileReviewer(llm, settings, cross_llm=cross_llm)
+    # the prompt production uses with the switch on, or the file block would never be rendered
+    reviewer = FileReviewer(llm, settings, cross_llm=cross_llm,
+                            **({"prompt": review_prompt_with_context} if settings.FILE_CONTEXT else {}))
     unload = (lambda model: unload_model(settings, model)) if args.unload else None
     print(f"model {settings.OLLAMA_MODEL}"
           + (f", cross-examiner {settings.CROSS_EXAMINE_MODEL}" if settings.CROSS_EXAMINE_MODEL else "")
           + f" at {settings.OLLAMA_BASE_URL}, num_ctx {settings.OLLAMA_NUM_CTX}, {len(entries)} pull requests")
     for entry in entries:
         record = await review_pull_request(entry, diff_text(entry["base_sha"], entry["head_sha"]), reviewer,
-                                          recorder, settings, unload=unload)
+                                          recorder, settings, unload=unload,
+                                          file_text_for=lambda rev, path: file_at(str(REPO), rev, path))
         report_drift(entry, record)
         path = write_record(out, args.tag, fixed["repository"], record)
         print(f"pr {entry['number']:>2}: {len(record['findings'])} findings from {len(record['files'])} files in "
@@ -1269,6 +1295,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     run.add_argument("--max-files", type=int, default=None, help="MAX_FILES_PER_REVIEW for this round")
     run.add_argument("--min-confidence", type=float, default=None, help="MIN_FINDING_CONFIDENCE for this round")
     run.add_argument("--num-ctx", type=int, default=None, help="OLLAMA_NUM_CTX for this round")
+    run.add_argument("--file-context", action="store_true",
+                     help="send each file beside its diff, read at the pull request's head commit (FILE_CONTEXT)")
+    run.add_argument("--file-context-lines", type=int, default=None,
+                     help="FILE_CONTEXT_LINES for this round; ignored without --file-context")
 
     sheet = subs.add_parser("sheet", help="the unjudged findings as a judge's sheet and a skeleton to fill")
     sheet.add_argument("runs")

@@ -70,8 +70,9 @@ except (RuntimeError, ValueError) as _refused:  # the module-level Settings the 
     sys.exit(2)
 from services.ai_reviewer import FileReviewer, FileReviewResult  # noqa: E402
 from services.comment_renderer import render_review  # noqa: E402
-from services.git_diff import GITHUB_CONTEXT_LINES, split_git_diff  # noqa: E402
+from services.git_diff import GITHUB_CONTEXT_LINES, file_at, split_git_diff  # noqa: E402
 from services.llm import build_chat_model, build_cross_model, ollama_health, unload_model  # noqa: E402
+from services.prompts import review_prompt_with_context  # noqa: E402
 from services.review_runner import prepare_files, select_files  # noqa: E402
 from services.review_workflow import ReviewWorkflow  # noqa: E402
 
@@ -116,6 +117,80 @@ def run_git_diff(repo: str, range_spec: Optional[str], staged: bool) -> str:
         hint = " (name the range with --range, or --repo the repository)" if "unknown revision" in detail or "bad revision" in detail else ""
         raise CannotRun(f"git diff failed: {detail}{hint}")
     return done.stdout.decode("utf-8", errors="replace")
+
+
+def new_side(args: argparse.Namespace) -> Optional[str]:
+    """What the new side of this diff is, as git names it: a revision for a
+    range, "" for the index (`--staged` diffs the index, not the tree), and None
+    for the files on disk, which only `--range <one revision>` compares against.
+    A diff read from a file or stdin names no side at all, so it gets no file
+    context: a file from this working tree need not be the file that diff was
+    taken from.
+
+    A range's new side is whatever follows the last pair of dots, `HEAD`
+    included: `main...HEAD` diffs the commit, so reading the working tree there
+    would show the model lines no diff in the run mentions."""
+    if args.file is not None:
+        return None
+    if args.staged:
+        return ""
+    spec = args.range or "main...HEAD"
+    if ".." not in spec:
+        return None   # `--range main` compares a commit with the files on disk, so read those
+    right = (spec.split("...")[-1] if "..." in spec else spec.split("..")[-1]).strip()
+    return right or "HEAD"
+
+
+def resolve_rev(repo: str, rev: str) -> str:
+    """The commit a range's right-hand side names, through `git rev-parse`, or ""
+    when git cannot resolve it: a branch, a tag or `HEAD` is read at the commit
+    it points at, so the listing is the file the diff's new side holds."""
+    if rev.startswith("-"):
+        return ""
+    try:
+        done = subprocess.run(["git", "--no-pager", "-C", repo, "rev-parse", "--verify", f"{rev}^{{commit}}"],
+                              capture_output=True, check=False)
+    except (FileNotFoundError, OSError):
+        return ""
+    return done.stdout.decode("utf-8", errors="replace").strip() if done.returncode == 0 else ""
+
+
+def where_read(args: argparse.Namespace) -> str:
+    """How the progress line names the side the files were read from."""
+    side = new_side(args)
+    return "the working tree" if side is None else (side or "the index")
+
+
+def file_texts(args: argparse.Namespace, files: List[Dict[str, Any]]) -> int:
+    """Hang the file the hunk came from on each prepared file, the way the App's
+    contents call does, and return how many were read. Only when FILE_CONTEXT is
+    on, and never for a diff read from a file or stdin. The side the diff was
+    taken against is the side the file is read from, or the model would be shown
+    a file the diff does not describe: a range at its resolved commit, a staged
+    change at the index, and only a dotless `--range` off the disk."""
+    if args.file is not None:
+        return 0
+    repo = str(Path(args.repo).resolve())
+    side = new_side(args)
+    rev = resolve_rev(repo, side) if side else side
+    read = 0
+    for f in files:
+        if f.get("status") == "added":
+            continue   # the diff of an added file is already the whole file
+        if side is None:
+            path = Path(repo, f["filename"])
+            try:
+                text = path.read_text(encoding="utf-8") if path.is_file() else ""
+            except (OSError, UnicodeDecodeError):
+                text = ""
+        elif side and not rev:
+            text = ""   # the right-hand side did not resolve; reading the wrong file is worse than none
+        else:
+            text = file_at(repo, rev, f["filename"])
+        if text:
+            f["file_text"] = text
+            read += 1
+    return read
 
 
 def read_diff(args: argparse.Namespace) -> Tuple[str, str]:
@@ -287,6 +362,11 @@ async def review(args: argparse.Namespace, settings: Settings, text: str, label:
                         + "); diff the merge against one parent instead, for example --range <merge>^1..<merge>")
     selected, skipped = select_files(raw_files, settings)
     files, redaction_total = prepare_files(selected)
+    if files and settings.FILE_CONTEXT:
+        read = file_texts(args, files)
+        if not args.quiet:
+            print(f"file context on: {read} of {len(files)} files read at {where_read(args)}",
+                  file=sys.stderr, flush=True)
     if not files:
         lines = ["Nothing to review: no eligible file in the diff.", "Not reviewed:"]
         lines += [f"  {_plain(name)}: {_plain(reason)}" for name, reason in skipped]
@@ -300,7 +380,9 @@ async def review(args: argparse.Namespace, settings: Settings, text: str, label:
                         f"(ollama pull {settings.CROSS_EXAMINE_MODEL}, or --no-cross)")
     llm = build_chat_model(settings)
     cross_llm = build_cross_model(settings)
-    reviewer = FileReviewer(llm, settings, cross_llm=cross_llm)
+    # the same prompt production uses with the switch on, or the block would never be rendered
+    reviewer = FileReviewer(llm, settings, cross_llm=cross_llm,
+                            **({"prompt": review_prompt_with_context} if settings.FILE_CONTEXT else {}))
     quiet = args.quiet
 
     async def on_progress(phase: str, done: int, total: int, current: str) -> None:

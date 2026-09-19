@@ -392,3 +392,172 @@ def test_patch_that_cannot_fit_the_context_window_is_skipped():
     tight = settings.model_copy(update={"OLLAMA_NUM_CTX": 2048})
     selected, skipped = select_files([big], tight)
     assert selected == [] and "context window" in dict(skipped)["big.py"]
+
+
+# ---------------------------------------------------------------- file context
+
+FILE_AT_HEAD = ("import requests\n"
+                "TOKEN = 'placeholder'\n"
+                "query = 'SELECT 1'\n"
+                "def main():\n"
+                "    return query\n"
+                "SENTINEL_FILE_ONLY = 1\n")
+# the same secret the patch adds, plus one on a line this pull request never touched
+SECRET_AT_HEAD = ("import requests\n"
+                  "TOKEN = 'ghp_" + "z" * 36 + "'\n"
+                  "LEGACY_TOKEN = 'ghp_" + "y" * 36 + "'\n"
+                  "query = 'SELECT 1'\n"
+                  "SENTINEL_FILE_ONLY = 1\n")
+
+
+def _contents_route(status=200, body=None, side_effect=None, text=None):
+    import base64
+    if body is None:
+        raw = (FILE_AT_HEAD if text is None else text).encode()
+        body = {"type": "file", "encoding": "base64", "size": len(raw),
+                "content": base64.b64encode(raw).decode(), "path": "db.py"}
+    route = respx.get(f"{BASE}/repos/octocat/repo/contents/db.py")
+    if side_effect is not None:
+        return route.mock(side_effect=side_effect)
+    return route.mock(return_value=httpx.Response(status, json=body))
+
+
+@respx.mock
+async def test_a_review_with_file_context_on_fetches_each_selected_file_at_the_head_and_sends_it(db):
+    _routes()
+    contents = _contents_route()
+    fake = RecordingChatModel(response=MODEL_REPLY)
+    on = settings.model_copy(update={"FILE_CONTEXT": True})
+    async with db() as session:
+        await WebhookRepository(session).record("d-ctx", "pull_request", "opened", "octocat/repo", 42, "c" * 40)
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=on, llm=fake, session_factory=db, http=http)
+        outcome = await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, "d-ctx", False, None), deps)
+    assert outcome.findings == 1 and outcome.files_reviewed == 1
+    assert contents.calls.last.request.url.params["ref"] == "c" * 40
+    assert "SENTINEL_FILE_ONLY" in fake.seen_text, "a line only the file holds reached the model"
+    token_body = json.loads(respx.calls[0].request.content)
+    assert token_body["permissions"] == {"pull_requests": "write", "metadata": "read", "contents": "read"}
+
+
+@respx.mock
+async def test_a_contents_call_that_fails_leaves_the_review_running_on_the_patch_alone(db):
+    _routes()
+    _contents_route(status=404, body={"message": "Not Found"})
+    fake = RecordingChatModel(response=MODEL_REPLY)
+    on = settings.model_copy(update={"FILE_CONTEXT": True})
+    async with db() as session:
+        await WebhookRepository(session).record("d-ctx2", "pull_request", "opened", "octocat/repo", 42, "c" * 40)
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=on, llm=fake, session_factory=db, http=http)
+        outcome = await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, "d-ctx2", False, None), deps)
+    assert outcome.findings == 1 and outcome.files_reviewed == 1 and outcome.files_skipped == 5
+    assert "SENTINEL_FILE_ONLY" not in fake.seen_text
+    async with db() as session:
+        review = await ReviewRepository(session).get(outcome.review_id)
+        assert review.status == "completed", "a file that could not be read is not a skipped file"
+
+
+@respx.mock
+async def test_a_contents_call_that_never_answers_is_abandoned_at_the_phase_ceiling(db):
+    _routes()
+
+    async def hang(request):
+        await asyncio.sleep(30)   # longer than FETCH_SECONDS_PER_FILE, cancelled well before it fires
+        return httpx.Response(200, json={})
+
+    _contents_route(side_effect=hang)
+    fake = RecordingChatModel(response=MODEL_REPLY)
+    on = settings.model_copy(update={"FILE_CONTEXT": True})
+    async with db() as session:
+        await WebhookRepository(session).record("d-ctx3", "pull_request", "opened", "octocat/repo", 42, "c" * 40)
+    from services import file_context as FC
+    started = asyncio.get_running_loop().time()
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=on, llm=fake, session_factory=db, http=http)
+        with_patch = await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, "d-ctx3", False, None), deps)
+    elapsed = asyncio.get_running_loop().time() - started
+    assert with_patch.findings == 1, "the review still ran on the patch"
+    assert elapsed < FC.FETCH_SECONDS_TOTAL, "the phase was abandoned at the per-file ceiling, not the phase one"
+    assert "SENTINEL_FILE_ONLY" not in fake.seen_text
+
+
+@respx.mock
+async def test_cancelling_a_review_in_the_fetch_phase_cancels_the_review(db):
+    """The fetch phase swallows a failure, because file context is an extra. A
+    cancel is not a failure: the queue cancels a review for a newer push or a
+    shutdown, and a phase that swallowed it sent the job on to spend the model
+    time it had just been stopped from spending."""
+    _routes()
+    fetching = asyncio.Event()
+
+    async def hang(request):
+        fetching.set()   # the phase is under way; respx records the call only once it answers
+        await asyncio.sleep(30)
+        return httpx.Response(200, json={})
+
+    _contents_route(side_effect=hang)
+    on = settings.model_copy(update={"FILE_CONTEXT": True})
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=on, llm=RecordingChatModel(response=MODEL_REPLY), session_factory=db, http=http)
+        task = asyncio.create_task(run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps))
+        await asyncio.wait_for(fetching.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert task.cancelled(), "the cancel reached the caller instead of being logged as a file that could not be read"
+    async with db() as session:
+        (latest,) = await ReviewRepository(session).list(limit=5)
+        assert latest.status == "superseded" and latest.files_reviewed == 0
+
+
+@respx.mock
+async def test_a_secret_only_the_file_holds_is_not_counted_as_one_the_diff_committed(db):
+    """The posted line tells the author to check their diff for committed secrets,
+    so it counts what the patches gave up. A secret the change adds is in the file
+    text as well, and a secret on a line the change never touched is not this pull
+    request's: adding the file count in would report both twice over."""
+    reviews_route = _routes()
+    _contents_route(text=SECRET_AT_HEAD)
+    fake = RecordingChatModel(response=MODEL_REPLY)
+    on = settings.model_copy(update={"FILE_CONTEXT": True})
+    from structlog.testing import capture_logs
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=on, llm=fake, session_factory=db, http=http)
+        with capture_logs() as logs:
+            outcome = await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
+    assert "ghp_zzzz" not in fake.seen_text and "ghp_yyyy" not in fake.seen_text
+    posted = json.loads(reviews_route.calls[0].request.content)
+    assert "1 credential-looking value was redacted" in posted["body"], posted["body"]
+    async with db() as session:
+        review = await ReviewRepository(session).get(outcome.review_id)
+        assert review.redactions == 1, "the patch's one secret, not the file's two"
+    posted_log = [e for e in logs if e["event"] == "review posted"]
+    assert posted_log and posted_log[0]["redactions_file"] == 2, "what the file gave up is still reported, apart"
+
+
+@respx.mock
+async def test_an_installation_without_contents_read_reviews_on_the_off_path_exactly(db):
+    """The token mint narrows and retries when the installation has not accepted
+    Contents read, so no file is fetched. The prompt narrows with it: the
+    file-context rule would otherwise tell the model a listing follows the diff
+    when none does, which is not what the switch being off means."""
+    answers = [httpx.Response(422, json={"message": "There is at least one repository that does not exist"}),
+               httpx.Response(201, json={"token": "ghs_narrow", "expires_at": "2099-01-01T00:00:00Z",
+                                         "permissions": {"pull_requests": "write", "metadata": "read"}})]
+    respx.post(f"{BASE}/app/installations/555/access_tokens").mock(side_effect=answers)
+    respx.get(f"{BASE}/repos/octocat/repo/pulls/42").mock(return_value=httpx.Response(200, json={
+        "number": 42, "title": PR_TITLE, "head": {"sha": "c" * 40}}))
+    respx.get(f"{BASE}/repos/octocat/repo/pulls/42/files").mock(return_value=httpx.Response(200, json=[
+        {"filename": "db.py", "status": "modified", "additions": 2, "deletions": 0, "patch": SECRET_DIFF}]))
+    respx.post(f"{BASE}/repos/octocat/repo/pulls/42/reviews").mock(return_value=httpx.Response(200, json={
+        "id": 1, "html_url": "https://github.com/octocat/repo/pull/42#pullrequestreview-1"}))
+    contents = _contents_route()
+    fake = RecordingChatModel(response=MODEL_REPLY)
+    on = settings.model_copy(update={"FILE_CONTEXT": True})
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=on, llm=fake, session_factory=db, http=http)
+        outcome = await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
+    assert outcome.findings == 1 and not contents.called
+    assert "File context: when a listing of this file" not in fake.seen_text, \
+        "the narrowed mint is the switch being off, prompt included"

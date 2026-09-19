@@ -11,6 +11,8 @@ guard, so no test needs Ollama, a network or the machine's own git history.
 
 import asyncio
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -552,7 +554,7 @@ def test_a_record_counts_the_drops_by_the_postprocess_rules(tmp_path):
     handler = record["files"][0]
     assert handler["raw"] == 6
     assert handler["drops"] == {"confidence": 1, "tag_title": 1, "praise": 1, "unlocated": 1, "duplicate": 1,
-                                "context_line": 0, "context_line_downgraded": 0}
+                                "outside_diff": 0, "context_line": 0, "context_line_downgraded": 0}
     assert len([f for f in record["findings"] if f["path"] == "app/handler.py"]) == 1
 
 
@@ -963,3 +965,42 @@ def test_a_replay_refuses_a_round_recorded_with_the_verify_pass_on(tmp_path, mon
     assert P.main(["replay", str(runs), "round1", "--out", str(tmp_path / "after"),
                    "--tag-out", "round1-after"]) == 2
     assert "ran with VERIFY_FINDINGS on" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not on PATH")
+def test_with_file_context_on_the_file_text_comes_from_the_pull_requests_head(tmp_path):
+    """The judged before and after is two run tags, so the on tag has to read the
+    file at the head commit of the pull request, the way the App's contents call
+    does. Read here from a temporary repository, with git and no model."""
+    env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+
+    def git(*args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", str(tmp_path), *args],
+                       capture_output=True, check=True, env=env)
+
+    git("init", "-b", "main")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "handler.py").write_text(
+        "import os\nimport sqlite3\n\ndef handle(request):\n"
+        "    query = \"x\"\n    return sqlite3.connect('app.db').execute(query)\n"
+        "SENTINEL_FILE_ONLY = 1\n", encoding="utf-8")
+    git("add", "app/handler.py")
+    git("commit", "-m", "first")
+    head = subprocess.run(["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+                          capture_output=True, check=True, env=env).stdout.decode().strip()
+    settings = _settings(file_context=True)
+    assert settings.FILE_CONTEXT and settings.FILE_CONTEXT_LINES == 60
+    llm = RecordingChatModel(response=ONE_FINDING)
+    recorder = P.Recorder()
+    llm.callbacks = [recorder]
+    reviewer = P.FileReviewer(llm, settings, prompt=P.review_prompt_with_context)
+    entry = dict(ENTRY, head_sha=head)
+    record = asyncio.run(P.review_pull_request(entry, DIFF, reviewer, recorder, settings,
+                                               file_text_for=lambda rev, path: P.file_at(str(tmp_path), rev, path)))
+    assert "SENTINEL_FILE_ONLY" in llm.seen_text, "the file at the head reached the model"
+    handler = [f for f in record["files"] if f["filename"] == "app/handler.py"][0]
+    assert handler["context_mode"] == "whole" and handler["file_redactions"] == 0
+    assert record["settings"]["file_context"] is True and record["settings"]["file_context_lines"] == 60
+    # the file the temporary repository does not hold simply gets none
+    other = [f for f in record["files"] if f["filename"] == "app/util.js"][0]
+    assert other["context_mode"] == "unavailable"

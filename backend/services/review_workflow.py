@@ -48,7 +48,10 @@ def totals_for(results: List[FileReviewResult]) -> Dict[str, int]:
     file at the end of a run, or the files that finished when it was cut short."""
     totals: Dict[str, int] = {"files": len(results), "findings": 0, "dropped": 0,
                               "prompt_tokens": 0, "output_tokens": 0, "refuted": 0, "verify_calls": 0,
-                              "cross_calls": 0, "cross_refuted": 0, "cross_added": 0}
+                              "cross_calls": 0, "cross_refuted": 0, "cross_added": 0,
+                              # what the file context cost and what became of it, per review
+                              "context_whole": 0, "context_window": 0, "context_none": 0,
+                              "context_unavailable": 0, "redactions_file": 0}
     for r in results:
         totals["findings"] += len(r.review.findings)
         totals["dropped"] += r.dropped
@@ -59,6 +62,13 @@ def totals_for(results: List[FileReviewResult]) -> Dict[str, int]:
         totals["cross_calls"] += r.cross_calls
         totals["cross_refuted"] += r.cross_refuted
         totals["cross_added"] += r.cross_added
+        totals["redactions_file"] += r.file_redactions
+        # a file whose text never arrived is counted apart from one the arithmetic left out;
+        # an empty mode is the switch off, and counts as none of the four
+        key = {"whole": "context_whole", "window": "context_window", "none": "context_none",
+               "unavailable": "context_unavailable"}.get(r.context_mode)
+        if key:
+            totals[key] += 1
     return totals
 
 
@@ -122,8 +132,15 @@ class ReviewWorkflow:
         logger.info("reviewing file", repo=state.get("repo"), pr=state.get("pr_number"), filename=f["filename"],
                     position=f"{i + 1}/{len(state['files'])}")
         await self._progress("review", i, len(state["files"]), f["filename"])
-        result = await self.reviewer.review_file(f["filename"], f.get("language", "unknown"), f.get("status", "modified"), f["patch"])
-        result.redactions = f.get("redactions", {})
+        result = await self.reviewer.review_file(f["filename"], f.get("language", "unknown"), f.get("status", "modified"),
+                                                 f["patch"], f.get("file_text", ""))
+        # the patch's counts plus whatever was stripped from the file text, so nothing redacted
+        # before the model goes unreported
+        result.redactions = dict(f.get("redactions", {}))
+        if result.file_redactions:
+            result.redactions["file_text"] = result.redactions.get("file_text", 0) + result.file_redactions
+        logger.info("file reviewed", filename=f["filename"], seconds=round(result.duration_seconds, 1),
+                    prompt_tokens=result.prompt_tokens, context_mode=result.context_mode or "off")
         if self._on_result is not None:
             self._on_result(result)
         return {"results": list(state.get("results", [])) + [result], "index": i + 1}
