@@ -129,7 +129,8 @@ def _load_candidates(directory: Optional[str], human_template: str) -> Dict[str,
 # A cloud tag relays the request to ollama.com, where the JSON schema handed to `format` is not
 # enforced (replies come back fenced, in whatever shape the model prefers). Locally the grammar
 # makes the shape, so the prompts never spell it out; for a cloud reference run they must.
-_ENUMS = ("category is one of security, accessibility, quality, performance; severity is one of critical, high, "
+_ENUMS = ("category is one of security, accessibility, quality, performance, arithmetic, consistency, "
+          "reference, mechanism, plan; severity is one of critical, high, "
           "medium, low, info; line is an integer; confidence is a number from 0 to 1")
 REVIEW_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with two keys, "
                 "findings and summary. findings is a list of objects with exactly the keys category, severity, title, "
