@@ -385,3 +385,53 @@ async def test_a_file_borne_injection_is_only_scored_where_the_file_really_went(
     assert blank["context_mode"] == "none" and blank["injection_obeyed"] is None, \
         "the file was read and then left out, so the instruction never reached the model either"
     assert H.summarise([blank])["context_unavailable"] == 0 and H.summarise([blank])["context_none"] == 1
+
+
+async def test_a_reviewer_candidate_is_the_system_prompt_for_the_markdown_cases_too(tmp_path, monkeypatch, capsys):
+    """The corpus holds nine markdown cases since 2026-09-19, and the reviewer
+    picks its prompt by language. A candidate that replaced only the code prompt
+    would leave those cases on the shipped document prompt, so the round would
+    report the pair and call it the candidate. The cross candidate is the same
+    argument on the second model."""
+    before = dict(H.VARIANTS)
+    prompts_dir = tmp_path / "prompts"
+    prompts_dir.mkdir()
+    (prompts_dir / "r1.txt").write_text("Review the diff. {data_begin} is the start and {data_end} the end.")
+    cross_dir = tmp_path / "cross"
+    cross_dir.mkdir()
+    (cross_dir / "c1.txt").write_text("Judge the findings. {data_begin} is the start and {data_end} the end.")
+
+    async def asked(settings):
+        raise AssertionError("the health gate was consulted")
+    monkeypatch.setattr(H, "ollama_health", asked)
+    monkeypatch.setattr(sys, "argv", ["prompt_eval.py", "--cases-from-file", str(_cases_file(tmp_path)),
+                                      "--variants", "r1", "--repeats", "1", "--replay", str(_run_file(tmp_path)),
+                                      "--prompts-dir", str(prompts_dir), "--cross-prompts-dir", str(cross_dir)])
+    try:
+        assert await H.main() == 0
+        assert H.VARIANTS["r1"]["doc_prompt"] is H.VARIANTS["r1"]["prompt"], "one candidate, both languages"
+        assert H.VARIANTS["cross:c1"]["doc_cross_prompt"] is H.VARIANTS["cross:c1"]["cross_prompt"]
+    finally:
+        H.VARIANTS.clear()
+        H.VARIANTS.update(before)
+    assert "== r1 ==" in capsys.readouterr().out
+
+
+async def test_the_code_on_docs_variant_sends_the_code_prompt_to_a_markdown_case():
+    """The baseline the markdown plan's step 1 asks for: what the shipped code
+    prompt does with a document. It carries doc_prompt as well, so the language
+    switch inside the reviewer cannot route a markdown case back to the document
+    prompt and measure the wrong thing."""
+    from tests.prompt_corpus import CASES_BY_KEY
+    spec = H.VARIANTS["code-on-docs"]
+    assert spec["prompt"] is P.review_prompt and spec["doc_prompt"] is P.review_prompt
+    kwargs = {"prompt": spec["prompt"], "verify": spec.get("verify", False)}
+    if spec.get("doc_prompt") is not None:
+        kwargs["doc_prompt"] = spec["doc_prompt"]
+    case = CASES_BY_KEY["md_sum_total"]
+    llm = RecordingChatModel(model="qwen-fake", response=json.dumps({"findings": [], "summary": "Nothing to report."}))
+    result = await FileReviewer(llm, settings, **kwargs).review_file(case.filename, case.language, case.status, case.patch)
+    assert result.parse_ok and not result.error, "the code prompt still passes the boundary check on a document"
+    system = llm.calls[0][0].content
+    assert system.startswith("You are ReviewBot, a security and accessibility specialist"), \
+        "the markdown case was reviewed with the code prompt, not the shipped document one"

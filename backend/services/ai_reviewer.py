@@ -23,11 +23,12 @@ from config.logging import get_logger
 from config.settings import CONTEXT_LINE_DEFAULT, CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT, Settings
 from services import file_context
 from services.diff import locate_evidence_kind, parse_patch, quotes_text
-from services.prompts import (MARK_BEGIN, MARK_END, MARK_FILE, cross_prompt, delimiters, file_marker, review_prompt,
-                              verify_prompt)
+from services.prompts import (MARK_BEGIN, MARK_END, MARK_FILE, cross_prompt, delimiters, doc_cross_prompt,
+                              doc_review_prompt, file_marker, review_prompt, verify_prompt)
 from services.redaction import redact, redact_text
-from services.schemas import (SEVERITY_ORDER, AnnotatedFileReview, CrossExamination, FileReview, Finding, ReviewedFinding,
-                              Severity, Verdict, cross_schema, output_schema, verdict_schema)
+from services.schemas import (SEVERITY_ORDER, AnnotatedFileReview, CrossExamination, FileReview, Finding,
+                              ReviewedFinding, Severity, Verdict, cross_schema, output_schema, verdict_schema)
+from utils.helpers import DOCUMENT_LANGUAGES
 
 logger = get_logger(__name__)
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)
@@ -40,25 +41,32 @@ _MARKER = re.compile(rf"[<\t ]{{0,16}}(?:{MARK_BEGIN}|{MARK_END}|{MARK_FILE})[A-
 
 
 TAG_WORDS = {"yagni", "delete", "stdlib", "native", "shrink"}
+# The eleven rule names the document prompt opens a title with, and forbids alone:
+# "Titles open with the rule name, then the problem, never the name alone".
+DOC_TAG_WORDS = {"sum", "method", "quote", "source", "stale", "twin", "ref", "undefined", "tech", "mechanism", "plan"}
 # the words a bare tag list is strung together with, and the words of the instruction itself
 _TAG_GLUE = {"and", "or", "then", "the", "a", "to", "what", "remove", "never", "tag", "alone", "use"}
-_PROMPT_ECHO = re.compile(r"never the tag alone|then what to remove", re.I)
+_PROMPT_ECHO = re.compile(r"never the tag alone|then what to remove|never the name alone", re.I)
 _TITLE_WORDS = re.compile(r"[^a-z]+")
 
 
-def _tag_only_title(title: str) -> bool:
+def _tag_only_title(title: str, tags=TAG_WORDS) -> bool:
     """A simplicity finding titled with the tag rather than the problem, which both
     prompts forbid ("then what to remove, never the tag alone"): the model filling
     the slot. Three shapes, all seen live: the tag alone ("shrink"), the tag list
     ("yagni, delete, shrink"), and the prompt's own sentence copied out ("yagni,
     delete, stdlib, native or shrink, then what to remove, never the tag alone",
     42 of those in round three's raw replies). A tag word in front of something
-    real ("yagni, delete unused import") is the form the prompt asks for and stays."""
+    real ("yagni, delete unused import") is the form the prompt asks for and stays.
+
+    A document is judged by DOC_TAG_WORDS instead, the eleven rule names the document
+    prompt opens a title with. The caller picks the list by the file's language, so a
+    code finding is judged by exactly the words it was before."""
     t = title.strip().lower().rstrip(".:")
-    if t in TAG_WORDS:
+    if t in tags:
         return True
     words = [w for w in _TITLE_WORDS.split(t) if w]
-    return bool(words) and any(w in TAG_WORDS for w in words) and all(w in TAG_WORDS or w in _TAG_GLUE for w in words) \
+    return bool(words) and any(w in tags for w in words) and all(w in tags or w in _TAG_GLUE for w in words) \
         and not _PROMPT_ECHO.search(t)
 
 
@@ -66,7 +74,9 @@ def _instruction_title(title: str) -> bool:
     """The prompt's own sentence copied into the title slot. The finding under it is
     often right (round three: "yagni, delete, stdlib, native or shrink, then what to
     remove" on the factory class it was meant to find), so the title is replaced from
-    the recommendation rather than the finding dropped."""
+    the recommendation rather than the finding dropped. The document prompt's own
+    sentence about the rule name ("never the name alone") is the same shape and is
+    matched here too."""
     return bool(_PROMPT_ECHO.search(title.strip().lower()))
 
 
@@ -318,12 +328,19 @@ def annotate(review: FileReview, source_model: str) -> AnnotatedFileReview:
                                summary=review.summary)
 
 
-def drop_rule(f: Finding, min_confidence: float) -> Optional[str]:
+def drop_rule(f: Finding, min_confidence: float, language: str = "") -> Optional[str]:
     """Why a finding is dropped before it is located, or None to go on. The
-    harness applies the same rules to a raw reply so a leaderboard can count them."""
+    harness applies the same rules to a raw reply so a leaderboard can count them.
+
+    The file's language picks the tag list the title rule reads, the same thing the
+    prompt itself was chosen by: a code file is judged by exactly the words it was
+    before the document pair existed, and a document by the eleven rule names whatever
+    category a finding carries, security for steering text included. The default is
+    the empty language, which is the code list."""
     if f.confidence < min_confidence:
         return "confidence"
-    if _tag_only_title(f.title):
+    tags = DOC_TAG_WORDS if language in DOCUMENT_LANGUAGES else TAG_WORDS
+    if _tag_only_title(f.title, tags):
         return "tag_title"
     if _praise(f):
         return "praise"
@@ -358,7 +375,7 @@ def _one_step_down(severity: Severity) -> Severity:
 
 
 def postprocess(review: FileReview, patch: Optional[str], min_confidence: float, *,
-                filename: str = "", counts: Optional[Dict[str, int]] = None,
+                filename: str = "", language: str = "", counts: Optional[Dict[str, int]] = None,
                 context_policy: str = CONTEXT_LINE_DEFAULT,
                 context_min_confidence: float = CONTEXT_LINE_MIN_CONFIDENCE_DEFAULT,
                 context_text: str = "") -> Tuple[FileReview, int]:
@@ -371,7 +388,9 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float,
     file listing that was sent beside the diff, when one was: a finding that
     quotes only that listing is still dropped, because an inline comment can
     only attach to a line of the diff, but it is counted apart from a quote the
-    model invented."""
+    model invented. language is the file's language, passed straight to drop_rule so
+    the title rule reads the tag list the prompt was chosen by, and read for nothing
+    else here."""
     parsed = parse_patch(patch)
     kept: List[Finding] = []
     seen = set()
@@ -383,7 +402,7 @@ def postprocess(review: FileReview, patch: Optional[str], min_confidence: float,
         logger.info("finding dropped", rule=rule, filename=_meta(filename), line=f.line, title=f.title[:120])
 
     for f in review.findings:
-        rule = drop_rule(f, min_confidence)
+        rule = drop_rule(f, min_confidence, language)
         if rule:
             dropped(f, rule)
             continue
@@ -427,7 +446,8 @@ class FileReviewer:
     def __init__(self, llm: BaseChatModel, settings: Settings, prompt=review_prompt,
                  verifier_prompt=verify_prompt, verify: Optional[bool] = None,
                  cross_llm: Optional[BaseChatModel] = None, cross_prompt_template=cross_prompt,
-                 model_name: Optional[str] = None, cross_note_first: Optional[bool] = None):
+                 model_name: Optional[str] = None, cross_note_first: Optional[bool] = None,
+                 doc_prompt=doc_review_prompt, doc_cross_prompt_template=doc_cross_prompt):
         self.settings = settings
         self.prompt = prompt
         self.verifier_prompt = verifier_prompt
@@ -440,6 +460,12 @@ class FileReviewer:
         self.cross_model_name = str(getattr(cross_llm, "model", "") or "cross-examiner") if cross_llm is not None else ""
         note_first = settings.CROSS_EXAMINE_NOTE_FIRST if cross_note_first is None else cross_note_first
         self.cross_chain = (cross_prompt_template | cross_llm.bind(format=cross_schema(note_first=note_first))) if cross_llm is not None else None
+        # One chain per language family, built here and chosen per file, so a harness candidate
+        # passed as prompt= or doc_prompt= is the one that runs on a file of that family.
+        self.doc_prompt = doc_prompt
+        self.doc_chain = doc_prompt | llm.bind(format=output_schema())
+        self.doc_cross_prompt = doc_cross_prompt_template
+        self.doc_cross_chain = (doc_cross_prompt_template | cross_llm.bind(format=cross_schema(note_first=note_first))) if cross_llm is not None else None
         self.cross_budget = settings.CROSS_EXAMINE_MAX_CALLS_PER_REVIEW  # shared across every file of one review
         # review_file cross-examines each file as it goes; the workflow switches this off when it
         # runs the two models one at a time and calls cross_examine_file itself in a second phase
@@ -477,18 +503,20 @@ class FileReviewer:
             logger.warning("cross-examine budget exhausted for this review, findings left unexamined", filename=_meta(filename))
             return review, 0, 0, 0, 0, 0
         self.cross_budget -= 1
+        prompt, chain = (self.doc_cross_prompt, self.doc_cross_chain) if language in DOCUMENT_LANGUAGES \
+            else (self.cross_prompt, self.cross_chain)
         data_begin, data_end = delimiters(secrets.token_hex(8))
         block = "\n".join(
             f"[{i}] {f.category.value} | {f.severity.value} | line {f.line} | {_meta(_defang(f.title), 120)} | evidence: {_meta(_defang(f.evidence), 300)}"
             for i, f in enumerate(review.findings)) or "(none)"
         inputs = {"filename": _meta(filename), "language": _meta(language, 40), "code_diff": await asyncio.to_thread(_defang, patch or ""),
                   "findings_block": block, "data_begin": data_begin, "data_end": data_end}
-        human = _content_text(self.cross_prompt.format_messages(**inputs)[-1].content)
+        human = _content_text(prompt.format_messages(**inputs)[-1].content)
         if human.count(data_begin) != 1 or human.count(data_end) != 1 or human.index(data_begin) > human.index(data_end):
             logger.error("cross-examine prompt boundary check failed", filename=_meta(filename))
             return review, 0, 0, 0, 0, 0
         try:
-            message = await self.cross_chain.ainvoke(inputs)
+            message = await chain.ainvoke(inputs)
         except Exception as e:
             logger.warning("cross-examine call failed, first review stands", filename=_meta(filename), error=type(e).__name__)
             return review, 0, 0, 1, 0, 0
@@ -520,6 +548,7 @@ class FileReviewer:
             kept.append(f.model_copy(update={"severity": severity, "cross_verdict": v.verdict.value,
                                              "cross_reason": v.reason, "cross_severity": v.severity}))
         additions, _ = postprocess(FileReview(findings=ce.additions, summary=""), patch, floor, filename=filename,
+                                   language=language,
                                    context_policy=self.settings.CONTEXT_LINE_FINDINGS,
                                    context_min_confidence=self.settings.CONTEXT_LINE_MIN_CONFIDENCE)
         seen = {(f.line, f.title.strip().lower()) for f in kept}
@@ -625,6 +654,8 @@ class FileReviewer:
     async def review_file(self, filename: str, language: str, status: str, patch: str,
                           file_text: str = "") -> FileReviewResult:
         started = time.perf_counter()
+        document = language in DOCUMENT_LANGUAGES
+        prompt, chain = (self.doc_prompt, self.doc_chain) if document else (self.prompt, self.chain)
         # Redaction and defanging scan attacker-authored text with regexes; they run in a
         # worker thread so a pathological patch cannot stall the webhook and the dashboard.
         patch = await asyncio.to_thread(redact_text, patch or "")  # idempotent; the runner already redacted
@@ -646,8 +677,8 @@ class FileReviewer:
                 block, context_mode, labels = rendered_context.block, rendered_context.mode, rendered_context.markers
         inputs = {"filename": _meta(filename), "language": _meta(language, 40), "status": _meta(status, 40),
                   "code_diff": code_diff, "file_context": block, "data_begin": data_begin, "data_end": data_end}
-        rendered = "\n".join(_content_text(m.content) for m in self.prompt.format_messages(**inputs))
-        human = _content_text(self.prompt.format_messages(**inputs)[-1].content)
+        rendered = "\n".join(_content_text(m.content) for m in prompt.format_messages(**inputs))
+        human = _content_text(prompt.format_messages(**inputs)[-1].content)
         if human.count(data_begin) != 1 or human.count(data_end) != 1 or human.index(data_begin) > human.index(data_end) \
                 or human.count(marker) != labels:
             logger.error("prompt boundary check failed", filename=_meta(filename))
@@ -656,7 +687,7 @@ class FileReviewer:
         if self.settings.LOG_PROMPTS:
             logger.info("prompt", filename=filename, prompt=rendered)
         try:
-            message = await self.chain.ainvoke(inputs)
+            message = await chain.ainvoke(inputs)
         except Exception as e:
             logger.error("model call failed", filename=filename, error=type(e).__name__)
             return FileReviewResult(filename, language, status, AnnotatedFileReview(findings=[], summary="Model call failed."),
@@ -666,6 +697,7 @@ class FileReviewer:
             logger.info("model output", filename=filename, output=redact_text(text)[:4000])
         first, ok = parse_file_review(text)
         first, dropped = postprocess(first, patch, self.settings.MIN_FINDING_CONFIDENCE, filename=filename,
+                                     language=language,
                                      context_policy=self.settings.CONTEXT_LINE_FINDINGS,
                                      context_min_confidence=self.settings.CONTEXT_LINE_MIN_CONFIDENCE,
                                      context_text=block)
@@ -679,9 +711,15 @@ class FileReviewer:
         if self.cross_inline:
             await self.cross_examine_file(result)
         if self.verify_enabled and result.review.findings:
-            result.review, result.refuted, result.verify_calls, v_in, v_out = await self._verify(
-                result.review, patch, filename, language)
-            result.prompt_tokens += v_in
-            result.output_tokens += v_out
+            if document:
+                # The verifier prompt is written for code: it names the four code categories and
+                # reasons about attackers, so a document finding would be judged by the wrong
+                # rules. A document verifier waits on a measured round.
+                logger.info("verify pass skipped for a document", filename=_meta(filename), language=_meta(language, 40))
+            else:
+                result.review, result.refuted, result.verify_calls, v_in, v_out = await self._verify(
+                    result.review, patch, filename, language)
+                result.prompt_tokens += v_in
+                result.output_tokens += v_out
         result.duration_seconds = time.perf_counter() - started
         return result

@@ -72,7 +72,7 @@ from services.ai_reviewer import FileReviewer, FileReviewResult  # noqa: E402
 from services.comment_renderer import render_review  # noqa: E402
 from services.git_diff import GITHUB_CONTEXT_LINES, file_at, split_git_diff  # noqa: E402
 from services.llm import build_chat_model, build_cross_model, ollama_health, unload_model  # noqa: E402
-from services.prompts import review_prompt_with_context  # noqa: E402
+from services.prompts import doc_review_prompt_with_context, review_prompt_with_context  # noqa: E402
 from services.review_runner import prepare_files, select_files  # noqa: E402
 from services.review_workflow import ReviewWorkflow  # noqa: E402
 
@@ -380,9 +380,11 @@ async def review(args: argparse.Namespace, settings: Settings, text: str, label:
                         f"(ollama pull {settings.CROSS_EXAMINE_MODEL}, or --no-cross)")
     llm = build_chat_model(settings)
     cross_llm = build_cross_model(settings)
-    # the same prompt production uses with the switch on, or the block would never be rendered
+    # the same prompt production uses with the switch on, or the block would never be rendered;
+    # the document prompt follows the switch for the same reason
     reviewer = FileReviewer(llm, settings, cross_llm=cross_llm,
-                            **({"prompt": review_prompt_with_context} if settings.FILE_CONTEXT else {}))
+                            **({"prompt": review_prompt_with_context,
+                                "doc_prompt": doc_review_prompt_with_context} if settings.FILE_CONTEXT else {}))
     quiet = args.quiet
 
     async def on_progress(phase: str, done: int, total: int, current: str) -> None:

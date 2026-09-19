@@ -9,14 +9,14 @@ import pytest
 import structlog
 
 from config.settings import settings
-from services.ai_reviewer import FileReviewer, parse_file_review, postprocess
+from services.ai_reviewer import FileReviewer, drop_rule, parse_file_review, postprocess
 from services.comment_renderer import render_review, sanitise
 from services.prompts import (MARK_BEGIN, MARK_END, MARK_FILE, HUMAN_TEMPLATE, HUMAN_TEMPLATE_WITH_CONTEXT,
                               SYSTEM_PROMPT, SYSTEM_PROMPT_HEAD, FILE_CONTEXT_RULE, SYSTEM_PROMPT_EVIDENCE_ON,
                               DOC_SYSTEM_PROMPT, DOC_SYSTEM_PROMPT_HEAD, DOC_SYSTEM_PROMPT_EVIDENCE_ON,
-                              DOC_SYSTEM_PROMPT_WITH_CONTEXT, DOC_CROSS_SYSTEM_PROMPT, review_prompt,
-                              review_prompt_with_context)
-from services.schemas import FileReview
+                              DOC_SYSTEM_PROMPT_WITH_CONTEXT, DOC_CROSS_SYSTEM_PROMPT,
+                              doc_review_prompt_with_context, review_prompt, review_prompt_with_context)
+from services.schemas import FileReview, Finding
 from tests.conftest import DIFF
 from tests.fakes import RecordingChatModel
 
@@ -691,3 +691,133 @@ def test_postprocess_only_asks_the_new_question_when_a_block_was_sent():
     postprocess(FileReview(findings=[made_up], summary=""), DIFF, 0.5, counts=counts,
                 context_text="lines 1 to 9 of 9\n    return CONFIG[value]\n")
     assert counts == {"outside_diff": 1}
+
+
+# ---------------------------------------------------------------- the document prompt pair
+
+# A markdown file whose one arithmetic line does not close: three boxes at 12 is 36, not 40.
+MD_LINE = "Three boxes at 12 pounds a month is 40 pounds a month."
+MD_DIFF = ("@@ -0,0 +1,3 @@\n"
+           "+# Cost model\n"
+           "+\n"
+           "+" + MD_LINE + "\n")
+# The same file after two lines were added to it, so a listing of it is more than the diff
+# already holds and the file block is rendered.
+MD_TEXT = ("# Cost model\n"
+           "\n"
+           "## Costs\n"
+           "\n"
+           + MD_LINE + "\n"
+           "\n"
+           "Every box is billed monthly.\n")
+MD_CONTEXT_DIFF = ("@@ -3,3 +3,5 @@\n"
+                   " ## Costs\n"
+                   " \n"
+                   "+" + MD_LINE + "\n"
+                   "+\n"
+                   " Every box is billed monthly.\n")
+
+
+def _doc(category, title, recommendation="Write 36 pounds a month.", line=3, evidence=MD_LINE):
+    return {"category": category, "severity": "medium", "title": title, "line": line,
+            "evidence": evidence, "recommendation": recommendation, "confidence": 0.9}
+
+
+async def test_a_markdown_file_gets_the_document_prompt_and_a_python_file_the_code_one():
+    """The prompt is chosen per file, not per reviewer: one pull request holds both
+    languages and one FileReviewer reviews all of it."""
+    fake = RecordingChatModel()
+    reviewer = FileReviewer(fake, settings)
+    await reviewer.review_file("docs/plan.md", "markdown", "added", MD_DIFF)
+    await reviewer.review_file("app.py", "python", "modified", DIFF)
+    document, code = fake.calls[0][0].content, fake.calls[1][0].content
+    assert document.startswith("You are ReviewBot's document reviewer")
+    assert "security and accessibility specialist" not in document
+    assert code.startswith("You are ReviewBot, a security and accessibility specialist")
+
+
+async def test_a_markdown_file_with_the_context_switch_on_gets_the_document_context_prompt():
+    """The pairing the runner builds when the switch is on: both prompts carrying the
+    file-context rule, so a markdown file with a listing beside it is read by the
+    document prompt that knows the listing is there."""
+    fake = RecordingChatModel()
+    reviewer = FileReviewer(fake, ON, prompt=review_prompt_with_context, doc_prompt=doc_review_prompt_with_context)
+    result = await reviewer.review_file("docs/plan.md", "markdown", "modified", MD_CONTEXT_DIFF, MD_TEXT)
+    assert result.error is None
+    assert result.review.summary != "Review skipped: prompt boundary check failed."
+    system = fake.calls[0][0].content
+    assert system.startswith("You are ReviewBot's document reviewer")
+    assert "File context: when a listing of this file" in system
+    human = _human(fake)
+    label = [line for line in human.split("\n") if MARK_FILE in line]
+    assert len(label) == 1 and label[0].endswith("the whole file at this commit, 7 lines")
+
+
+def test_a_document_title_is_judged_by_the_document_rule_names():
+    """The document prompt opens a title with its rule name and forbids the name
+    alone, as the code prompt does with its tags. The file's language picks the
+    list, the same thing the prompt was chosen by: in a markdown file "sum, method"
+    is two rule names and nothing else, while "sum, the total does not close" names
+    the problem after the rule and stays, and so does "delete the plan", because
+    delete is not one of the document rule names."""
+    findings = [
+        _doc("mechanism", "mechanism"),
+        _doc("arithmetic", "sum, method"),
+        _doc("arithmetic", "sum, the total does not close"),
+        _doc("quality", "delete the plan"),
+    ]
+    counts = {}
+    kept, dropped = postprocess(FileReview(findings=findings, summary=""), MD_DIFF, 0.5,
+                                language="markdown", counts=counts)
+    assert [f.title for f in kept.findings] == ["sum, the total does not close", "delete the plan"]
+    assert dropped == 2 and counts == {"tag_title": 2}
+
+
+def test_a_title_with_no_language_named_is_judged_by_the_code_tag_words():
+    """The language defaults to the empty string and the empty string is the code
+    list, so a caller that names no language gets exactly the code path it had
+    before the document pair existed: "yagni, delete" is the tag list and goes,
+    and "mechanism" names no code tag and stays."""
+    findings = [_doc("quality", "yagni, delete"), _doc("mechanism", "mechanism")]
+    counts = {}
+    kept, dropped = postprocess(FileReview(findings=findings, summary=""), MD_DIFF, 0.5, counts=counts)
+    assert [f.title for f in kept.findings] == ["mechanism"]
+    assert dropped == 1 and counts == {"tag_title": 1}
+
+
+def test_a_document_category_on_a_code_file_is_still_judged_by_the_code_tags():
+    """The grammar hands all nine categories to both prompts, so a Python file's
+    reply can come back filed under plan. Keying the tag list on the category let
+    such a finding out of the tag_title drop it took before this branch; keying it
+    on the file's language does not, and the same finding in a markdown file names
+    no document rule and stays."""
+    f = Finding(**_doc("plan", "yagni, delete"))
+    assert drop_rule(f, 0.5) == "tag_title"
+    assert drop_rule(f, 0.5, "markdown") is None
+
+
+def test_the_document_prompts_own_sentence_as_a_title_is_replaced_not_dropped():
+    """The shape round three produced 42 times from the code prompt, in the document
+    prompt's words: the instruction copied into the title slot over a finding that is
+    often right. The title comes from the recommendation instead."""
+    rec = "Write 36 pounds a month, which is what three boxes at 12 gives. The total below repeats it."
+    title = "the rule name, then the problem, never the name alone"
+    kept, dropped = postprocess(FileReview(findings=[_doc("arithmetic", title, recommendation=rec)], summary=""),
+                                MD_DIFF, 0.5)
+    assert dropped == 0
+    assert [f.title for f in kept.findings] == ["Write 36 pounds a month, which is what three boxes at 12 gives."]
+
+
+async def test_the_verify_pass_is_skipped_for_a_document_and_still_runs_for_code():
+    """The verifier prompt names the four code categories and reasons about attackers,
+    so a document finding would be judged by the wrong rules. The skip is per language:
+    the same reviewer verifies the Python file in the next call."""
+    doc_reply = json.dumps({"findings": [_doc("arithmetic", "sum, the total does not close")],
+                            "summary": "A cost model."})
+    fake = RecordingChatModel(responses=[doc_reply, GOOD])
+    reviewer = FileReviewer(fake, settings, verify=True)
+    result = await reviewer.review_file("docs/plan.md", "markdown", "added", MD_DIFF)
+    assert len(fake.calls) == 1 and result.verify_calls == 0
+    assert [f.title for f in result.review.findings] == ["sum, the total does not close"]
+    code = await reviewer.review_file("app.py", "python", "modified", DIFF)
+    assert len(fake.calls) > 2 and code.verify_calls > 0

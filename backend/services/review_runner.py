@@ -20,7 +20,8 @@ from services.comment_renderer import render_review, sanitise
 from services.file_context import FETCH_CONCURRENCY, FETCH_SECONDS_PER_FILE, FETCH_SECONDS_TOTAL, fits_context
 from services.github_app_auth import REVIEW_PERMISSIONS, InstallationTokenProvider
 from services.github_client import GitHubClient
-from services.prompts import review_prompt, review_prompt_with_context
+from services.prompts import (doc_review_prompt, doc_review_prompt_with_context, review_prompt,
+                              review_prompt_with_context)
 from services.redaction import is_excluded_path, redact
 from services.review_queue import ReviewJob
 from services.review_workflow import ReviewWorkflow, risk_score, totals_for
@@ -417,9 +418,12 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
 
         # The narrowed token mint is the off path exactly: no file was fetched, so the prompt
         # that carries the listing would only render the empty block, and the switch-on rule
-        # would sit in the system text saying a listing follows when none does.
+        # would sit in the system text saying a listing follows when none does. The document
+        # prompt follows the same switch, because a prompt without the file-context slot fails
+        # the boundary check whenever a listing was rendered.
         with_context = settings.FILE_CONTEXT and "contents" not in provider.dropped
-        reviewer_kwargs = {"prompt": review_prompt_with_context if with_context else review_prompt}
+        reviewer_kwargs = {"prompt": review_prompt_with_context if with_context else review_prompt,
+                           "doc_prompt": doc_review_prompt_with_context if with_context else doc_review_prompt}
         workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm, **reviewer_kwargs),
                                   on_progress=_progress,
                                   on_result=lambda result: done.__setitem__(result.filename, result))
