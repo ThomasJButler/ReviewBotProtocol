@@ -67,7 +67,8 @@ async def ollama_health(settings: Settings) -> Dict[str, Any]:
             names = {m.get("name") for m in tags.json().get("models", [])}
             if settings.CROSS_EXAMINE_MODEL:
                 out["cross_model"] = settings.CROSS_EXAMINE_MODEL
-                out["cross_model_present"] = settings.CROSS_EXAMINE_MODEL in names
+                out["cross_model_present"] = (settings.CROSS_EXAMINE_MODEL in names
+                                              or f"{settings.CROSS_EXAMINE_MODEL}:latest" in names)
             out["reachable"] = True
             out["model_present"] = settings.OLLAMA_MODEL in names or f"{settings.OLLAMA_MODEL}:latest" in names
             ps = await client.get(f"{base}/api/ps")

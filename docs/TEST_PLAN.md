@@ -181,6 +181,16 @@ while true; do lsof -i -P -a -p $(pgrep -f 'uvicorn main:app') 2>/dev/null | gre
 
 The only peers that ever appear are `127.0.0.1:11434` (Ollama) and `api.github.com:443`. The tunnel client's own connections belong to the ngrok process, not to the backend.
 
+The webhook path can never be run with the network off, because GitHub has to reach the machine. The offline command can. Turn the wifi off, then from `backend/` run `.venv/bin/python scripts/review_diff.py --range 2595c59~1..2595c59 --no-cross` (two eligible files; the six markdown files are listed under Not reviewed) with the same loop pointed at it in another terminal:
+
+```
+while true; do lsof -i -P -a -p $(pgrep -f 'scripts/review_diff.py') 2>/dev/null | grep -v LISTEN; sleep 1; done
+```
+
+Expected: the review prints, and the only peer that ever appears is `127.0.0.1:11434`. Run it again without `--no-cross` to time the two-phase path with the cross-examiner, which loads each model once.
+
+Run of 2026-09-12, reviewer alone, network up: the two eligible files took 40 and 49 seconds with `qwen3.5:9b` already resident and produced 9 findings (3 dropped by the post-filters), all of them the defence-read-as-attack shape that `docs/REVIEW_QUALITY.md` describes, on the praise rule's own test fixtures. `lsof` sampled the process 84 times over the run and the only peer it ever showed was `localhost:11434`. The wifi-off repeat and the cross-examined timing are still to do.
+
 ## 7. Afterwards
 
 Keep the App: it is the real one. Delete the scratch pull requests or the repository. Never install the App on all repositories. If you rotate the webhook secret or the key, update `backend/.env` and restart the backend.
@@ -203,10 +213,10 @@ Backend on the host under `scripts/dev-up.sh`, ngrok on a static dev domain, the
 
 What the run turned up, in the order it was found:
 
-1. `ALLOWED_HOSTS` pasted as `https://host` gave every delivery a 400 "Invalid Host header". Fixed in 69acebe: the setting now drops a scheme, path or port and lower-cases the rest, so a pasted URL works.
+1. `ALLOWED_HOSTS` pasted as `https://host` gave every delivery a 400 "Invalid Host header". Fixed in 92d24f1: the setting now drops a scheme, path or port and lower-cases the rest, so a pasted URL works.
 2. The App's webhook URL was saved without the `/webhook/github` path, so GitHub posted to `/` and got 404. Nothing to fix in the code; the troubleshooting table below gained a row.
 3. The redaction leaves a value alone when it announces itself as a placeholder (`example...`, `changeme`, `your-...`), by design. The GitHub token line in S1 came out as `[REDACTED:assigned-secret]`; the fake OpenAI key, whose value starts with `example`, was posted in the clear. The plan's original `sk-proj-` shape is caught by the provider pattern. Never start a real key with one of those words.
-4. The progress lookup added to `GET /api/status` during the run (b5de17c) reached for an app attribute that was never set, so the Status page failed with a 500 for as long as a job was running and worked again the moment it finished. Fixed with a test that fails on the old code.
+4. The progress lookup added to `GET /api/status` during the run (8bd22c0) reached for an app attribute that was never set, so the Status page failed with a 500 for as long as a job was running and worked again the moment it finished. Fixed with a test that fails on the old code.
 5. The cross-examiner's low-severity addition on `db.py` in S8 ("lack of input type validation" on a query that is already parameterised) is the soft false positive the benchmark predicts for `gemma4:12b` additions. Read it the way the README says: decide who is right before asking either model why.
 
 ## Troubleshooting
@@ -214,7 +224,7 @@ What the run turned up, in the order it was found:
 | Symptom                                                                                 | Cause                                                                                                                                             | Fix                                                                                                                                                                                                  |
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Delivery red, response "Invalid Host header" or 400                                     | the tunnel hostname is not in `ALLOWED_HOSTS`                                                                                                     | add it, restart the backend                                                                                                                                                                          |
-| Delivery red, 400 "Invalid Host header" with the tunnel host already in `ALLOWED_HOSTS` | the full URL was pasted in rather than the bare hostname                                                                                          | write it bare, as `ALLOWED_HOSTS=localhost,127.0.0.1,<tunnel-host>`; since 69acebe `allowed_hosts_list` also strips a scheme, path or port (`backend/config/settings.py`), so a pasted URL works too |
+| Delivery red, 400 "Invalid Host header" with the tunnel host already in `ALLOWED_HOSTS` | the full URL was pasted in rather than the bare hostname                                                                                          | write it bare, as `ALLOWED_HOSTS=localhost,127.0.0.1,<tunnel-host>`; since 92d24f1 `allowed_hosts_list` also strips a scheme, path or port (`backend/config/settings.py`), so a pasted URL works too |
 | Delivery red, 404                                                                       | the App's webhook URL has no path, so GitHub posts to `/`                                                                                         | it must end in `/webhook/github`                                                                                                                                                                     |
 | Delivery red, 401                                                                       | webhook secret mismatch                                                                                                                           | the same value in the App settings and `backend/.env`, no trailing space                                                                                                                             |
 | Delivery green, 202, but no review                                                      | Ollama down, or the model not pulled                                                                                                              | Status page shows which; `ollama pull qwen3.5:9b`                                                                                                                                                    |

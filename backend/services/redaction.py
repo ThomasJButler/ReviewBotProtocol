@@ -26,7 +26,7 @@ _PATTERNS: List[Tuple[str, re.Pattern, int]] = [
     ("slack-token", re.compile(r"\bxoxe\.[A-Za-z0-9-]{10,}"), 0),
     ("slack-webhook", re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/]+"), 0),
     ("discord-webhook", re.compile(r"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+"), 0),
-    ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), 0),
+    ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])"), 0),
     ("stripe-key", re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{20,}"), 0),
     ("langsmith-key", re.compile(r"\b(?:lsv2_[a-z]{2}_[a-f0-9]{32}|ls__[A-Za-z0-9]{20,})"), 0),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), 0),

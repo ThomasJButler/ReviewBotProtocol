@@ -1,13 +1,17 @@
-"""What PROMPT_OVERHEAD_TOKENS in services/review_runner.py should be for a
+"""What PROMPT_OVERHEAD_TOKENS in services/file_context.py should be for a
 measured prompt.
 
 usage: .venv/bin/python scripts/prompt_overhead.py <run json from prompt_eval --out> <cases json>
 
 For every row: overhead = the prompt tokens Ollama counted minus the runner's
 own estimate of the redacted patch (bytes / BYTES_PER_TOKEN). The constant
-must cover the largest overhead seen plus headroom, or _fits_context admits
-patches that no longer fit num_ctx. The two constants are read from the
-runner's source so this needs no Settings environment.
+must cover the largest overhead seen plus headroom, or file_context.fits_context
+admits patches that no longer fit num_ctx. The two constants are read from that
+module's source text so this needs no Settings environment.
+
+The run must be one whose cases carry no file text, so the only overhead the
+number holds is the system prompt, the schema and the framing: a padded run
+would fold the file listing into it and the constant would grow for nothing.
 """
 
 import json
@@ -18,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.redaction import redact_text  # noqa: E402
 
-_SRC = (Path(__file__).resolve().parents[1] / "services" / "review_runner.py").read_text(encoding="utf-8")
+_SRC = (Path(__file__).resolve().parents[1] / "services" / "file_context.py").read_text(encoding="utf-8")
 BYTES_PER_TOKEN = float(re.search(r"^BYTES_PER_TOKEN = ([\d.]+)", _SRC, re.M).group(1))
 PROMPT_OVERHEAD_TOKENS = int(re.search(r"^PROMPT_OVERHEAD_TOKENS = (\d+)", _SRC, re.M).group(1))
 

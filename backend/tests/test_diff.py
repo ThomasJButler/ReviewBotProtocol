@@ -1,4 +1,4 @@
-from services.diff import locate_evidence, parse_patch
+from services.diff import hunk_spans, locate_evidence, locate_evidence_kind, parse_patch, quotes_text
 from tests.conftest import DIFF
 
 
@@ -151,6 +151,53 @@ def test_a_removal_at_the_end_of_a_hunk_lands_on_the_last_line_before_it():
     assert locate_evidence(parsed, 3, "assert_authorised(user)") == 2
 
 
+def test_the_locator_says_a_quote_of_a_removed_line_was_located_as_a_removal():
+    """The context-line rule exempts a removal, and the exemption is only as
+    honest as the locator's own answer about how it got there."""
+    parsed = parse_patch(_REMOVAL)
+    quote = '<p role="status" className="cart-status">{message}</p>'
+    assert locate_evidence_kind(parsed, 17, quote) == (17, quote, "removal")
+    assert locate_evidence_kind(parsed, 14, "-    " + quote)[2] == "removal"
+
+
+def test_a_removal_at_the_end_of_a_hunk_is_still_a_removal_on_the_line_before_it():
+    parsed = parse_patch(_TRAILING)
+    assert locate_evidence_kind(parsed, 3, "assert_authorised(user)") == (2, "assert_authorised(user)", "removal")
+
+
+def test_the_locator_distinguishes_an_added_line_from_a_context_line():
+    parsed = parse_patch(DIFF)
+    assert locate_evidence_kind(parsed, 2, "eval(user_input)") == (2, "eval(user_input)", "added")
+    assert locate_evidence_kind(parsed, 1, "import os") == (1, "import os", "context")
+    assert locate_evidence_kind(parsed, 1, "def main()")[2] == "context", "relocated, and still a line nobody touched"
+    assert locate_evidence_kind(parsed, 1, "import os\nSENTINEL_9f3a = eval(user_input)")[2] == "context", \
+        "the kind belongs to whichever part of a multi-line quote located"
+
+
+_SUBSTRING_OF_A_REMOVAL = (
+    "@@ -1,2 +1,2 @@\n"
+    "-    check = validate_token(request.headers)\n"
+    "     token = request.headers\n"
+)
+
+
+def test_a_quote_that_is_only_a_substring_of_an_unrelated_removal_is_still_a_context_line():
+    """The regression guard on the refactor: the kind must come from the locator
+    and never be re-derived by a removal predicate asked afterwards. Here
+    `request.headers` appears inside the removed check as well as on the context
+    line the locator placed it on, so an unconditional predicate would call it a
+    removal and exempt a finding the locator never treated as one."""
+    parsed = parse_patch(_SUBSTRING_OF_A_REMOVAL)
+    assert locate_evidence_kind(parsed, 1, "request.headers") == (1, "request.headers", "context")
+    assert locate_evidence_kind(parsed, 1, "validate_token(request.headers)")[2] == "removal", \
+        "the whole removed line is a removal, by the branch that answered"
+
+
+def test_a_fabricated_quote_is_located_nowhere_and_has_no_kind():
+    parsed = parse_patch(DIFF)
+    assert locate_evidence_kind(parsed, 2, "os.system('rm -rf /')") == (None, "os.system('rm -rf /')", "")
+
+
 _CAROUSEL = (
     "@@ -6,3 +6,8 @@\n"
     "   const [index, setIndex] = useState(0)\n"
@@ -218,3 +265,24 @@ def test_a_quote_that_swaps_the_quote_marks_is_the_same_line():
     parsed = parse_patch(patch)
     assert locate_evidence(parsed, 2, "url = request.args['url']") == 2
     assert locate_evidence(parsed, 3, "url = request.args['url']") == 2, "and it is found from a wrong line number too"
+
+
+def test_hunk_spans_come_from_the_header_numbers_of_every_hunk():
+    """The window around a change needs each hunk's range, which ParsedPatch
+    counts but does not keep."""
+    patch = "@@ -1,2 +1,2 @@\n-a\n+b\n c\n@@ -10,2 +10,3 @@\n x\n+y\n z\n\\ No newline at end of file\n"
+    assert hunk_spans(patch) == [(1, 2), (10, 12)]
+    assert hunk_spans(DIFF) == [(1, 4)]
+    assert hunk_spans("@@ -0,0 +1 @@\n+only\n") == [(1, 1)], "a hunk header with no count is one line"
+    assert hunk_spans("") == [] and hunk_spans(None) == []
+
+
+def test_a_quote_of_the_context_block_is_told_from_a_line_the_model_invented():
+    """This is what tells a finding that quotes the file we sent from one that
+    quotes nothing at all, and it answers with the locator's own normalisation."""
+    block = 'lines 1 to 3 of 90\nimport os\ndef helper(value):\n    return CONFIG["value"]\n'
+    assert quotes_text(block, 'return CONFIG["value"]')
+    assert quotes_text(block, "+    return CONFIG['value']"), "a marker and the other quote mark still match"
+    assert not quotes_text(block, "os.system('rm -rf /')")
+    assert not quotes_text(block, "os"), "too short to mean anything, as in the locator"
+    assert not quotes_text("", "return CONFIG[value]") and not quotes_text(block, "")

@@ -1,6 +1,6 @@
 # 2026-09-04: the specialist reviewer prompt, the verify pass and the red team
 
-Machine: Apple M1 Max, 32 GB, Ollama 0.33.1. Model: `qwen3.5:9b`, reasoning off, output bound to the JSON schema. Pipeline commits: 37d5482 (the prompt and the harness), 8cdb6d3 (the red-team corpus). The run files from this day were written to the session's temporary directory and were lost when the machine rebooted on 2026-09-05; the numbers below are as recorded the same day in `backend/README.md` ("Measuring the prompt") and `docs/SECURITY_REVIEW.md` (fourth round), which were written from the harness output at the time.
+Machine: Apple M1 Max, 32 GB, Ollama 0.33.1. Model: `qwen3.5:9b`, reasoning off, output bound to the JSON schema. Pipeline commits: d912b6f (the prompt and the harness), 1d94292 (the red-team corpus). The run files from this day were written to the session's temporary directory and were lost when the machine rebooted on 2026-09-05; the numbers below are as recorded the same day in `backend/README.md` ("Measuring the prompt") and `docs/SECURITY_REVIEW.md` (fourth round), which were written from the harness output at the time.
 
 ## The eleven-case corpus, two repeats
 

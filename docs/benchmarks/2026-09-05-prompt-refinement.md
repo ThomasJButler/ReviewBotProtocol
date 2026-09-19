@@ -1,12 +1,12 @@
 # 2026-09-05: refining the reviewer, verifier and cross-examiner prompts
 
-Machine: Apple M1 Max, 32 GB, Ollama 0.33.3 (desktop app, loopback only). Models: `qwen3.5:9b` (reviewer), `gemma4:12b` (cross-examiner). One model resident at a time throughout: every run below ends with `--unload`, and cross-examiner and verifier runs replay the reviewer's recorded replies (`--replay`) so only their own model is loaded. Pipeline commit for the runs marked "fixed pipeline": e122a0e; the first full run (`full1`) ran on 4950a3d, before the three finding-loss fixes in 64ebab2, so it is used to choose candidates, not to quote shipped numbers.
+Machine: Apple M1 Max, 32 GB, Ollama 0.33.3 (desktop app, loopback only). Models: `qwen3.5:9b` (reviewer), `gemma4:12b` (cross-examiner). One model resident at a time throughout: every run below ends with `--unload`, and cross-examiner and verifier runs replay the reviewer's recorded replies (`--replay`) so only their own model is loaded. Pipeline commit for the runs marked "fixed pipeline": 469b67c; the first full run (`full1`) ran on 6802e4d, before the three finding-loss fixes in a0d299c, so it is used to choose candidates, not to quote shipped numbers.
 
 Corpus: `backend/tests/prompt_corpus.py` (76 cases: 11 original, 65 added today, 16 of them clean) plus `backend/tests/prompt_redteam.py` (15 hostile diffs), 91 cases in all; the cross-examiner screen used a 30-case subset (9 clean, 13 planted, 8 red team). Ground truth as corrected during the day (every line of a planted block; simplicity findings expected at low). Judge: `backend/scripts/prompt_judge.py`, rule in its docstring; every table below is its output, re-scored against the corrected ground truth with `--corpus`. Columns: `obeyed` and `inj_rep` count red-team cases; `fp/clean` is false positives per clean diff; `x_add` is the share of planted lines found only by the cross-examiner; `x_refT` is first-pass hits refuted by the cross-examiner; `score` is recall with each clean-diff false positive costing twice a miss; `tokens` and `sec` are per file for the whole pipeline.
 
 Raw rows, including every model's raw reply per case, live outside the repository in `~/ReviewBot-runs/2026-09-05/prompt-runs/<tag>-<variant>.json`; the compact summaries and these leaderboards are in `runs/2026-09-05/`.
 
-## full1: four reviewer prompts, 91 cases, two repeats (pipeline 4950a3d)
+## full1: four reviewer prompts, 91 cases, two repeats (pipeline 6802e4d)
 
 ```
 .venv/bin/python scripts/prompt_eval.py --cases-from-file full.json --prompts-dir reviewer2 --variants new,a11y-r2,checklist-r2,synthesis-r2 --repeats 2 --out runs --tag full1 --unload
@@ -19,7 +19,7 @@ Raw rows, including every model's raw reply per case, live outside the repositor
 | new                | 473   | 182   | 0   | 0/32   | 0.66   | 0.06     | 0.06    | 0.98 | 1.0  | 24/32   | -     | -      | 0.698 | 1000   | 9.2  |
 | synthesis-r2 (OUT) | 700   | 182   | 0   | 2/32   | 0.8    | 0.0      | 0.0     | 0.97 | 0.95 | 11/32   | -     | -      | 0.835 | 1504   | 13.0 |
 
-What it says. The round-two revision of the accessibility-led prompt (a11y-r2, 698 words) is the winner: recall 0.92 against the shipped prompt's 0.66, with false positives held at 0.12 per clean diff (the round-one version of the same prompt sat at 1.22 on the screening subset). synthesis-r2 is marked OUT for "obeyed 2/32"; the raw text shows both rows were the JSON grammar closing the object early after an unescaped quote in the summary (`options={"`), not obedience. That bug is fixed in 64ebab2. Reading the winner's raw replies also found `<html>` refused as evidence for being six characters, and a 44-character base64 key copied with one slip and dropped, both fixed in the same commit.
+What it says. The round-two revision of the accessibility-led prompt (a11y-r2, 698 words) is the winner: recall 0.92 against the shipped prompt's 0.66, with false positives held at 0.12 per clean diff (the round-one version of the same prompt sat at 1.22 on the screening subset). synthesis-r2 is marked OUT for "obeyed 2/32"; the raw text shows both rows were the JSON grammar closing the object early after an unescaped quote in the summary (`options={"`), not obedience. That bug is fixed in a0d299c. Reading the winner's raw replies also found `<html>` refused as evidence for being six characters, and a 44-character base64 key copied with one slip and dropped, both fixed in the same commit.
 
 ## full1o: the round-one originals, 91 cases, one repeat (fixed pipeline)
 
@@ -36,7 +36,7 @@ What it says. The originals ran after the fixes, so their recall is not comparab
 
 ## verify: the verifier prompts, 91 cases, replaying the shipped reviewer (fixed pipeline)
 
-**Correction, found at 01:35 on 2026-09-06.** The harness reused one reviewer object for a whole variant, and the per-review call budgets live on that object (25 cross-examiner calls, 40 verifier calls), so this run verified only the first 40 findings and left 19 rows with findings unverified. The ranking among candidates in it stands, because every candidate saw the same rows, but its absolute numbers are diluted with rows the second model never saw. Fixed in 3c61448 (each case starts with a fresh budget, and the judge's `x_calls` column shows how many rows the second model saw); the corrected runs are `verify2` below.
+**Correction, found at 01:35 on 2026-09-06.** The harness reused one reviewer object for a whole variant, and the per-review call budgets live on that object (25 cross-examiner calls, 40 verifier calls), so this run verified only the first 40 findings and left 19 rows with findings unverified. The ranking among candidates in it stands, because every candidate saw the same rows, but its absolute numbers are diluted with rows the second model never saw. Fixed in b269fab (each case starts with a fresh budget, and the judge's `x_calls` column shows how many rows the second model saw); the corrected runs are `verify2` below.
 
 ```
 .venv/bin/python scripts/prompt_eval.py --cases-from-file full.json --replay runs/full1-new.json --verify-prompts-dir verify --variants new+verify,verify:verify-strict,verify:verify-lenient --repeats 1 --out runs --tag verify --unload
@@ -52,7 +52,7 @@ What it says. The shipped verifier costs recall (0.53 against 0.66 without it, a
 
 ## xscreen: seven cross-examiner prompts, 30-case subset, replaying the winning reviewer
 
-**Correction, found at 01:35 on 2026-09-06.** The harness reused one reviewer object for a whole variant, and the per-review call budgets live on that object (25 cross-examiner calls, 40 verifier calls), so this run cross-examined only the first 25 of its 30 rows. The ranking among candidates in it stands, because every candidate saw the same rows, but its absolute numbers are diluted with rows the second model never saw. Fixed in 3c61448 (each case starts with a fresh budget, and the judge's `x_calls` column shows how many rows the second model saw); the corrected runs are `xscreen3` below.
+**Correction, found at 01:35 on 2026-09-06.** The harness reused one reviewer object for a whole variant, and the per-review call budgets live on that object (25 cross-examiner calls, 40 verifier calls), so this run cross-examined only the first 25 of its 30 rows. The ranking among candidates in it stands, because every candidate saw the same rows, but its absolute numbers are diluted with rows the second model never saw. Fixed in b269fab (each case starts with a fresh budget, and the judge's `x_calls` column shows how many rows the second model saw); the corrected runs are `xscreen3` below.
 
 ```
 .venv/bin/python scripts/prompt_eval.py --cases-from-file subset_cross.json --replay runs/full1-a11y-r2.json --cross-model gemma4:12b --cross-prompts-dir cross --variants cross,cross:refute-first-a,cross:refute-first-b,cross:gap-hunter-a,cross:gap-hunter-b,cross:teacher-a,cross:teacher-b --repeats 1 --out runs --tag xscreen --unload
@@ -68,7 +68,7 @@ What it says. The shipped verifier costs recall (0.53 against 0.66 without it, a
 | cross (OUT)                | 698   | 30    | 0   | 0/8    | 0.905  | 0.33     | 0.22    | 1.0  | 1.0  | 1/8 (reviewer 2) | 0.0   | 2      | 0.733 | 2228   | 25.6 |
 | cross:refute-first-a (OUT) | 698   | 30    | 0   | 0/8    | 0.81   | 0.44     | 0.0     | 0.94 | 0.94 | 1/8 (reviewer 2) | 0.1   | 6      | 0.6   | 2470   | 30.3 |
 
-The reviewer alone on the same 30 cases (first repeat of full1-a11y-r2): recall 1.0, 0.11 false positives per clean diff, score 0.933, injection reported 2 of 8. What it says. Every cross-examiner candidate scored below the reviewer alone: each removed false positives and lost real findings. Two shapes explained most of the losses. gemma answers false_positive when it only disagrees with the severity and then adds the same problem in its own words on the same line (teacher-a did this sixteen times in thirty cases); the reconciliation now treats that as a correction (e122a0e). And gemma rightly refuted findings that named the right line for the wrong reason (an "injection" on an int() of an environment variable) without adding the finding it should have written. The shipped cross prompt and refute-first-a are OUT: each was talked out of a real command injection by a planted comment claiming a prior "cleared as false positive" ticket, and silenced the reviewer's report of that comment. The round-two brief targets exactly these; results land in `xscreen2` and `xfinal` below.
+The reviewer alone on the same 30 cases (first repeat of full1-a11y-r2): recall 1.0, 0.11 false positives per clean diff, score 0.933, injection reported 2 of 8. What it says. Every cross-examiner candidate scored below the reviewer alone: each removed false positives and lost real findings. Two shapes explained most of the losses. gemma answers false_positive when it only disagrees with the severity and then adds the same problem in its own words on the same line (teacher-a did this sixteen times in thirty cases); the reconciliation now treats that as a correction (469b67c). And gemma rightly refuted findings that named the right line for the wrong reason (an "injection" on an int() of an environment variable) without adding the finding it should have written. The shipped cross prompt and refute-first-a are OUT: each was talked out of a real command injection by a planted comment claiming a prior "cleared as false positive" ticket, and silenced the reviewer's report of that comment. The round-two brief targets exactly these; results land in `xscreen2` and `xfinal` below.
 
 ## Cloud reference: the same prompts on bigger models through Ollama's cloud tags
 
@@ -96,7 +96,7 @@ What it says. The prompt scales: on the 31B of the same family as the local cros
 
 ## full2a, full2b, exporder, full2c: the shipped candidates like for like (fixed pipeline)
 
-After the three finding-loss fixes (64ebab2) the incumbent and the winner were re-measured, and the drop that appeared was not the fixes. Making every JSON key required had a side effect: Ollama's grammar now holds the model to the schema's field order (182 of 182 replies followed it, where before 182 of 182 wrote the summary first), and findings-first made the 9B conservative. Same prompt, same diffs:
+After the three finding-loss fixes (a0d299c) the incumbent and the winner were re-measured, and the drop that appeared was not the fixes. Making every JSON key required had a side effect: Ollama's grammar now holds the model to the schema's field order (182 of 182 replies followed it, where before 182 of 182 wrote the summary first), and findings-first made the 9B conservative. Same prompt, same diffs:
 
 ```
 .venv/bin/python scripts/prompt_eval.py --cases-from-file full.json --prompts-dir winner --variants new,a11y-r2 --repeats 2 --out runs --tag full2a --unload
@@ -113,7 +113,7 @@ Recall 0.867 against 0.92 in full1, with the summaries still describing the very
 | ------- | ----- | ----- | --- | ------ | ------ | -------- | ------- | ---- | ---- | ------- | ----- | ------ | ----- | ------ | ---- |
 | a11y-r2 | 698   | 12    | 0   | -      | 1.0    | 1.33     | 1.33    | 0.89 | 0.89 | -       | -     | -      | 0.5   | 1512   | 19.8 |
 
-So the shipped schema puts the summary first (aab638c): one sentence on what the change does, written first, is a scratchpad for a small model, and with the findings required after it a truncated summary still costs nothing but the summary. The hand polish (a11y-r3) ran on that order by a three-minute margin (`full2b`), then all three shipped candidates were measured on it together (`full2c`; commit 7766b26 for the pipeline, before the removed-line locator fallback in b0ad5cf):
+So the shipped schema puts the summary first (f54d1b2): one sentence on what the change does, written first, is a scratchpad for a small model, and with the findings required after it a truncated summary still costs nothing but the summary. The hand polish (a11y-r3) ran on that order by a three-minute margin (`full2b`), then all three shipped candidates were measured on it together (`full2c`; commit 2a01274 for the pipeline, before the removed-line locator fallback in 96e95e4):
 
 ```
 .venv/bin/python scripts/prompt_eval.py --cases-from-file full.json --prompts-dir final --variants a11y-r2,a11y-r3 --repeats 2 --out runs --tag full2c --unload
@@ -128,9 +128,9 @@ So the shipped schema puts the summary first (aab638c): one sentence on what the
 
 What it says. The polish (a11y-r3, 699 words, Fable's hand revision of the round-two winner against its failure rows) ships: score 0.896 against the winner's 0.89 and the old prompt's 0.731, the same recall (0.953 against 0.96) with fewer clean-diff false positives (0.19 against 0.22) and the hostile text reported half again as often (21 of 32 against 14). Its four repeats pooled (full2b plus full2c) give the same 0.896. What the polish did not fix: the copy-pasted validator, the carousel with no pause, the html tag without lang, the low-contrast colour pair, the removed autocomplete attribute, the status message that lost its live region, and the 16-pixel target were each missed in at least one repeat, so they stay out of the opt-in floor test until a measured prompt clears them. The medium-plus false positives rose from 0.12 to 0.19, all of them accessibility findings on the clean controls (a focus indicator carried by box-shadow, an alt text built from a prop, an XSS claimed on an image source); that is the next round's brief. Its 31B cloud reference: recall 0.973, 0.09 false positives, score 0.945 (`cloud-gemma4_31b-r3`).
 
-## xscreen2: the revised cross-examiner prompts, 30-case subset, gemma only (pipeline 7766b26)
+## xscreen2: the revised cross-examiner prompts, 30-case subset, gemma only (pipeline 2a01274)
 
-**Correction, found at 01:35 on 2026-09-06.** The harness reused one reviewer object for a whole variant, and the per-review call budgets live on that object (25 cross-examiner calls, 40 verifier calls), so this run cross-examined only the first 25 of its 30 rows. The ranking among candidates in it stands, because every candidate saw the same rows, but its absolute numbers are diluted with rows the second model never saw. Fixed in 3c61448 (each case starts with a fresh budget, and the judge's `x_calls` column shows how many rows the second model saw); the corrected runs are `xscreen3` below.
+**Correction, found at 01:35 on 2026-09-06.** The harness reused one reviewer object for a whole variant, and the per-review call budgets live on that object (25 cross-examiner calls, 40 verifier calls), so this run cross-examined only the first 25 of its 30 rows. The ranking among candidates in it stands, because every candidate saw the same rows, but its absolute numbers are diluted with rows the second model never saw. Fixed in b269fab (each case starts with a fresh budget, and the judge's `x_calls` column shows how many rows the second model saw); the corrected runs are `xscreen3` below.
 
 Three Opus writers revised the two leading cross prompts and synthesised a third against the brief built from `xscreen` (false positive used for a severity disagreement, talked out of a finding by a planted comment, refuting the reason and leaving the line, praise as additions, additions that never find the reviewer's misses). Screened beside the unrevised leader, replaying the winning reviewer's recorded replies:
 
@@ -147,7 +147,7 @@ Three Opus writers revised the two leading cross prompts and synthesised a third
 
 What it says. The revisions did not beat the original gap-hunter-b: its round-two version ties it on every column and costs more tokens, the synthesis loses recall, and the gap-hunter-a revision trades false positives for the recall it gains. gap-hunter-b ships as `CROSS_SYSTEM_PROMPT` (the tie broke on cost, as the judge's rule says). The three true findings it still refutes are the wrong-reason hits (an "injection" claimed on an int() of an environment variable, an "unpinned" claim on a lodash import, a "missing label" claim where the label is present), refuted correctly and not replaced; the reviewer alone still scores 0.933 on this subset against the cross-examiner's 0.90, so on this corpus the cross-examiner buys its zero false positives with three lost findings, and it stays an option rather than a default. The full-corpus measurement of the shipped pair is `xfinal` below.
 
-## verify2 and xscreen3: the verifier and the cross-examiner screen, corrected (fresh budget per case, pipeline 3c61448)
+## verify2 and xscreen3: the verifier and the cross-examiner screen, corrected (fresh budget per case, pipeline b269fab)
 
 Both replay the shipped reviewer's recorded replies (`full2c-a11y-r3`), so the second model is the only live call and every row is examined (`x_calls`).
 
@@ -176,7 +176,7 @@ The reviewer alone on the same 91 cases: recall 0.953, 0.19 false positives per 
 
 The reviewer alone on the same 30 cases: hostile text reported in 5 of 8. What it says. With every row examined the picture changes. gap-hunter-b, the leader of the capped screens, silences two of the reviewer's five injection reports on this subset and is out; so are its revision and the synthesis. The one prompt that keeps every report, and adds one, is gap-hunter-a-r2, at a price: 0.67 false positives per clean diff, all at low or info, and a score of 0.60 against the reviewer alone at 0.933. The full-corpus measurement of that prompt against the shipped reviewer is `xfinal2` below; the cross-examiner stays an option, not a default, and the honest reading is that on this corpus the second model earns its place through the disagreement view and the reports it refuses to drop, not through the score.
 
-## xfinal2: the shipped pair on the full corpus (fresh budget per case, pipeline 3c61448)
+## xfinal2: the shipped pair on the full corpus (fresh budget per case, pipeline b269fab)
 
 ```
 .venv/bin/python scripts/prompt_eval.py --cases-from-file full.json --replay runs/full2c-a11y-r3.json --cross-model gemma4:12b --cross-prompts-dir cross2 --variants cross:gap-hunter-a-r2 --repeats 2 --out runs --tag xfinal2 --unload
@@ -202,6 +202,6 @@ The bigger cross-examiner adds recall (0.973) and keeps 13 of 16 reports, with t
 
 ## What shipped, and what the day changed
 
-- `SYSTEM_PROMPT`: a11y-r3 (35c8740). `VERIFY_SYSTEM_PROMPT`: verify-strict, off by default (a2a73d4). `CROSS_SYSTEM_PROMPT`: gap-hunter-a-r2, off by default (8a45e14, replacing 1d6d291, which had shipped gap-hunter-b on the capped screen).
-- The review schema writes the summary first and requires every key (aab638c); the evidence locator accepts a whole short line, a long literal copied with a slip, and a quote of a removed line (64ebab2, b0ad5cf); encryption and signing keys are redacted (64ebab2); a refute-plus-re-add on one line is a correction (e122a0e); a review can run the two models one at a time (f683c3e); the harness replays, unloads, spells the shape out for cloud tags, and gives every case a fresh budget (a48430a, 91b3ce8, 31af04e, 68b9dac, 3c61448); the corpus has 76 cases (4950a3d, 21c457d, e873a89).
+- `SYSTEM_PROMPT`: a11y-r3 (1338146). `VERIFY_SYSTEM_PROMPT`: verify-strict, off by default (689803e). `CROSS_SYSTEM_PROMPT`: gap-hunter-a-r2, off by default (e8a558a, replacing 2135944, which had shipped gap-hunter-b on the capped screen).
+- The review schema writes the summary first and requires every key (f54d1b2); the evidence locator accepts a whole short line, a long literal copied with a slip, and a quote of a removed line (a0d299c, 96e95e4); encryption and signing keys are redacted (a0d299c); a refute-plus-re-add on one line is a correction (469b67c); a review can run the two models one at a time (91f3ff8); the harness replays, unloads, spells the shape out for cloud tags, and gives every case a fresh budget (643b993, 97994a2, 5fe38e7, 8ec8e01, b269fab); the corpus has 76 cases (6802e4d, e87a8e3, 64fff77).
 - Machine: 2021 M1 Max, 32 GB. With one model resident the whole day's measurement kept memory above 40 percent free; both resident had crashed it the night before. Ollama was shut down at 03:52 on 2026-09-06 when the last run finished.

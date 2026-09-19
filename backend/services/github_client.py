@@ -4,11 +4,12 @@ import asyncio
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
 from config.logging import get_logger
+from services import file_context
 from services.comment_renderer import sanitise
 from services.github_app_auth import API_VERSION, InstallationTokenProvider
 
@@ -127,6 +128,51 @@ class GitHubClient:
             url = m.group(1) if m else None
             pages += 1
         return files, False
+
+    async def get_file_text(self, repo: str, path: str, ref: str) -> Optional[str]:
+        """One file at one commit, as text, or None with a logged reason.
+
+        Never raises: file context is an extra, and a review runs on the patch
+        alone without it. The JSON media type is used on purpose, because the
+        raw one redirects to codeload and this client is built with
+        follow_redirects off. The per-file contents_url from the pull request
+        files payload is deliberately not used: it is a URL out of attacker
+        reachable JSON, and _resolve would be the only thing between it and the
+        installation token.
+
+        The path comes from the pull request files payload, so it is checked
+        before it is spliced into a URL: an empty path, a leading slash or a
+        `.` or `..` segment is refused rather than sent, because quote() leaves
+        dots alone and only the shape of the path stops a request walking out of
+        the repository the token is scoped to."""
+        segments = path.split("/")
+        if not path or path.startswith("/") or any(s in (".", "..") for s in segments):
+            logger.info("file context unavailable", repo=repo, path=sanitise(path, 200), reason="path refused")
+            return None
+        try:
+            data = (await self._request("GET", f"/repos/{repo}/contents/{quote(path)}", params={"ref": ref})).json()
+        except (GitHubError, httpx.HTTPError, ValueError) as e:
+            # a transport failure and a body that is not JSON are file context lost, like a 404:
+            # the docstring's "never raises" has to be true, or one unreadable file fails a review
+            logger.info("file context unavailable", repo=repo, path=sanitise(path, 200),
+                        status=getattr(e, "status", None), reason=type(e).__name__)
+            return None
+        if not isinstance(data, dict) or data.get("type") != "file":
+            logger.info("file context unavailable", repo=repo, path=sanitise(path, 200), reason="not a file")
+            return None
+        if data.get("encoding") != "base64":
+            # how the API reports a file over 1 MB: the content is omitted and the encoding is "none"
+            logger.info("file context unavailable", repo=repo, path=sanitise(path, 200),
+                        reason=f"encoding {data.get('encoding')}", size=data.get("size"))
+            return None
+        if int(data.get("size") or 0) > file_context.MAX_FILE_BYTES:
+            logger.info("file context unavailable", repo=repo, path=sanitise(path, 200), reason="too large",
+                        size=data.get("size"))
+            return None
+        text = file_context.decode(str(data.get("content") or ""))
+        if text is None:
+            logger.info("file context unavailable", repo=repo, path=sanitise(path, 200), reason="not utf-8 text")
+        return text
 
     @staticmethod
     def _inline_comments_rejected(err: GitHubError) -> bool:

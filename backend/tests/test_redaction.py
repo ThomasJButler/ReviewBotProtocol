@@ -111,3 +111,17 @@ def test_encryption_and_signing_keys_are_assigned_secrets_too():
     assert "ZmFrZS1kZW1v" not in out and "not-a-real-signing-key" not in out
     assert out.count("[REDACTED:assigned-secret]") == 2
     assert 'cache_key = "user:profile:v2"' in out, "a plain key name with a short value is not a secret"
+
+
+def test_a_google_key_whose_last_character_is_a_hyphen_is_still_redacted():
+    """The pattern ended in a word boundary, which cannot hold between a hyphen
+    and a following space or quote, so a key ending in a hyphen leaked in a URL,
+    a comment or a bare value. A miss here is a leak, so the boundary is now a
+    lookahead for the key's own alphabet instead."""
+    key = "AIza" + "c" * 34 + "-"
+    for text in (f"+url = 'https://maps.example/api?key={key}'\n", f"+# {key}\n", f"+key: {key}\n"):
+        masked, counts = redact(text)
+        assert key not in masked and counts.get("google-api-key") == 1, text
+    masked, _ = redact("+key = '" + "AIza" + "c" * 35 + "'\n")
+    assert "AIza" not in masked, "a key ending in a letter is still caught"
+

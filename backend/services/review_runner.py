@@ -17,8 +17,10 @@ from database.repositories.review_repository import ReviewRepository
 from database.repositories.webhook_repository import WebhookRepository
 from services.ai_reviewer import FileReviewer, FileReviewResult
 from services.comment_renderer import render_review, sanitise
-from services.github_app_auth import InstallationTokenProvider
+from services.file_context import FETCH_CONCURRENCY, FETCH_SECONDS_PER_FILE, FETCH_SECONDS_TOTAL, fits_context
+from services.github_app_auth import REVIEW_PERMISSIONS, InstallationTokenProvider
 from services.github_client import GitHubClient
+from services.prompts import review_prompt, review_prompt_with_context
 from services.redaction import is_excluded_path, redact
 from services.review_queue import ReviewJob
 from services.review_workflow import ReviewWorkflow, risk_score, totals_for
@@ -29,9 +31,9 @@ logger = get_logger(__name__)
 SKIP_LANGUAGES = {"unknown", "markdown", "text", "rst"}
 SKIP_DIRS = ("node_modules/", "vendor/", "dist/", "build/", ".next/", "__pycache__/")
 LOCK_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Pipfile.lock", "Cargo.lock", "go.sum", "composer.lock", "Gemfile.lock"}
-BYTES_PER_TOKEN = 2.8          # conservative for code
-PROMPT_OVERHEAD_TOKENS = 1400  # system prompt, schema and framing: measured up to 1206 on 2026-09-06
-                               # for the 699-word prompt (scripts/prompt_overhead.py), with headroom
+# The size gate's arithmetic lives in services/file_context.py, constants and all: the reviewer needs
+# the same numbers for the file listing and cannot import this module, because this module imports the
+# reviewer. So fits_context is called here and the constants behind it stay there.
 CLEANUP_SECONDS = 15
 PARTIAL_HEAD_CHECK_SECONDS = 5   # a review cut short checks the head once more, briefly,
 PARTIAL_POST_SECONDS = 20        # and posts what it has inside the queue's grace period
@@ -104,11 +106,6 @@ class ReviewOutcome:
     comment_url: Optional[str]
 
 
-def _fits_context(patch: str, settings: Settings) -> bool:
-    tokens = len(patch.encode("utf-8")) / BYTES_PER_TOKEN
-    return tokens + PROMPT_OVERHEAD_TOKENS + settings.OLLAMA_NUM_PREDICT <= settings.OLLAMA_NUM_CTX
-
-
 def _skip_reason(f: Dict[str, Any], settings: Settings) -> Optional[str]:
     name = f.get("filename", "")
     base = name.rsplit("/", 1)[-1]
@@ -127,7 +124,7 @@ def _skip_reason(f: Dict[str, Any], settings: Settings) -> Optional[str]:
         return "generated or vendored"
     if len(f["patch"].encode("utf-8")) > settings.MAX_PATCH_BYTES:
         return f"patch larger than {settings.MAX_PATCH_BYTES} bytes"
-    if not _fits_context(f["patch"], settings):
+    if not fits_context(f["patch"], settings):
         return "patch too large for the model's context window"
     if get_file_language(name) in SKIP_LANGUAGES:
         return "not code"
@@ -163,6 +160,59 @@ def prepare_files(selected: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]],
             "additions": f.get("additions", 0), "redactions": counts,
         })
     return prepared, redaction_total
+
+
+async def _fetch_file_context(client: GitHubClient, files: List[Dict[str, Any]], repo: str, head_sha: str,
+                              settings: Settings) -> Dict[str, int]:
+    """Read each reviewed file at the head commit and hang it on its file dict,
+    so the reviewer can send it beside the diff. Bounded three ways: a per-file
+    wait_for, a phase-wide wait_for and a semaphore. The bounds are the point
+    rather than politeness: _request sleeps up to 120 seconds twice on a
+    throttle, which at 25 files would be most of an hour out of the review's own
+    budget, and cancelling the call ends that sleep.
+
+    A failure is swallowed, because file context is an extra and a review runs
+    on the patch alone without it. A cancel is not: the queue cancels a review
+    for a newer push or a shutdown, and swallowing it here would send the job on
+    into the model calls it was stopped before.
+
+    A file the pull request added is skipped, because its diff is already the
+    whole file."""
+    wanted = [f for f in files if f.get("status") != "added"]
+    counts = {"fetched": 0, "failed": 0, "skipped": len(files) - len(wanted)}
+    if not wanted:
+        return counts
+    started = time.perf_counter()
+    gate = asyncio.Semaphore(FETCH_CONCURRENCY)
+
+    async def one(f: Dict[str, Any]) -> None:
+        async with gate:
+            try:
+                text = await asyncio.wait_for(client.get_file_text(repo, f["filename"], head_sha),
+                                              timeout=FETCH_SECONDS_PER_FILE)
+            except asyncio.CancelledError:
+                raise   # the review itself was cancelled: this phase is not the place to swallow that
+            except Exception as e:  # noqa: BLE001  # TimeoutError included: the per-file bound, not a cancel
+                logger.warning("could not read a file for context", repo=repo, filename=f["filename"],
+                               error=type(e).__name__)
+                counts["failed"] += 1
+                return
+            if text:
+                f["file_text"] = text
+                counts["fetched"] += 1
+            else:
+                counts["failed"] += 1
+
+    try:
+        await asyncio.wait_for(asyncio.gather(*(one(f) for f in wanted)), timeout=FETCH_SECONDS_TOTAL)
+    except asyncio.CancelledError:
+        raise   # a cancelled review stops here rather than carrying on into the model calls
+    except Exception as e:  # noqa: BLE001  # TimeoutError included: the phase-wide bound
+        logger.warning("the file context phase ran out of time", repo=repo, error=type(e).__name__)
+    counts["seconds"] = int(time.perf_counter() - started)
+    logger.info("file context read", repo=repo, fetched=counts["fetched"], failed=counts["failed"],
+                skipped=counts["skipped"], seconds=counts["seconds"])
+    return counts
 
 
 async def _finish(deps: RunnerDeps, review_id: str, delivery_id: str, review_update: Dict[str, Any],
@@ -206,7 +256,15 @@ async def _post_and_record(deps: RunnerDeps, client: GitHubClient, job: ReviewJo
     and post=False when the head has moved, so the row still gets its findings
     but nothing goes to a stale commit. cross_examined is false when a review
     was cut short before the second model saw anything: naming it then would
-    tell the author the findings were checked when they were not."""
+    tell the author the findings were checked when they were not.
+
+    redaction_total is what the patches gave up and nothing else. What the file
+    listings gave up is a different count of different lines: a secret the change
+    adds appears in both, and a secret on a line the change never touched is not
+    a secret this pull request committed. Folding the two together would tell the
+    author that more credentials are in their diff than are in it, so the file
+    count stays where it can be read for what it is: result.redactions["file_text"],
+    the totals' redactions_file, and the log line."""
     settings = deps.settings
     rendered = render_review(succeeded, model=settings.OLLAMA_MODEL, skipped=skipped, is_fork=job.is_fork,
                              fork_repo=job.fork_repo, max_inline=settings.MAX_INLINE_COMMENTS,
@@ -279,6 +337,7 @@ async def _post_cut_short(deps: RunnerDeps, client: GitHubClient, job: ReviewJob
                        repo=job.repo, pr=job.pr_number, error=type(e).__name__)
         current = False
     totals = totals_for(results)
+    # redaction_total is the patch count and stays it: see _post_and_record's own note
     try:
         posted = await _post_and_record(deps, client, job, review_id, head_sha=head_sha, succeeded=succeeded, errored=errored,
                                         skipped=skipped, redaction_total=redaction_total, totals=totals,
@@ -312,8 +371,13 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         })
         await WebhookRepository(session).mark(job.delivery_id, status="running", review_id=review_id)
 
+    # Contents read is asked for only when file context is on, and it is droppable: an
+    # installation that has not accepted it still mints a token and still gets reviews,
+    # on the patch alone.
+    wider = {"permissions": {**REVIEW_PERMISSIONS, "contents": "read"}, "droppable": ("contents",)} if settings.FILE_CONTEXT else {}
     provider = InstallationTokenProvider(settings.GITHUB_APP_ID, settings.GITHUB_PRIVATE_KEY, job.installation_id,
-                                         base_url=settings.GITHUB_API_BASE_URL, http=deps.http, repository=job.repo)
+                                         base_url=settings.GITHUB_API_BASE_URL, http=deps.http, repository=job.repo,
+                                         **wider)
     client = GitHubClient(provider, base_url=settings.GITHUB_API_BASE_URL, http=deps.http)
     where: Dict[str, Any] = {}  # the last progress report, so a review cut short says how far it got
     done: "OrderedDict[str, FileReviewResult]" = OrderedDict()  # every file result so far, keyed by file, cross-examined ones overwriting
@@ -335,8 +399,13 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
         if truncated:
             skipped.append(("(remaining files)", "the pull request has more files than this bot will fetch"))
         files, redaction_total = await asyncio.to_thread(prepare_files, selected)
+        context_counts: Dict[str, int] = {}
+        if settings.FILE_CONTEXT and files and "contents" not in provider.dropped:
+            context_counts = await _fetch_file_context(client, files, job.repo, head_sha, settings)
         logger.info("review starting", repo=job.repo, pr=job.pr_number, files=len(files), skipped=len(skipped),
-                    redactions=redaction_total, model=settings.OLLAMA_MODEL)
+                    redactions=redaction_total, model=settings.OLLAMA_MODEL,
+                    file_context=settings.FILE_CONTEXT, context_read=context_counts.get("fetched", 0),
+                    context_unread=context_counts.get("failed", 0), context_seconds=context_counts.get("seconds", 0))
 
         async def _progress(phase: str, done: int, total: int, current: str) -> None:
             # one small write per file so the dashboard can show where the review is up to
@@ -346,7 +415,13 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                     "progress_phase": phase, "progress_done": done, "progress_total": total,
                     "progress_file": current[:512] or None})
 
-        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm), on_progress=_progress,
+        # The narrowed token mint is the off path exactly: no file was fetched, so the prompt
+        # that carries the listing would only render the empty block, and the switch-on rule
+        # would sit in the system text saying a listing follows when none does.
+        with_context = settings.FILE_CONTEXT and "contents" not in provider.dropped
+        reviewer_kwargs = {"prompt": review_prompt_with_context if with_context else review_prompt}
+        workflow = ReviewWorkflow(FileReviewer(deps.llm, settings, cross_llm=deps.cross_llm, **reviewer_kwargs),
+                                  on_progress=_progress,
                                   on_result=lambda result: done.__setitem__(result.filename, result))
         budget = review_budget(settings, len(files), time.perf_counter() - started)
         try:
@@ -378,7 +453,9 @@ async def run_review(job: ReviewJob, deps: RunnerDeps) -> ReviewOutcome:
                                         error_message="the model failed on every file" if all_failed else None)
         logger.info("review posted", repo=job.repo, pr=job.pr_number, findings=posted.findings_total,
                     files=len(succeeded), errored=len(errored), seconds=round(time.perf_counter() - started, 1),
-                    url=posted.comment_url)
+                    context_whole=totals.get("context_whole", 0), context_window=totals.get("context_window", 0),
+                    context_none=totals.get("context_none", 0), context_unavailable=totals.get("context_unavailable", 0),
+                    redactions_file=totals.get("redactions_file", 0), url=posted.comment_url)
         return ReviewOutcome(review_id, posted.findings_total, len(succeeded), len(skipped), posted.comment_url)
     except BaseException as e:
         elapsed = time.perf_counter() - started
