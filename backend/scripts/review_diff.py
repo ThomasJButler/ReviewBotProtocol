@@ -228,6 +228,8 @@ def build_settings(args: argparse.Namespace) -> Settings:
         overrides["CROSS_EXAMINE_MODEL"] = args.cross_model
     if args.verify is not None:
         overrides["VERIFY_FINDINGS"] = "true" if args.verify else "false"
+    if args.markdown is not None:
+        overrides["REVIEW_MARKDOWN"] = "true" if args.markdown else "false"
     if args.max_files is not None:
         overrides["MAX_FILES_PER_REVIEW"] = args.max_files
     env_file: Optional[str]
@@ -427,6 +429,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--no-cross", action="store_true", help="review with the reviewer alone whatever backend/.env says")
     ap.add_argument("--verify", action=argparse.BooleanOptionalAction, default=None,
                     help="run the verify pass on every finding (--no-verify switches it off); default VERIFY_FINDINGS")
+    ap.add_argument("--markdown", action=argparse.BooleanOptionalAction, default=None,
+                    help="review markdown files with the document prompt (--no-markdown skips them); default REVIEW_MARKDOWN")
     ap.add_argument("--max-files", type=int, default=None, help="at most this many files, riskiest first; default MAX_FILES_PER_REVIEW")
     ap.add_argument("--format", choices=FORMATS, default="text", help="text for a terminal, markdown as the App would post it, json")
     ap.add_argument("--env-file", default=None, help="settings file to read instead of backend/.env; '' reads none")

@@ -25,7 +25,7 @@ from services.prompts import (doc_review_prompt, doc_review_prompt_with_context,
 from services.redaction import is_excluded_path, redact
 from services.review_queue import ReviewJob
 from services.review_workflow import ReviewWorkflow, risk_score, totals_for
-from utils.helpers import get_file_language, get_utc_timestamp
+from utils.helpers import DOCUMENT_LANGUAGES, get_file_language, get_utc_timestamp
 
 logger = get_logger(__name__)
 
@@ -127,7 +127,10 @@ def _skip_reason(f: Dict[str, Any], settings: Settings) -> Optional[str]:
         return f"patch larger than {settings.MAX_PATCH_BYTES} bytes"
     if not fits_context(f["patch"], settings):
         return "patch too large for the model's context window"
-    if get_file_language(name) in SKIP_LANGUAGES:
+    language = get_file_language(name)
+    # The size gates above run first, so an oversized design document is still skipped for size, and the
+    # switch only opens the languages the document prompt covers.
+    if language in SKIP_LANGUAGES and not (settings.REVIEW_MARKDOWN and language in DOCUMENT_LANGUAGES):
         return "not code"
     return None
 
