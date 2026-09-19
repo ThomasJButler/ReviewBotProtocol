@@ -18,8 +18,8 @@ Everything below is the detail for those three, plus the things that stayed desi
 
 What happened, 2026-09-07:
 
-- PR 13 (`v1.1-Local-AI` into `main`) merged at 18:17 UTC as `5121aa3`. The bot reviewed it five times as the branch moved, all five from `reviewbot-tjb` and none from a person (`gh pr view 13 --json reviews`); the five-reader `/code-review` run was internal and never posted; CodeRabbit declined it for size.
-- `v1.1.0` is an annotated tag at `5121aa3` with a GitHub release whose notes are the CHANGELOG entry.
+- PR 13 (`v1.1-Local-AI` into `main`) merged at 18:17 UTC as `9020f31`. The bot reviewed it five times as the branch moved, all five from `reviewbot-tjb` and none from a person (`gh pr view 13 --json reviews`); the five-reader `/code-review` run was internal and never posted; CodeRabbit declined it for size.
+- `v1.1.0` is an annotated tag at `9020f31` with a GitHub release whose notes are the CHANGELOG entry.
 - Dependabot 11 and 12 (bumps against the old lock files) closed with a note. Of the nine it opened against the new lock files, the six green and minor ones were merged (actions/setup-python 7, actions/setup-node 7, actions/checkout 7 after a rebase, ollama/ollama 0.33.3, lint-staged 17, @types/node 26). Next 16, eslint-config-next 16 and eslint 10 (20, 18, 22) stay open: 18 and 22 fail alone and only pass together, so they are one branch to try by hand with the dev server up.
 - `CHANGELOG.md` started at 1.1.0 with an Unreleased section that each v1.2 pull request adds a line to.
 - The App stays installed on this repository and the scratch repository; every pull request here costs the laptop about an hour when the bot is up, which is why section 2 gains a setting to skip pull requests opened by bots.
