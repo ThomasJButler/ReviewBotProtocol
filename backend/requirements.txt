@@ -4,7 +4,7 @@ uvicorn[standard]==0.52.4
 httpx==0.28.1
 pydantic==2.13.5
 pydantic-settings==2.15.0
-SQLAlchemy==2.0.52
+SQLAlchemy==2.0.54
 aiosqlite==0.22.1
 structlog==26.1.0
 PyJWT==2.13.0
