@@ -7,7 +7,7 @@ pydantic-settings==2.15.0
 SQLAlchemy==2.0.52
 aiosqlite==0.22.1
 structlog==26.1.0
-PyJWT==2.13.0
+PyJWT==2.14.0
 cryptography==50.0.1
 langchain-core==1.6.2
 langgraph==1.2.11
