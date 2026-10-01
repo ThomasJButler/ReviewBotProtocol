@@ -289,6 +289,47 @@ async def test_an_addition_of_another_category_on_a_refuted_line_is_not_a_correc
     assert on_three[0].source_model == "gemma-fake" and result.cross_refuted == 1 and result.cross_added == 1
 
 
+# The document pair. The reviewer's reply must locate on an added line of the markdown
+# patch, or the cross-examiner is handed an empty findings block and has nothing to judge.
+MD_LINE = "Three boxes at 12 pounds a month is 40 pounds a month."
+MD_DIFF = ("@@ -0,0 +1,3 @@\n"
+           "+# Cost model\n"
+           "+\n"
+           "+" + MD_LINE + "\n")
+MD_FIND = json.dumps({"findings": [
+    {"category": "arithmetic", "severity": "medium", "title": "sum, the total does not close", "line": 3,
+     "evidence": MD_LINE, "recommendation": "Write 36 pounds a month.", "confidence": 0.9},
+], "summary": "A cost model."})
+MD_CONFIRM = _cross([
+    {"index": 0, "verdict": "real", "severity": "medium", "reason": "12 times three is 36, line 3.", "confidence": 0.9},
+])
+
+
+async def test_the_cross_examiner_prompt_is_chosen_by_the_file_language():
+    reviewer = RecordingChatModel(model="qwen-fake", responses=[MD_FIND, FIND])
+    cross = RecordingChatModel(model="gemma-fake", responses=[MD_CONFIRM, CONFIRM_BOTH])
+    r = FileReviewer(reviewer, settings, cross_llm=cross)
+    await r.review_file("docs/plan.md", "markdown", "added", MD_DIFF)
+    await r.review_file("a.py", "python", "modified", DIFF)
+    assert cross.calls[0][0].content.startswith("You are ReviewBot's document cross-examiner")
+    assert cross.calls[1][0].content.startswith("You are ReviewBot's cross-examiner")
+
+
+async def test_the_document_cross_examiner_is_chosen_in_sequential_mode_too():
+    """Sequential mode runs the two models one at a time, so review_file makes no cross
+    call at all: cross_examine_file passes the file's language later and the choice is
+    made there, which is the only place it is made."""
+    reviewer = RecordingChatModel(model="qwen-fake", response=MD_FIND)
+    cross = RecordingChatModel(model="gemma-fake", response=MD_CONFIRM)
+    r = FileReviewer(reviewer, settings, cross_llm=cross)
+    r.cross_inline = False
+    result = await r.review_file("docs/plan.md", "markdown", "added", MD_DIFF)
+    assert cross.calls == [] and result.cross_calls == 0
+    await r.cross_examine_file(result)
+    assert len(cross.calls) == 1 and result.cross_calls == 1
+    assert cross.calls[0][0].content.startswith("You are ReviewBot's document cross-examiner")
+
+
 async def test_a_refutation_with_an_addition_elsewhere_is_still_a_refutation():
     elsewhere = _cross(
         [{"index": 1, "verdict": "false_positive", "severity": "low", "reason": "fixture value", "confidence": 0.9}],

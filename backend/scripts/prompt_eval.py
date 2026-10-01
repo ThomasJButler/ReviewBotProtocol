@@ -24,8 +24,10 @@ reviewer model and unload it, then replay those replies through the cross-examin
 
 Candidate prompts: --prompts-dir loads every *.txt as a reviewer system prompt (one
 variant per file, named after the file), --cross-prompts-dir and --verify-prompts-dir
-do the same for the cross-examiner and the verifier. A candidate must contain exactly one
-{data_begin} and one {data_end} and no other brace. With --out, one JSON file per variant
+do the same for the cross-examiner and the verifier. A candidate must contain exactly
+one {data_begin} and one {data_end} and no other brace. A reviewer candidate replaces
+the system prompt for every case in its run, markdown cases included, so a document
+prompt is measured the same way as a code one. With --out, one JSON file per variant
 is written as it finishes, so a crashed run loses nothing.
 
 The harness's own Settings ignores backend/.env (the model comes from --model
@@ -102,7 +104,11 @@ VARIANTS: Dict[str, Dict[str, Any]] = {
     "cross": {"prompt": P.review_prompt, "verify": False, "cross": True},
     # the shipped prompt with the file listing beside the diff, so one tag holds off and on
     # side by side and prompt_judge ranks them in one table
-    "new+filectx": {"prompt": P.review_prompt_with_context, "verify": False, "cross": False, "file_context": True},
+    "new+filectx": {"prompt": P.review_prompt_with_context, "doc_prompt": P.doc_review_prompt_with_context,
+                    "verify": False, "cross": False, "file_context": True},
+    # the shipped code prompt on every case, prose included, which is the baseline the markdown
+    # plan's step 1 asks for: what the code prompt does with a document, expect nothing, or noise
+    "code-on-docs": {"prompt": P.review_prompt, "doc_prompt": P.review_prompt, "verify": False, "cross": False},
 }
 
 
@@ -129,7 +135,8 @@ def _load_candidates(directory: Optional[str], human_template: str) -> Dict[str,
 # A cloud tag relays the request to ollama.com, where the JSON schema handed to `format` is not
 # enforced (replies come back fenced, in whatever shape the model prefers). Locally the grammar
 # makes the shape, so the prompts never spell it out; for a cloud reference run they must.
-_ENUMS = ("category is one of security, accessibility, quality, performance; severity is one of critical, high, "
+_ENUMS = ("category is one of security, accessibility, quality, performance, arithmetic, consistency, "
+          "reference, mechanism, plan; severity is one of critical, high, "
           "medium, low, info; line is an integer; confidence is a number from 0 to 1")
 REVIEW_SHAPE = (" Output shape, because this server does not enforce the schema: one JSON object with two keys, "
                 "findings and summary. findings is a list of objects with exactly the keys category, severity, title, "
@@ -250,13 +257,16 @@ def _settings(model: Optional[str], allow_cloud: bool = False, cross_model: Opti
 
 
 def _classify_raw(raw_text: str, patch: str, min_confidence: float, context_policy: str,
-                  context_min_confidence: float, context_text: str = "") -> Tuple[int, Dict[str, int], List[Dict[str, Any]]]:
+                  context_min_confidence: float, context_text: str = "",
+                  language: str = "") -> Tuple[int, Dict[str, int], List[Dict[str, Any]]]:
     """How many findings the model produced and why the postprocess dropped any,
     counted by the postprocess itself rather than by a copy of its loop: the copy
     applied drop_rule and then the locator, so it never saw the duplicate key or
     the instruction-title retitle that sits between them. The rows beside it are
     the raw findings as the model wrote them, each with where the locator put it
-    and what kind of line that is, because run_case scores a hit off them."""
+    and what kind of line that is, because run_case scores a hit off them. The case's
+    language goes through as well, or a markdown case's drop counters would be computed
+    with the code word list while the pipeline itself used the document one."""
     review, _ = parse_file_review(raw_text)
     parsed = parse_patch(patch)
     drops = {
@@ -269,7 +279,7 @@ def _classify_raw(raw_text: str, patch: str, min_confidence: float, context_poli
         "context_line": 0,
         "context_line_downgraded": 0,
     }
-    postprocess(review, patch, min_confidence, counts=drops, context_policy=context_policy,
+    postprocess(review, patch, min_confidence, counts=drops, language=language, context_policy=context_policy,
                 context_min_confidence=context_min_confidence, context_text=context_text)
     raw_rows = []
     for f in review.findings:
@@ -298,7 +308,8 @@ async def run_case(reviewer: FileReviewer, recorder: Recorder, case: Case, min_c
                                                 "<<<DIFF_DATA_FILE_harness>>>")[0].block
     raw_count, drops, raw_rows = _classify_raw(raw_text, patch_seen, min_confidence,
                                                reviewer.settings.CONTEXT_LINE_FINDINGS,
-                                               reviewer.settings.CONTEXT_LINE_MIN_CONFIDENCE, context_text)
+                                               reviewer.settings.CONTEXT_LINE_MIN_CONFIDENCE, context_text,
+                                               case.language)
     kept = result.review.findings
     # the drops above are read off the reviewer's own reply, so they are blind to a cross-examiner
     # addition; this counts context lines in what both models left standing
@@ -506,26 +517,34 @@ async def main() -> int:
         cross_llm.callbacks = [recorder]
     # Candidate prompts become variants: reviewer candidates run without the cross-examiner
     # (and with it when --cross-model is set, as "<name>+cross"); cross and verifier candidates
-    # run against the current reviewer prompt.
+    # run against the current reviewer prompt. A candidate is the system prompt for every case in
+    # its run, markdown cases included, so it carries doc_prompt as well; the built-in variants
+    # measure the shipped pair chosen by language, except code-on-docs, which puts the code
+    # prompt on every case on purpose.
     for name, prompt in _load_candidates(args.prompts_dir, P.HUMAN_TEMPLATE).items():
-        VARIANTS[name] = {"prompt": prompt, "verify": False, "cross": False}
+        VARIANTS[name] = {"prompt": prompt, "doc_prompt": prompt, "verify": False, "cross": False}
         if cross_llm is not None:
-            VARIANTS[f"{name}+cross"] = {"prompt": prompt, "verify": False, "cross": True}
+            VARIANTS[f"{name}+cross"] = {"prompt": prompt, "doc_prompt": prompt, "verify": False, "cross": True}
     if args.file_context:
         for name, prompt in _load_candidates(args.prompts_dir, P.HUMAN_TEMPLATE_WITH_CONTEXT).items():
-            VARIANTS[f"{name}+filectx"] = {"prompt": prompt, "verify": False, "cross": False, "file_context": True}
+            VARIANTS[f"{name}+filectx"] = {"prompt": prompt, "doc_prompt": prompt, "verify": False, "cross": False,
+                                           "file_context": True}
     for name, prompt in _load_candidates(args.cross_prompts_dir, P.CROSS_HUMAN_TEMPLATE).items():
-        VARIANTS[f"cross:{name}"] = {"prompt": P.review_prompt, "verify": False, "cross": True, "cross_prompt": prompt}
+        VARIANTS[f"cross:{name}"] = {"prompt": P.review_prompt, "verify": False, "cross": True, "cross_prompt": prompt,
+                                     "doc_cross_prompt": prompt}
     for name, prompt in _load_candidates(args.verify_prompts_dir, P.VERIFY_HUMAN_TEMPLATE).items():
         VARIANTS[f"verify:{name}"] = {"prompt": P.review_prompt, "verify": True, "cross": False, "verifier_prompt": prompt}
     if args.variants == "old,new,new+verify" and (args.prompts_dir or args.cross_prompts_dir or args.verify_prompts_dir):
-        skip = ("old", "new+verify") + (() if args.file_context else ("new+filectx",))
+        skip = ("old", "new+verify", "code-on-docs") + (() if args.file_context else ("new+filectx",))
         args.variants = ",".join(v for v in VARIANTS if v not in skip)
     if args.allow_cloud:
         for spec in VARIANTS.values():
             spec["prompt"] = _with_shape(spec["prompt"], REVIEW_SHAPE)
+            # the hint has to reach the document prompts too, since that server does not enforce the schema
+            spec["doc_prompt"] = _with_shape(spec.get("doc_prompt") or P.doc_review_prompt, REVIEW_SHAPE)
             if spec.get("cross"):
                 spec["cross_prompt"] = _with_shape(spec.get("cross_prompt") or P.cross_prompt, CROSS_SHAPE)
+                spec["doc_cross_prompt"] = _with_shape(spec.get("doc_cross_prompt") or P.doc_cross_prompt, CROSS_SHAPE)
             if spec.get("verify"):
                 spec["verifier_prompt"] = _with_shape(spec.get("verifier_prompt") or P.verify_prompt, VERDICT_SHAPE)
     # A run that replays every model it names loads nothing and generates nothing, so it runs with
@@ -565,6 +584,10 @@ async def main() -> int:
             kwargs["cross_note_first"] = args.cross_note_first
         if spec.get("cross_prompt") is not None:
             kwargs["cross_prompt_template"] = spec["cross_prompt"]
+        if spec.get("doc_prompt") is not None:
+            kwargs["doc_prompt"] = spec["doc_prompt"]
+        if spec.get("doc_cross_prompt") is not None:
+            kwargs["doc_cross_prompt_template"] = spec["doc_cross_prompt"]
         if spec.get("verifier_prompt") is not None:
             kwargs["verifier_prompt"] = spec["verifier_prompt"]
         variant_settings = settings

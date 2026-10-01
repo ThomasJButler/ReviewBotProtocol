@@ -5,7 +5,7 @@ import pytest
 from config.settings import CLOUD_KEY_VARS, LocalOnlyViolation, Settings, TRACING_KEY_VARS, TRACING_VARS
 
 _OVERRIDDEN = ("VERIFY_FINDINGS", "DEBUG", "STRICT_LOCAL", "ALLOWED_HOSTS", "MAX_WEBHOOK_BODY_BYTES", "LOG_LEVEL", "LOCAL_API_TOKEN",
-               "OLLAMA_MODEL", "DATABASE_URL", "LOG_PROMPTS", "REVIEW_DRAFTS")
+               "OLLAMA_MODEL", "DATABASE_URL", "LOG_PROMPTS", "REVIEW_DRAFTS", "REVIEW_MARKDOWN")
 
 
 def _mk(monkeypatch, clear_overrides=False, **env):
@@ -79,6 +79,14 @@ def test_verify_findings_is_off_by_default_and_parses_like_the_other_booleans():
     assert s.VERIFY_FINDINGS is False and s.MAX_VERIFY_CALLS_PER_REVIEW == 40
     for raw, want in (("true", True), ("TRUE", True), ("1", True), ("on", True), ("false", False), ("0", False)):
         assert Settings(_env_file=None, VERIFY_FINDINGS=raw).VERIFY_FINDINGS is want, raw
+
+
+def test_review_markdown_is_off_by_default_and_parses_like_the_other_booleans():
+    """Off is the incumbent behaviour: a .md file is skipped as not code until
+    the markdown round in docs/benchmarks passes."""
+    assert Settings(_env_file=None).REVIEW_MARKDOWN is False
+    for raw, want in (("true", True), ("TRUE", True), ("1", True), ("on", True), ("false", False), ("0", False)):
+        assert Settings(_env_file=None, REVIEW_MARKDOWN=raw).REVIEW_MARKDOWN is want, raw
 
 
 def test_the_context_line_policy_accepts_its_four_names_and_refuses_anything_else():

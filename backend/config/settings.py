@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     REVIEW_BOT_PULL_REQUESTS: bool = False
     """Review pull requests opened by a bot (dependabot, renovate). Off: they are recorded as skipped_bot; each
     would cost the machine about an hour."""
+    REVIEW_MARKDOWN: bool = False
+    """Review markdown files with the document prompt pair (services/prompts.py, docs/MARKDOWN_REVIEW_PLAN.md)
+    instead of skipping them as not code. A .md file costs one model call like a code file and competes for
+    MAX_FILES_PER_REVIEW, where it is ranked like any other file, by a risky word in its path and then by its
+    additions, so SECURITY.md sorts ahead of notes.md. .rst and .txt stay skipped either way. Off until a
+    markdown round in docs/benchmarks passes; the first, on 2026-09-19, fell short."""
     REVIEW_RETENTION_DAYS: int = 365
     """Reviews and their findings older than this many days are deleted at startup and then nightly, never a row still
     running; 0 keeps everything. A webhook delivery that old is not deleted but stripped to a tombstone of its delivery
@@ -237,7 +243,7 @@ class Settings(BaseSettings):
                 pass
         return v.replace("\\n", "\n")
 
-    @field_validator("DEBUG", "REVIEW_DRAFTS", "REVIEW_BOT_PULL_REQUESTS", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", "CROSS_EXAMINE_SEQUENTIAL",
+    @field_validator("DEBUG", "REVIEW_DRAFTS", "REVIEW_BOT_PULL_REQUESTS", "REVIEW_MARKDOWN", "LOG_PROMPTS", "STRICT_LOCAL", "VERIFY_FINDINGS", "CROSS_EXAMINE_SEQUENTIAL",
                      "CROSS_EXAMINE_NOTE_FIRST",
                      "FILE_CONTEXT", mode="before")
     @classmethod

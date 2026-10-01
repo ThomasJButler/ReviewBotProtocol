@@ -387,6 +387,38 @@ def test_select_files_applies_every_rule_and_keeps_the_riskiest_under_the_cap():
     assert sum(1 for _, r in skipped if "file limit" in r) == 32 + 1 - capped.MAX_FILES_PER_REVIEW
 
 
+def test_review_markdown_opens_md_files_only_and_leaves_rst_and_txt_skipped():
+    raw = [{"filename": name, "status": "modified", "patch": "+x"} for name in ("notes.md", "notes.rst", "notes.txt")]
+    selected, skipped = select_files(raw, settings.model_copy(update={"REVIEW_MARKDOWN": True}))
+    assert [f["filename"] for f in selected] == ["notes.md"]
+    assert dict(skipped) == {"notes.rst": "not code", "notes.txt": "not code"}
+    selected, skipped = select_files(raw, settings)
+    assert selected == []
+    assert dict(skipped) == {"notes.md": "not code", "notes.rst": "not code", "notes.txt": "not code"}
+
+
+@respx.mock
+async def test_a_whole_review_with_review_markdown_on_reads_the_readme_with_the_document_prompt(db):
+    """The same fake pull request as the end-to-end test, with the switch on:
+    README.md joins db.py instead of being listed under Not reviewed. The
+    canned reply quotes a SQL line that is not in README.md's '+hello', so the
+    second file adds no finding."""
+    reviews_route = _routes()
+    fake = RecordingChatModel(response=MODEL_REPLY)
+    async with httpx.AsyncClient() as http:
+        deps = RunnerDeps(settings=settings.model_copy(update={"REVIEW_MARKDOWN": True}), llm=fake,
+                          session_factory=db, http=http)
+        outcome = await run_review(ReviewJob("octocat/repo", 42, "c" * 40, 555, ""), deps)
+
+    assert outcome.files_reviewed == 2 and outcome.files_skipped == 4 and outcome.findings == 1
+    assert "Language: markdown" in fake.seen_text
+    assert "You are ReviewBot's document reviewer" in fake.seen_text
+    assert "You are ReviewBot, a security and accessibility specialist" in fake.seen_text
+    posted = json.loads(reviews_route.calls[0].request.content)
+    not_reviewed = posted["body"].split("### Not reviewed", 1)[1].split("###", 1)[0]
+    assert "README.md" not in not_reviewed and "`.env`" in not_reviewed
+
+
 def test_patch_that_cannot_fit_the_context_window_is_skipped():
     big = {"filename": "big.py", "status": "modified", "patch": "+" + "y" * (settings.MAX_PATCH_BYTES - 10)}
     tight = settings.model_copy(update={"OLLAMA_NUM_CTX": 2048})

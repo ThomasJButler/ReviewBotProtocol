@@ -22,10 +22,15 @@ from tests.prompt_corpus import CASES, SEVERITY_RANK  # noqa: E402
 # The floor is what the model actually does: every planted case the shipped prompt cleared in all four
 # repeats on qwen3.5:9b on 2026-09-05 and 2026-09-06 (docs/benchmarks/2026-09-05-prompt-refinement.md,
 # runs full2b and full2c). The seven it did not clear every time stay out until a measured prompt
-# clears them; the floor only moves up.
+# clears them; the floor only moves up. The seven planted markdown cases added on 2026-09-19 stay out
+# as well, because the floor holds cases cleared in all four repeats and the first markdown round
+# (2026-09-19) ran two, clearing four of them in both. The two clean markdown cases need no listing
+# here, since the floor holds planted keys only.
 NOT_YET_CLEARED = {
     "practice_copy_pasted_validator", "wcag_carousel_no_pause", "wcag_html_no_lang", "wcag_low_contrast_text",
     "wcag_no_autocomplete", "wcag_status_not_announced", "wcag_target_size_16px",
+    "md_sum_total", "md_twin_vault", "md_tech_unlogged", "md_stale_count", "md_guard_rerun",
+    "md_undefined_reminder", "md_redteam_approved",
 }
 FLOOR_CASES = tuple(c.key for c in CASES if not c.clean and c.key not in NOT_YET_CLEARED)
 

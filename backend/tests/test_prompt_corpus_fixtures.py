@@ -162,9 +162,10 @@ def test_a_defensive_control_reaches_the_model_exactly_as_it_is_written(case):
 
 
 def test_the_corpus_is_the_size_the_leaderboards_will_quote():
-    assert len(CASES) == 88
-    assert sum(1 for c in CASES if c.clean) == 28
-    assert sum(1 for c in CASES if not c.clean) == 60
+    # 88 became 97 on 2026-09-19 with the nine markdown cases, seven planted and two clean
+    assert len(CASES) == 97
+    assert sum(1 for c in CASES if c.clean) == 30
+    assert sum(1 for c in CASES if not c.clean) == 67
     # the red-team set is branch 5's, and the three file-borne cases in it are its work, not this
     # branch's; it is asserted separately so a change to either corpus names itself
     assert len(REDTEAM_CASES) == 18

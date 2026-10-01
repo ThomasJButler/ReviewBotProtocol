@@ -15,6 +15,15 @@ class Category(str, Enum):
     PERFORMANCE = "performance"
     QUALITY = "quality"
     ACCESSIBILITY = "accessibility"
+    # The four values above are the code prompt's; the five below are the document prompt's
+    # (services/prompts.py, docs/MARKDOWN_REVIEW_PLAN.md). Security is the value both prompts
+    # use, in the document prompt for steering text. FileReview.model_json_schema() is the
+    # grammar handed to Ollama, so a value not listed here cannot be emitted.
+    ARITHMETIC = "arithmetic"
+    CONSISTENCY = "consistency"
+    REFERENCE = "reference"
+    MECHANISM = "mechanism"
+    PLAN = "plan"
 
 
 class Severity(str, Enum):

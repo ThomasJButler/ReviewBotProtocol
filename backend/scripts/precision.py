@@ -79,7 +79,7 @@ from services.ai_reviewer import FileReviewer, FileReviewResult, parse_file_revi
 from services.diff import parse_patch  # noqa: E402
 from services.git_diff import GITHUB_CONTEXT_LINES, file_at, split_git_diff  # noqa: E402
 from services.llm import build_chat_model, ollama_health, unload_model  # noqa: E402
-from services.prompts import review_prompt_with_context  # noqa: E402
+from services.prompts import doc_review_prompt_with_context, review_prompt_with_context  # noqa: E402
 from services.review_runner import prepare_files, select_files  # noqa: E402
 
 PR_SET = BACKEND / "tests" / "precision" / "pull_requests.json"
@@ -424,7 +424,7 @@ class ReplayFileModel(BaseChatModel):
 
 
 def classify_raw(raw_text: str, patch: str, min_confidence: float, context_policy: Optional[str] = None,
-                 context_min_confidence: Optional[float] = None) -> Tuple[int, Dict[str, int]]:
+                 context_min_confidence: Optional[float] = None, language: str = "") -> Tuple[int, Dict[str, int]]:
     """How many findings the model raised and which rule removed each one that
     did not survive, counted by the postprocess itself rather than by a copy of
     its loop: the copy applied drop_rule and then the locator, and missed the
@@ -432,14 +432,16 @@ def classify_raw(raw_text: str, patch: str, min_confidence: float, context_polic
     the title the model typed and not the title the pipeline kept. A round can
     then say whether a finding vanished through a rule or because the model
     never raised it. Every rule services/ai_reviewer.py names has a counter
-    here, and a test holds the two lists equal."""
+    here, and a test holds the two lists equal. The file's language goes through
+    as well, or a markdown file's counters would be computed with the code word
+    list while the pipeline itself used the document one."""
     review, _ = parse_file_review(raw_text)
     drops = {rule: 0 for rule in RECORD_COUNTERS}
     # the run's own policy, so a round measured under a non-default CONTEXT_LINE_FINDINGS attributes its
     # own drops; None leaves postprocess at the module default, which is the shipped one
     extra = {k: v for k, v in (("context_policy", context_policy), ("context_min_confidence", context_min_confidence))
              if v is not None}
-    postprocess(review, patch, min_confidence, counts=drops, **extra)
+    postprocess(review, patch, min_confidence, counts=drops, language=language, **extra)
     return len(review.findings), drops
 
 
@@ -556,7 +558,7 @@ def fill_record(record: Dict[str, Any], files: List[Dict[str, Any]], results: Li
     for r in results:
         raw_texts = texts.get(r.filename) or []
         raw, drops = classify_raw(raw_texts[0] if raw_texts else "", patches.get(r.filename, ""), min_confidence,
-                                  context_policy, context_min_confidence)
+                                  context_policy, context_min_confidence, r.language)
         record["files"].append({
             "filename": r.filename, "language": r.language, "status": r.status,
             "additions": next((f.get("additions", 0) for f in files if f["filename"] == r.filename), 0),
@@ -760,9 +762,11 @@ async def cmd_run(args: argparse.Namespace) -> int:
         cross_llm = build_chat_model(settings, model=settings.CROSS_EXAMINE_MODEL,
                                      keep_alive=settings.CROSS_EXAMINE_KEEP_ALIVE)
         cross_llm.callbacks = [recorder]
-    # the prompt production uses with the switch on, or the file block would never be rendered
+    # the prompt production uses with the switch on, or the file block would never be rendered;
+    # the document prompt follows the switch for the same reason
     reviewer = FileReviewer(llm, settings, cross_llm=cross_llm,
-                            **({"prompt": review_prompt_with_context} if settings.FILE_CONTEXT else {}))
+                            **({"prompt": review_prompt_with_context,
+                                "doc_prompt": doc_review_prompt_with_context} if settings.FILE_CONTEXT else {}))
     unload = (lambda model: unload_model(settings, model)) if args.unload else None
     print(f"model {settings.OLLAMA_MODEL}"
           + (f", cross-examiner {settings.CROSS_EXAMINE_MODEL}" if settings.CROSS_EXAMINE_MODEL else "")
