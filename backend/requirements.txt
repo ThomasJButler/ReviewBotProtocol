@@ -1,5 +1,5 @@
 # Runtime dependencies. No inference API client, no telemetry, no tracing.
-fastapi==0.141.1
+fastapi==0.142.2
 uvicorn[standard]==0.52.4
 httpx==0.28.1
 pydantic==2.13.5
